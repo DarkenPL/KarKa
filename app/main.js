@@ -1471,6 +1471,86 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     drukarniaPdf.bledy = bledy;
     drukarniaPdf.ok = !bledy.length;
   }
+  // CMYK (issue #66, etap 2; --test-edytor, każdy projekt, pliki w katalogu tymczasowym): a) okno Druk i PDF (pole cmyk, profil),
+  // b) PDF drukarni przez pdfDoPliku z profilem testowym (Ghostscript): kontrola każdego pliku, ramki z planu, pdfimages (jeśli jest).
+  // c) zlecenia z profilem – w bloku zlecenia (cmykTest.profil). Bez Ghostscripta ≥ 10 albo profilu CMYK: { pominiety } (w CI to błąd).
+  let cmykTest = null;
+  if (process.argv.includes('--test-edytor')) {
+    const js = (k) => wc.executeJavaScript(k);
+    const CI = !!process.env.GITHUB_ACTIONS;
+    const gs = cmyk.znajdzGs({ odswiez: true });
+    const szukajIcc = () => {   // KARKA_TEST_ICC, potem instalacja Ghostscripta (Linux, Homebrew)
+      const kandydaci = [process.env.KARKA_TEST_ICC, '/usr/share/color/icc/ghostscript/default_cmyk.icc'];
+      for (const baza of [gs.sciezka && path.resolve(path.dirname(fs.realpathSync(gs.sciezka)), '..'), '/opt/homebrew', '/usr/local']) {
+        if (!baza) continue;
+        try { for (const w of fs.readdirSync(path.join(baza, 'share', 'ghostscript'))) kandydaci.push(path.join(baza, 'share', 'ghostscript', w, 'iccprofiles', 'default_cmyk.icc')); } catch (e) { /* brak */ }
+      }
+      return kandydaci.filter(Boolean).find((p) => { try { cmyk.sprawdzPlikIcc(p); return true; } catch (e) { return false; } }) || null;
+    };
+    const icc = gs.ok ? szukajIcc() : null;
+    if (!gs.ok || !icc) {
+      const powod = !gs.ok ? gs.powod : 'brak profilu CMYK do testu (default_cmyk.icc z Ghostscripta albo KARKA_TEST_ICC)';
+      cmykTest = CI ? { ok: false, blad: 'w CI wymagany Ghostscript ≥ 10 i profil testowy: ' + powod } : { pominiety: powod };
+    } else {
+      const { PDFDocument } = require('./drukarnia').pdfLib(ZASOBY);   // lokalna zmienna drukarnia (wynik testu) przesłania moduł
+      const MMpt = 72 / 25.4, bliskie = (a, b) => Math.abs(a - b) <= 0.01;
+      const bledy = [];
+      cmykTest = { gs: gs.wersja, profil: icc };
+      // a) okno: pole cmyk włączone i zaznaczone, profile fogra39 / fogra51 / „inny plik”.
+      cmykTest.okno = await js(`(async () => {
+        const przed = USTAWIENIA_OKIEN.druk, f = () => document.getElementById('oknoForm');
+        delete USTAWIENIA_OKIEN.druk;
+        try {
+          const stan = await odswiezCmyk();
+          const p = otworzOkno('druk');
+          const c = f().querySelector('[name=cmyk]'), s = f().querySelector('[name=profil]');
+          const r = { gs: !!(stan && stan.gs && stan.gs.ok), cmyk: !!c, wlaczony: !!c && !c.disabled, zaznaczony: !!c && c.checked,
+            profil: !!s && !s.disabled, opcje: s ? [...s.options].map((x) => x.value) : [], wybrany: s ? s.value : null };
+          document.getElementById('okno').dispatchEvent(new Event('cancel')); await p;
+          return r;
+        } finally { if (przed) USTAWIENIA_OKIEN.druk = przed; else delete USTAWIENIA_OKIEN.druk; }
+      })()`);
+      const ow = cmykTest.okno;
+      ow.ok = ow.gs && ow.cmyk && ow.wlaczony && ow.zaznaczony && ow.profil && ow.opcje.join() === 'fogra39,fogra51,__inny' && ow.wybrany === 'fogra39';
+      if (!ow.ok) bledy.push('okno: ' + JSON.stringify(ow));
+      // b) PDF: awersy i rewersy (spad 3) w CMYK.
+      const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'gk-cmyk-'));
+      try {
+        const t0 = Date.now();
+        const plan = await js(`buildPrint(${JSON.stringify({ uklad: 'drukarnia', spad: 3, strony: 'osobno' })})`);
+        const w = await pdfDoPliku(wc, path.join(tmp, 'cmyk.pdf'), { ...plan, cmyk: { plik: icc, nazwa: 'test' } });
+        const wPlanie = plan.pliki.map((_, n) => plan.strony.filter((s) => s.plik === n)).filter((a) => a.length);
+        const W = plan.szer * MMpt, H = plan.wys * MMpt;
+        cmykTest.pdf = { pliki: (w.pliki || []).map((p) => path.basename(p)), czas: Date.now() - t0, gsCzas: w.cmyk && w.cmyk.czas, profil: w.cmyk && w.cmyk.profil,
+          kontrola: ((w.cmyk && w.cmyk.pliki) || []).map((k) => ({ strony: k.strony, rgb: k.rgb, przestrzenieRgb: k.przestrzenieRgb, czern: k.czern, obrazki: k.obrazki, trimBox: k.trimBox, ok: k.ok })) };
+        if (!w.cmyk || w.cmyk.profil !== 'test' || w.cmyk.ghostscript !== gs.wersja) bledy.push('pdf: raport cmyk: ' + JSON.stringify(w.cmyk && { profil: w.cmyk.profil, gs: w.cmyk.ghostscript }));
+        if (!w.pliki || w.pliki.length !== wPlanie.length) bledy.push(`pdf: plików ${w.pliki && w.pliki.length}, w planie ${wPlanie.length}`);
+        for (let n = 0; n < (w.pliki || []).length; n++) {
+          const k = w.cmyk.pliki[n];
+          if (!fs.existsSync(w.pliki[n])) { bledy.push('pdf: brak pliku ' + w.pliki[n]); continue; }
+          if (!k || !k.ok || k.rgb !== 0 || k.przestrzenieRgb !== 0 || k.trimBox !== k.strony || k.strony !== wPlanie[n].length) bledy.push(`pdf: plik ${n}: kontrola ${JSON.stringify(k && { ok: k.ok, rgb: k.rgb, strony: k.strony, trimBox: k.trimBox })}`);
+          const strony_ = (await PDFDocument.load(fs.readFileSync(w.pliki[n]))).getPages();
+          if (strony_.length !== wPlanie[n].length) bledy.push(`pdf: plik ${n}: stron ${strony_.length}, w planie ${wPlanie[n].length}`);
+          strony_.forEach((s, i) => {
+            const mb = s.getMediaBox(), tb = s.getTrimBox(), c = wPlanie[n][i] && wPlanie[n][i].ciecie;
+            if (!(bliskie(mb.x, 0) && bliskie(mb.y, 0) && bliskie(mb.width, W) && bliskie(mb.height, H))) bledy.push(`pdf: plik ${n} str. ${i + 1}: MediaBox ${[mb.x, mb.y, mb.width, mb.height].map((x) => x.toFixed(2))}`);
+            if (!c || !bliskie(tb.x, c[0] * MMpt) || !bliskie(tb.width, c[2] * MMpt) || !bliskie(tb.height, c[3] * MMpt) || !bliskie(tb.y, H - (c[1] + c[3]) * MMpt)) bledy.push(`pdf: plik ${n} str. ${i + 1}: TrimBox ≠ ciecie z planu`);
+          });
+        }
+        // Obrazki w pliku: pdfimages -list (kolumna „color”: cmyk / gray; icc przy N = 4 też jest CMYK) – tylko gdy narzędzie istnieje.
+        const pi = require('child_process').spawnSync('pdfimages', ['-list', w.pliki[0]], { encoding: 'utf8' });
+        if (!pi.error && pi.status === 0) {
+          const wiersze = pi.stdout.split('\n').slice(2).map((l) => l.trim().split(/\s+/)).filter((c) => c.length > 6);
+          const zle = wiersze.filter((c) => !(c[5] === 'cmyk' || c[5] === 'gray' || (c[5] === 'icc' && c[6] === '4')));
+          cmykTest.pdfimages = { obrazkow: wiersze.length, kolory: [...new Set(wiersze.map((c) => c[5] + '/' + c[6]))] };
+          if (zle.length) bledy.push('pdfimages: obrazki nie w CMYK/gray: ' + zle.map((c) => c.slice(0, 8).join(' ')).join(' | '));
+        } else cmykTest.pdfimages = 'brak narzędzia pdfimages';
+      } catch (e) { bledy.push('pdf: ' + e.message); }
+      finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+      cmykTest.bledy = bledy;
+      cmykTest.ok = !bledy.length;
+    }
+  }
   // Katalog (--test-edytor, poza przykładami): A – Export/katalog; B – zlecenie z pliku → wynik.json.
   let katalog = null;
   if (process.argv.includes('--test-edytor') && !jestPrzykladem(szablon)) {
@@ -1576,6 +1656,44 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       dr.ok = ['osobno', 'naprzemian', 'bokiem', 'raportTak', 'raportBez'].every((k) => dr[k] && dr[k].ok);
       z.drukarnia = dr;
     }
+    // CMYK (issue #66, etap 2): zlecenie pdf z kluczem profil – ścieżka .icc (Ghostscript), fogra39 bez sieci (błąd z eci.org),
+    // nieznany profil, profil bez układu drukarnia, brak klucza = RGB mimo cmyk: true w ustawieniach okna.
+    if (cmykTest && cmykTest.profil) {
+      const cz = {};
+      const wProjekcie = (p) => path.join(projekt, p);
+      const c1 = await zlec('pdf', `uklad = drukarnia\nprofil = ${cmykTest.profil}\nplik = Export/cmyk.pdf\n`);
+      cz.icc = c1 && { ok: c1.ok, pliki: c1.pliki, blad: c1.blad, profil: c1.cmyk && c1.cmyk.profil, kontrola: c1.cmyk && c1.cmyk.pliki.map((k) => ({ rgb: k.rgb, ok: k.ok, trimBox: k.trimBox, strony: k.strony })) };
+      cz.icc.ok = !!(c1 && c1.ok && c1.cmyk && c1.cmyk.pliki.length === c1.pliki.length && c1.cmyk.pliki.every((k) => k.rgb === 0 && k.ok) && c1.pliki.every((p) => fs.existsSync(wProjekcie(p))));
+      // Bez sieci: adres udawany (nic tam nie nasłuchuje) i brak pobranego profilu → błąd z eci.org, bez pliku.
+      // „Fogra39” (inna wielkość liter niż klucz) – patrz niżej: dokładne „fogra39” trafia dziś w błąd opcjeZlecenia (karty.html).
+      const adresPrzed = process.env.KARKA_PROFILE_ADRES;
+      process.env.KARKA_PROFILE_ADRES = 'http://127.0.0.1:9/';
+      let c2, c2m;
+      try {
+        c2 = await zlec('pdf', 'uklad = drukarnia\nprofil = Fogra39\nplik = Export/cmyk-eci.pdf\n');
+        c2m = await zlec('pdf', 'uklad = drukarnia\nprofil = fogra39\nplik = Export/cmyk-eci-male.pdf\n');
+      } finally { if (adresPrzed === undefined) delete process.env.KARKA_PROFILE_ADRES; else process.env.KARKA_PROFILE_ADRES = adresPrzed; }
+      const pobrany = !!cmyk.profilLokalny('fogra39', folderProfili());
+      cz.fogra39 = { ok: c2 && c2.ok, blad: c2 && c2.blad, plik: fs.existsSync(wProjekcie('Export/cmyk-eci.pdf')), pobrany };
+      cz.fogra39.ok = !!(c2 && c2.ok === false && /eci\.org/.test(c2.blad || '') && !cz.fogra39.plik && !pobrany);
+      // Dokładnie „fogra39” (małe litery) – ten sam błąd z eci.org.
+      cz.fogra39Male = { blad: c2m && c2m.blad, plik: fs.existsSync(wProjekcie('Export/cmyk-eci-male.pdf')) };
+      cz.fogra39Male.ok = !!(c2m && c2m.ok === false && !cz.fogra39Male.plik && /eci\.org/.test(c2m.blad || ''));
+      const c3 = await zlec('pdf', 'uklad = drukarnia\nprofil = cośtam\nplik = Export/cmyk-zly.pdf\n');
+      cz.nieznany = { ok: c3 && c3.ok, blad: c3 && c3.blad, plik: fs.existsSync(wProjekcie('Export/cmyk-zly.pdf')) };
+      cz.nieznany.ok = !!(c3 && c3.ok === false && /profil/.test(c3.blad || '') && !cz.nieznany.plik);
+      const c4 = await zlec('pdf', `uklad = a4\nprofil = ${cmykTest.profil}\nplik = Export/cmyk-a4.pdf\n`);
+      cz.a4 = { ok: c4 && c4.ok, blad: c4 && c4.blad, plik: fs.existsSync(wProjekcie('Export/cmyk-a4.pdf')) };
+      cz.a4.ok = !!(c4 && c4.ok === false && /drukarnia/.test(c4.blad || '') && !cz.a4.plik);
+      // Okno ma cmyk: true, ale zlecenie bez klucza profil zostaje w RGB (jak do 0.5.10).
+      await js("USTAWIENIA_OKIEN.druk = { ...(USTAWIENIA_OKIEN.druk || {}), cmyk: true }");
+      const c5 = await zlec('pdf', 'uklad = drukarnia\nplik = Export/rgb.pdf\n');
+      await js(ustPrzed === 'null' || !JSON.parse(ustPrzed).druk ? 'delete USTAWIENIA_OKIEN.druk' : `USTAWIENIA_OKIEN.druk = ${JSON.stringify(JSON.parse(ustPrzed).druk)}`);
+      cz.bezProfilu = { ok: c5 && c5.ok, cmyk: c5 && 'cmyk' in c5, pliki: c5 && c5.pliki };
+      cz.bezProfilu.ok = !!(c5 && c5.ok && !('cmyk' in c5) && c5.pliki.every((p) => fs.existsSync(wProjekcie(p))));
+      cz.ok = ['icc', 'fogra39', 'fogra39Male', 'nieznany', 'a4', 'bezProfilu'].every((k) => cz[k] && cz[k].ok);
+      z.cmyk = cz;
+    } else if (cmykTest) z.cmyk = cmykTest.pominiety ? { pominiety: cmykTest.pominiety } : { ok: false, blad: cmykTest.blad };
     // Niezapisany edytor: zmiana tytułu kart w edytorze; zlecenie widzi wersję z dysku, edytor zostaje bez zmian.
     const nazwaKarty = await js("document.querySelector('#podglad .karta:not(.rewers)').title");
     await js("(() => { const p = document.getElementById('edPole'); p.value = p.value.replace(/^PROJEKT(\\s*)=(\\s*)/m, 'PROJEKT$1=$2ZMIANA ') + '\\n; zmiana z testu\\n'; p.dispatchEvent(new Event('input')); })()");
@@ -1615,6 +1733,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       && z.pcioId && z.pcioId.ok && !(z.pcioId.ostrzezenia || []).length && z.pcioId.zip && z.pcioId.zip.karty === z.pcio.oczek.zId && z.pcioId.zip.holdery.length === z.pcio.oczek.taliiZId
       && z.edytor && z.edytor.niezapisane && !/ZMIANA/.test(z.edytor.projekt) && /ZMIANA/.test(z.edytor.projektEd) && /ZMIANA/.test(z.edytor.poZleceniu.projekt) && z.edytor.poZleceniu.zmiany && z.edytor.poZleceniu.tekst
       && z.drukarnia && z.drukarnia.ok
+      && (!z.cmyk || z.cmyk.pominiety || z.cmyk.ok)
       && z.ustawieniaBezZmian && !z.pozostale.length
       && !/ZDYSKU/.test(z.zDysku.przedZleceniem) && /ZDYSKU/.test(z.zDysku.wZleceniu) && !/ZDYSKU/.test(z.zDysku.poPrzywroceniu));
     z.nazwaKarty = nazwaKarty;
@@ -1708,9 +1827,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     && Menu.getApplicationMenu().items[0].submenu.items.some((i) => i.label === 'Sprawdź aktualizacje…');
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
-    && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
+    && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, katalog, zlecenia, aktualizacja, podfolder, formatowanie, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

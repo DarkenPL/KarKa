@@ -2245,8 +2245,9 @@ function opcjeZlecenia(polecenie, surowe = {}) {
     if (v.profil !== undefined && !/^(nie|brak|rgb|0|false|no)$/.test(plain(v.profil))) {
       const k = plain(v.profil).replace(/[\s_-]/g, '');
       o.cmyk = true;
-      o.profil = ['fogra39', 'fogra51'].includes(k) ? k : v.profil;
-      if (o.profil === v.profil && !/\.ic[cm]$/i.test(v.profil)) bledy.push(`profil: „${v.profil}” – możliwe: fogra39, fogra51, rgb albo ścieżka do pliku .icc`);
+      const znany = ['fogra39', 'fogra51'].includes(k);
+      o.profil = znany ? k : v.profil;
+      if (!znany && !/\.ic[cm]$/i.test(v.profil)) bledy.push(`profil: „${v.profil}” – możliwe: fogra39, fogra51, rgb albo ścieżka do pliku .icc`);
       if (o.uklad !== 'drukarnia') bledy.push('profil: CMYK działa tylko w układzie drukarnia (dopisz uklad = drukarnia)');
     }
   }

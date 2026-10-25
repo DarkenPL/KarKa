@@ -265,6 +265,14 @@ function sprawdzPdf(buf, PDFLib) {
         else continue;
       } catch (e) { continue; }
       wynik.rgb += (tekst.match(/(^|\s)(rg|RG)(?=\s)/g) || []).length;
+      // Obrazki w treści (BI … ID … EI – Ghostscript tak zapisuje małe obrazki): przestrzeń z /CS albo /ColorSpace.
+      for (const m of tekst.matchAll(/(?:^|\s)BI\s([\s\S]*?)\sID\s/g)) {
+        const cs = (/\/(?:CS|ColorSpace)\s*\/(\w+)/.exec(m[1]) || [])[1];
+        if (/IM\s+true|ImageMask\s+true/.test(m[1])) continue;
+        if (cs === 'CMYK' || cs === 'DeviceCMYK') wynik.obrazki.cmyk++;
+        else if (cs === 'G' || cs === 'DeviceGray') wynik.obrazki.szare++;
+        else wynik.obrazki.inne.push('obrazek w treści ' + (cs || '?'));
+      }
       wynik.czern += (tekst.match(/(^|\s)0 0 0 1 k(?=\s)/g) || []).length;
     }
     for (const s of doc.getPages()) {
@@ -307,6 +315,34 @@ async function czernK100(buf, PDFLib) {
   return { bufor: zamiany ? Buffer.from(await doc.save({ useObjectStreams: false })) : buf, zamiany };
 }
 
+// Grupy przezroczystości (strony i XObject Form): Ghostscript zostawia przestrzeń mieszania /CS /DeviceRGB
+// z Chromium – po konwersji ustawiamy /DeviceCMYK (jak w PDF z InDesigna), żeby mieszanie nie szło w RGB.
+async function grupyCmyk(buf, PDFLib) {
+  const { PDFDocument, PDFName, PDFDict, PDFRawStream, PDFRef, PDFArray } = PDFLib;
+  const doc = await PDFDocument.load(buf, { updateMetadata: false });
+  const ctx = doc.context, G = PDFName.of('Group'), CS = PDFName.of('CS');
+  const czyRgb = (cs) => {
+    cs = cs instanceof PDFRef ? ctx.lookup(cs) : cs;
+    if (cs instanceof PDFName) return /^\/(DeviceRGB|CalRGB)$/.test(cs.toString());
+    if (cs instanceof PDFArray) { const n = ctx.lookup(cs.get(1)); return String(cs.get(0)) === '/ICCBased' && n && n.dict && String(n.dict.get(PDFName.of('N'))) === '3'; }
+    return false;
+  };
+  let zmiany = 0;
+  const popraw = (g) => {
+    g = g instanceof PDFRef ? ctx.lookup(g) : g;
+    if (!(g instanceof PDFDict) || String(g.get(PDFName.of('S'))) !== '/Transparency' || !czyRgb(g.get(CS))) return;
+    g.set(CS, PDFName.of('DeviceCMYK'));
+    zmiany++;
+  };
+  for (const [, o] of ctx.enumerateIndirectObjects()) {
+    const d = o instanceof PDFRawStream ? o.dict : o instanceof PDFDict ? o : null;
+    if (!d) continue;
+    if (String(d.get(PDFName.of('Type'))) === '/Group') popraw(d);
+    if (d.get(G)) popraw(d.get(G));
+  }
+  return zmiany ? Buffer.from(await doc.save({ useObjectStreams: false })) : buf;
+}
+
 // Czy Ghostscript naprawdę użył profilu (spike: -sOutputICCProfile bywał pomijany bez słowa) – czerwony prostokąt
 // z profilem drukarni ma wyjść inaczej niż z domyślnym profilem Ghostscripta. Raz na profil (pamięć wg SHA-256).
 const PROFIL_SPRAWDZONY = new Map();
@@ -346,13 +382,14 @@ async function sprawdzProfilGs(gs, profil, PDFLib) {
 async function konwertujBufor(buf, { gs, profil, sygnal, PDFLib, po } = {}) {
   gs = gs || znajdzGs();
   if (!gs.ok) throw new Error(gs.powod);
+  sprawdzPlikIcc(profil);
   await sprawdzProfilGs(gs, profil, PDFLib);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'karka-cmyk-'));
   try {
     const we = path.join(tmp, 'rgb.pdf'), wy = path.join(tmp, 'cmyk.pdf');
     fs.writeFileSync(we, (await czernK100(buf, PDFLib)).bufor);
     const { czas } = await konwertuj(we, wy, { gs, profil, sygnal });
-    let bufor = fs.readFileSync(wy);
+    let bufor = await grupyCmyk(fs.readFileSync(wy), PDFLib);
     if (po) bufor = await po(bufor);
     const kontrola = await sprawdzPdf(bufor, PDFLib);
     return { bufor, kontrola, czas };
@@ -361,4 +398,4 @@ async function konwertujBufor(buf, { gs, profil, sygnal, PDFLib, po } = {}) {
 
 module.exports = { PROFILE, DOMYSLNY, PODPOWIEDZ_GS, MIN_WERSJA_GS, znajdzGs, argumentyGs, konwertuj, opisBleduGs,
   sprawdzPlikIcc, profilLokalny, pobierzProfil, rozwiazProfil, adresPaczki, czyKlucz, sprawdzPdf, konwertujBufor, sha256,
-  czernK100, katalogIccGs, sprawdzProfilGs };
+  czernK100, grupyCmyk, katalogIccGs, sprawdzProfilGs };
