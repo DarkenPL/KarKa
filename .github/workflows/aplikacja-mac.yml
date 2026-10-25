@@ -49,6 +49,9 @@ jobs:
       - name: Test – historia wersji (moduł)
         run: node scripts/test-historia.js
 
+      - name: Test – PDF dla drukarni (moduł)
+        run: node scripts/test-drukarnia.js
+
       - name: Test – aktualizacje (moduł, nakładka, ditto)
         run: node scripts/test-aktualizacje.js
 

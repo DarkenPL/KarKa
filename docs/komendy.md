@@ -207,6 +207,8 @@ Ikona (lub kilka) o wysokości pola, wyśrodkowana. Opcje: `wyrównanie`, `pion`
 ### `CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#1d1b19`
 Domyślna czcionka, rozmiar i inne opcje (także flagi, np. `kursywa`) dla kolejnych `TEKST`-ów. Działa do następnej `CZCIONKA`.
 
+**Druk w drukarni:** czarny tekst i ikony wpisuj jako `#000` – domyślny kolor tekstu `#1d1b19` i inne ciemne odcienie wychodzą po konwersji do CMYK jako czerń czterokolorowa, a drukarnie chcą czystej czerni K100 (np. `CZCIONKA = …, kolor=#000`). Tekst i ważne elementy trzymaj co najmniej 3 mm od krawędzi karty, a tło prowadź do samej krawędzi (spad dorysuje aplikacja). Sprawdza to Raport w trybie drukarni – [opis](aplikacja.md#raport).
+
 ### `CZCIONKA_PLIK = "Moja Czcionka", Fonts/MojaCzcionka.ttf`
 Czcionka z pliku w folderze projektu. Potem używasz jej jako `czcionka="Moja Czcionka"`. Czcionki zainstalowane w systemie działają bez tej komendy.
 
