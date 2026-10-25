@@ -46,11 +46,17 @@ jobs:
       - name: Zasoby (generator, przykłady, biblioteki, czcionki)
         run: npm run zasoby
 
+      - name: Ghostscript (PDF w CMYK – testy modułu i aplikacji)
+        run: brew install ghostscript
+
       - name: Test – historia wersji (moduł)
         run: node scripts/test-historia.js
 
       - name: Test – PDF dla drukarni (moduł)
         run: node scripts/test-drukarnia.js
+
+      - name: Test – PDF w CMYK (moduł, Ghostscript)
+        run: node scripts/test-cmyk.js
 
       - name: Test – aktualizacje (moduł, nakładka, ditto)
         run: node scripts/test-aktualizacje.js

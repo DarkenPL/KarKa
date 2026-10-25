@@ -27,7 +27,7 @@ async function ustawStrony(buf, plan, zasoby) {
   const { PDFDocument, PDFName, PDFArray } = pdfLib(zasoby);
   const doc = await PDFDocument.load(buf, { updateMetadata: false });
   const ctx = doc.context;
-  const W = plan.szer * MM, H = plan.wys * MM;
+  const H = plan.wys * MM;
   const box = (a, b, c, d) => ctx.obj([a, b, c, d].map((x) => Math.round(x * 1000) / 1000));
   const strony = doc.getPages();
   if (plan.strony && plan.strony.length !== strony.length)
@@ -42,13 +42,34 @@ async function ustawStrony(buf, plan, zasoby) {
     if (tresc) (tresc instanceof PDFArray ? tresc.asArray() : [tresc]).forEach((x) => tablica.push(x));
     tablica.push(po);
     strona.node.set(PDFName.of('Contents'), tablica);
-    const [x, y, w, h] = (plan.strony && plan.strony[i] && plan.strony[i].ciecie) || [plan.spad || 0, plan.spad || 0, plan.szer - 2 * (plan.spad || 0), plan.wys - 2 * (plan.spad || 0)];
-    strona.node.set(PDFName.of('MediaBox'), box(0, 0, W, H));
-    strona.node.set(PDFName.of('CropBox'), box(0, 0, W, H));
-    strona.node.set(PDFName.of('BleedBox'), box(0, 0, W, H));
-    strona.node.set(PDFName.of('TrimBox'), box(x * MM, H - (y + h) * MM, (x + w) * MM, H - y * MM));
+    ramki(strona, plan, plan.strony && plan.strony[i], PDFName, box);
   });
   return { doc, bufor: Buffer.from(await doc.save({ useObjectStreams: false })) };
+}
+
+// MediaBox = CropBox = BleedBox = strona z planu, TrimBox = karta bez spadu (ciecie z planu albo spad z każdej strony).
+function ramki(strona, plan, s, PDFName, box) {
+  const W = plan.szer * MM, H = plan.wys * MM, sp = plan.spad || 0;
+  const [x, y, w, h] = (s && s.ciecie) || [sp, sp, plan.szer - 2 * sp, plan.wys - 2 * sp];
+  strona.node.set(PDFName.of('MediaBox'), box(0, 0, W, H));
+  strona.node.set(PDFName.of('CropBox'), box(0, 0, W, H));
+  strona.node.set(PDFName.of('BleedBox'), box(0, 0, W, H));
+  strona.node.set(PDFName.of('TrimBox'), box(x * MM, H - (y + h) * MM, (x + w) * MM, H - y * MM));
+}
+
+// Po konwersji do CMYK (cmyk.js): ramki stron jeszcze raz z planu – Ghostscript nie musi ich przenosić dokładnie.
+// indeksy = numery stron planu w tej części (z przygotujDruk); treść bez przesunięcia (już ustawiona).
+async function ustawRamki(buf, plan, indeksy, zasoby) {
+  const { PDFDocument, PDFName } = pdfLib(zasoby);
+  const doc = await PDFDocument.load(buf, { updateMetadata: false });
+  const box = (a, b, c, d) => doc.context.obj([a, b, c, d].map((x) => Math.round(x * 1000) / 1000));
+  const strony = doc.getPages();
+  if (indeksy && indeksy.length !== strony.length) throw new Error(`PDF po konwersji ma ${strony.length} stron zamiast ${indeksy.length}`);
+  strony.forEach((strona, i) => {
+    strona.node.delete(PDFName.of('Rotate'));
+    ramki(strona, plan, plan.strony && plan.strony[indeksy ? indeksy[i] : i], PDFName, box);
+  });
+  return Buffer.from(await doc.save({ useObjectStreams: false }));
 }
 
 async function wybierzStrony(doc, indeksy, zasoby) {
@@ -62,18 +83,18 @@ async function wybierzStrony(doc, indeksy, zasoby) {
 const plikCzesci = (plik, przyrostek) => !przyrostek ? plik
   : plik.replace(/(\.pdf)?$/i, '') + ' – ' + przyrostek + '.pdf';
 
-// Zwraca [{ plik, bufor, strony }] – jeden plik albo awersy i rewersy (strona N rewersów = rewers awersu N).
+// Zwraca [{ plik, bufor, strony, indeksy }] (indeksy – numery stron planu w części; null = wszystkie) – jeden plik albo awersy i rewersy (strona N rewersów = rewers awersu N).
 async function przygotujDruk(buf, plan, plik, zasoby) {
   const { doc, bufor } = await ustawStrony(buf, plan, zasoby);
   const pliki = plan.pliki && plan.pliki.length ? plan.pliki : [''];
-  if (pliki.length === 1) return [{ plik: plikCzesci(plik, pliki[0]), bufor, strony: doc.getPageCount() }];
+  if (pliki.length === 1) return [{ plik: plikCzesci(plik, pliki[0]), bufor, strony: doc.getPageCount(), indeksy: null }];
   const wynik = [];
   for (let n = 0; n < pliki.length; n++) {
     const indeksy = plan.strony.map((s, i) => (s.plik === n ? i : -1)).filter((i) => i >= 0);
     if (!indeksy.length) continue;
-    wynik.push({ plik: plikCzesci(plik, pliki[n]), bufor: await wybierzStrony(doc, indeksy, zasoby), strony: indeksy.length });
+    wynik.push({ plik: plikCzesci(plik, pliki[n]), bufor: await wybierzStrony(doc, indeksy, zasoby), strony: indeksy.length, indeksy });
   }
   return wynik;
 }
 
-module.exports = { ustawStrony, przygotujDruk, plikCzesci, MM };
+module.exports = { ustawStrony, ustawRamki, przygotujDruk, plikCzesci, pdfLib, MM };

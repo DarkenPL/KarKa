@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('generatorApp', {
   pokazFolder: () => ipcRenderer.invoke('projekt:pokaz'),
   zapiszPdf: (nazwa, druk) => ipcRenderer.invoke('pdf:zapisz', nazwa, druk),
   zapiszPdfZlecenia: (plik, druk) => ipcRenderer.invoke('zlecenie:pdf', plik, druk),
+  cmykStan: () => ipcRenderer.invoke('cmyk:stan'),
+  cmykWybierzProfil: () => ipcRenderer.invoke('cmyk:wybierzProfil'),
   zapiszSzablon: (tekst) => ipcRenderer.invoke('edytor:zapisz', tekst),
   edytorZmiany: (czy) => ipcRenderer.invoke('edytor:zmiany', !!czy),
   odciski: () => ipcRenderer.invoke('druk:odciski'),
