@@ -47,30 +47,65 @@ function znajdzGs({ odswiez = false, kandydaci } = {}) {
   return wynik;
 }
 
-// Parametry konwersji – jak w próbie z #66 (pdfwrite, PDF 1.6, CMYK z zachowaniem czerni, przezroczystość zostaje),
-// bez -dPDFX i bez Output Intent (drukarnia ich nie wymaga). Dodatkowo: bez obracania stron wg tekstu
-// (karta pozioma ma zostać tak, jak w planie druku) i bez stratnego przekodowania i zmniejszania obrazków.
-function argumentyGs(wejscie, wyjscie, profil) {
+// Parametry konwersji (sprawdzone w spike'u na gs 10.02 – #66, PR etapu 2): pdfwrite, PDF 1.6, wszystko do CMYK,
+// przezroczystość zostaje, bez -dPDFX i bez Output Intent. Różnice względem próby z #66:
+// - bez -dBlackText / -dBlackVector – czerniły CAŁY tekst i wszystkie wektory (także kolorowe); K100 daje czernK100() przed gs;
+// - bez -dOverrideICC – ignorował profile obrazków (Display P3 liczony jak sRGB, ΔE do ~7,6); bez niej gs czyta profil z PDF;
+// - profil docelowy przez -sICCProfilesDir (kopia katalogu profili Ghostscripta z naszym default_cmyk.icc) –
+//   -sOutputICCProfile w pdfwrite nie zmienia wyniku, a bez -sProcessColorModel=DeviceCMYK kończy się błędem;
+// - -dAutoRotatePages=/None (inaczej strony z kartą poziomą dostają /Rotate 270) i obrazki bez stratnej kompresji i zmniejszania.
+function argumentyGs(wejscie, wyjscie, katalogIcc) {
   return ['-dSAFER', '-dBATCH', '-dNOPAUSE', '-dQUIET',
     '-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.6',
-    '-sColorConversionStrategy=CMYK', `-sOutputICCProfile=${profil}`, '-dOverrideICC=true',
-    '-dBlackText=true', '-dBlackVector=true', '-dPreserveSMask=true',
-    '-dAutoRotatePages=/None',
+    '-sColorConversionStrategy=CMYK', '-sProcessColorModel=DeviceCMYK',
+    `-sICCProfilesDir=${katalogIcc.replace(/\/?$/, '/')}`, `-sOutputICCProfile=${path.join(katalogIcc, 'default_cmyk.icc')}`,
+    '-dPreserveSMask=true', '-dAutoRotatePages=/None',
     '-dAutoFilterColorImages=false', '-dColorImageFilter=/FlateEncode',
     '-dAutoFilterGrayImages=false', '-dGrayImageFilter=/FlateEncode',
     '-dDownsampleColorImages=false', '-dDownsampleGrayImages=false', '-dDownsampleMonoImages=false',
     `-sOutputFile=${wyjscie}`, wejscie];
 }
 
+// Katalog profili Ghostscripta (iccprofiles – obok Resource/ z listy „Search path” w gs -h; Homebrew, Debian).
+const PROFILE_GS = ['default_cmyk.icc', 'default_gray.icc', 'default_rgb.icc'];
+function katalogIccGs(gs) {
+  if (gs.katalogIcc !== undefined) return gs.katalogIcc;
+  const kandydaci = [];
+  const r = spawnSync(gs.sciezka, ['-h'], { encoding: 'utf8', timeout: 10000 });
+  for (const m of String(r.stdout || '').matchAll(/(\/[^\s:]*?)\/Resource\/Init\b/g)) kandydaci.push(path.join(m[1], 'iccprofiles'));
+  const prefiks = path.dirname(path.dirname(fs.realpathSync(gs.sciezka)));
+  const share = path.join(prefiks, 'share', 'ghostscript');
+  try { for (const n of fs.readdirSync(share)) kandydaci.push(path.join(share, n, 'iccprofiles')); } catch (e) { /* brak */ }
+  kandydaci.push(path.join(share, 'iccprofiles'), '/usr/share/color/icc/ghostscript');
+  gs.katalogIcc = kandydaci.find((k) => PROFILE_GS.every((f) => fs.existsSync(path.join(k, f)))) || null;
+  return gs.katalogIcc;
+}
+// Kopia katalogu profili Ghostscripta z profilem drukarni jako default_cmyk.icc (gs potrzebuje kompletu profili).
+function katalogZProfilem(gs, profil, cel) {
+  const zrodlo = katalogIccGs(gs);
+  if (!zrodlo) throw new Error(`nie znaleziono katalogu profili Ghostscripta (iccprofiles) dla ${gs.sciezka} – zainstaluj ponownie: brew reinstall ghostscript`);
+  fs.mkdirSync(cel, { recursive: true });
+  for (const f of fs.readdirSync(zrodlo)) if (/\.ic[cm]$/i.test(f)) fs.copyFileSync(path.join(zrodlo, f), path.join(cel, f));
+  fs.copyFileSync(profil, path.join(cel, 'default_cmyk.icc'));
+  return cel;
+}
+
 // Konwersja pliku → plik. Błąd = wyjątek z czytelnym komunikatem, a częściowy plik wyjściowy jest usuwany.
-// sygnal: AbortSignal (przerwanie), limit: ms (domyślnie 5 min).
+// profil: plik .icc (CMYK). sygnal: AbortSignal (przerwanie), limit: ms (domyślnie 5 min).
+// gs przy uszkodzonym wejściu potrafi skończyć kodem 0 z „**** Error” – to też błąd.
 function konwertuj(wejscie, wyjscie, { gs, profil, sygnal, limit = 5 * 60 * 1000 } = {}) {
   gs = gs || znajdzGs();
   if (!gs || !gs.ok) return Promise.reject(new Error((gs && gs.powod) || PODPOWIEDZ_GS));
+  let katalog;
+  try {
+    if (!profil) throw new Error('brak profilu CMYK');
+    sprawdzPlikIcc(profil);
+    katalog = katalogZProfilem(gs, profil, fs.mkdtempSync(path.join(os.tmpdir(), 'karka-icc-')));
+  } catch (e) { return Promise.reject(e); }
   const start = Date.now();
   return new Promise((ok, blad) => {
     let wyjscieGs = '', koniec = false;
-    const proc = spawn(gs.sciezka, argumentyGs(wejscie, wyjscie, profil), { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(gs.sciezka, argumentyGs(wejscie, wyjscie, katalog), { stdio: ['ignore', 'pipe', 'pipe'] });
     const dopisz = (c) => { wyjscieGs = (wyjscieGs + c).slice(-20000); };
     proc.stdout.on('data', dopisz);
     proc.stderr.on('data', dopisz);
@@ -79,6 +114,7 @@ function konwertuj(wejscie, wyjscie, { gs, profil, sygnal, limit = 5 * 60 * 1000
       koniec = true;
       clearTimeout(zegar);
       if (sygnal) sygnal.removeEventListener('abort', przerwij);
+      fs.rmSync(katalog, { recursive: true, force: true });
       if (e) { fs.rmSync(wyjscie, { force: true }); blad(e); } else ok({ czas: Date.now() - start });
     };
     const przerwij = () => { proc.kill('SIGKILL'); zakoncz(new Error('konwersja do CMYK przerwana')); };
@@ -86,7 +122,8 @@ function konwertuj(wejscie, wyjscie, { gs, profil, sygnal, limit = 5 * 60 * 1000
     if (sygnal) { if (sygnal.aborted) return przerwij(); sygnal.addEventListener('abort', przerwij); }
     proc.on('error', (e) => zakoncz(new Error('nie udało się uruchomić Ghostscripta: ' + e.message)));
     proc.on('close', (kod) => {
-      if (kod === 0 && fs.existsSync(wyjscie) && fs.statSync(wyjscie).size > 0) return zakoncz();
+      const bladWLogu = /\*\*\*\* Error|^\s*Error:|Unrecoverable error/m.test(wyjscieGs);
+      if (kod === 0 && !bladWLogu && fs.existsSync(wyjscie) && fs.statSync(wyjscie).size > 0) return zakoncz();
       zakoncz(new Error(`Ghostscript zakończył się błędem (kod ${kod}): ${opisBleduGs(wyjscieGs)}`));
     });
   });
@@ -241,13 +278,79 @@ function sprawdzPdf(buf, PDFLib) {
   });
 }
 
+// Czysta czerń K100: w strumieniach treści (strony, XObject Form) „0 0 0 rg/RG” i „0 g/G” (czerń #000 z Chromium)
+// → „0 0 0 1 k/K”. Ghostscript zostawia DeviceCMYK bez zmian, więc #000 wychodzi jako C0 M0 Y0 K100, a inne kolory
+// (także „prawie czerń”) przechodzą przez profil. Zwraca { bufor, zamiany }.
+async function czernK100(buf, PDFLib) {
+  const { PDFDocument, PDFName, PDFRawStream, PDFArray, PDFNumber } = PDFLib;
+  const doc = await PDFDocument.load(buf, { updateMetadata: false });
+  let zamiany = 0;
+  for (const [ref, o] of doc.context.enumerateIndirectObjects()) {
+    if (!(o instanceof PDFRawStream)) continue;
+    const d = o.dict, typ = d.get(PDFName.of('Subtype'));
+    if ((typ && typ.toString() !== '/Form') || d.get(PDFName.of('N')) || d.get(PDFName.of('Length1'))) continue;
+    const rodzaj = d.get(PDFName.of('Type'));
+    if (rodzaj && rodzaj.toString() !== '/XObject') continue;
+    const filtr = d.get(PDFName.of('Filter'));
+    const filtry = filtr instanceof PDFArray ? filtr.asArray().map(String) : filtr ? [String(filtr)] : [];
+    if (filtry.length > 1 || (filtry.length === 1 && filtry[0] !== '/FlateDecode') || d.get(PDFName.of('DecodeParms'))) continue;
+    let tekst;
+    try { tekst = (filtry.length ? zlib.inflateSync(Buffer.from(o.contents)) : Buffer.from(o.contents)).toString('latin1'); } catch (e) { continue; }
+    let n = 0;
+    const nowy = tekst.replace(/(^|\s)(?:0 0 0 (rg|RG)|0 (g|G))(?=\s)/g, (m, przed, rgb, szary) => { n++; return `${przed}0 0 0 1 ${(rgb || szary) === 'rg' || (rgb || szary) === 'g' ? 'k' : 'K'}`; });
+    if (!n) continue;
+    zamiany += n;
+    const dane = filtry.length ? zlib.deflateSync(Buffer.from(nowy, 'latin1')) : Buffer.from(nowy, 'latin1');
+    d.set(PDFName.of('Length'), PDFNumber.of(dane.length));
+    doc.context.assign(ref, PDFRawStream.of(d, dane));
+  }
+  return { bufor: zamiany ? Buffer.from(await doc.save({ useObjectStreams: false })) : buf, zamiany };
+}
+
+// Czy Ghostscript naprawdę użył profilu (spike: -sOutputICCProfile bywał pomijany bez słowa) – czerwony prostokąt
+// z profilem drukarni ma wyjść inaczej niż z domyślnym profilem Ghostscripta. Raz na profil (pamięć wg SHA-256).
+const PROFIL_SPRAWDZONY = new Map();
+async function sprawdzProfilGs(gs, profil, PDFLib) {
+  const suma = sha256(fs.readFileSync(profil));
+  const zrodlo = katalogIccGs(gs);
+  if (!zrodlo || suma === sha256(fs.readFileSync(path.join(zrodlo, 'default_cmyk.icc')))) return true;   // to samo co domyślny
+  if (PROFIL_SPRAWDZONY.get(suma + gs.sciezka)) return true;
+  const { PDFDocument, rgb } = PDFLib;
+  const d = await PDFDocument.create();
+  d.addPage([20, 20]).drawRectangle({ x: 0, y: 0, width: 20, height: 20, color: rgb(1, 0, 0) });
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'karka-profil-'));
+  try {
+    const we = path.join(tmp, 'we.pdf');
+    fs.writeFileSync(we, Buffer.from(await d.save({ useObjectStreams: false })));
+    const kolor = async (p, n) => {
+      await konwertuj(we, path.join(tmp, n), { gs, profil: p });
+      const doc = await PDFDocument.load(fs.readFileSync(path.join(tmp, n)));
+      for (const [, o] of doc.context.enumerateIndirectObjects()) {
+        if (!(o instanceof PDFLib.PDFRawStream) || o.dict.get(PDFLib.PDFName.of('Subtype'))) continue;
+        let t; try { t = zlib.inflateSync(Buffer.from(o.contents)).toString('latin1'); } catch (e) { continue; }
+        const m = t.match(/[\d.]+ [\d.]+ [\d.]+ [\d.]+ k/);
+        if (m) return m[0];
+      }
+      return '';
+    };
+    const nasz = await kolor(profil, 'a.pdf'), domyslny = await kolor(path.join(zrodlo, 'default_cmyk.icc'), 'b.pdf');
+    if (!nasz || nasz === domyslny) throw new Error(`Ghostscript ${gs.wersja} nie zastosował profilu ${path.basename(profil)} (wynik jak z domyślnego profilu) – PDF nie powstał`);
+    PROFIL_SPRAWDZONY.set(suma + gs.sciezka, true);
+    return true;
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+
 // Konwersja bufora PDF (jedna część z drukarnia.przygotujDruk) → { bufor, kontrola, czas }.
-// po(bufor) – poprawka po Ghostscripcie (drukarnia.js: ramki stron z planu druku).
+// Kolejno: sprawdzenie profilu, czerń #000 → K100, Ghostscript, po(bufor) – poprawka po Ghostscripcie
+// (drukarnia.js: ramki stron z planu druku), kontrola wyniku.
 async function konwertujBufor(buf, { gs, profil, sygnal, PDFLib, po } = {}) {
+  gs = gs || znajdzGs();
+  if (!gs.ok) throw new Error(gs.powod);
+  await sprawdzProfilGs(gs, profil, PDFLib);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'karka-cmyk-'));
   try {
     const we = path.join(tmp, 'rgb.pdf'), wy = path.join(tmp, 'cmyk.pdf');
-    fs.writeFileSync(we, buf);
+    fs.writeFileSync(we, (await czernK100(buf, PDFLib)).bufor);
     const { czas } = await konwertuj(we, wy, { gs, profil, sygnal });
     let bufor = fs.readFileSync(wy);
     if (po) bufor = await po(bufor);
@@ -257,4 +360,5 @@ async function konwertujBufor(buf, { gs, profil, sygnal, PDFLib, po } = {}) {
 }
 
 module.exports = { PROFILE, DOMYSLNY, PODPOWIEDZ_GS, MIN_WERSJA_GS, znajdzGs, argumentyGs, konwertuj, opisBleduGs,
-  sprawdzPlikIcc, profilLokalny, pobierzProfil, rozwiazProfil, adresPaczki, czyKlucz, sprawdzPdf, konwertujBufor, sha256 };
+  sprawdzPlikIcc, profilLokalny, pobierzProfil, rozwiazProfil, adresPaczki, czyKlucz, sprawdzPdf, konwertujBufor, sha256,
+  czernK100, katalogIccGs, sprawdzProfilGs };
