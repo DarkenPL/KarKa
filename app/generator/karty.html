@@ -834,13 +834,27 @@ function renderCard(tpl, cmds, row, ctx) {
     if (kolory.length < 2) return kolory[0] || null;
     return `linear-gradient(${Number.isNaN(num(kierunek)) ? 180 : num(kierunek)}deg, ${kolory.join(', ')})`;
   };
-  const condition = (expr) => {
-    const m = /^(.*?)(!=|=)(.*)$/.exec(expr);
-    if (!m) return value(expr) !== '';
-    const a = value(m[1]).toLowerCase(), b = value(m[3]).toLowerCase();
+  // Warunek jeśli=: człony połączone | (lub) i & (i), & wiąże mocniej, bez nawiasów. Człon: [Kol] (niepusta),
+  // lewa=prawa, lewa!=prawa (bez wielkości liter, liczby liczbowo; „[Kol]=” – pusta, „[Kol]!=” – niepusta)
+  // albo lewa>prawa, <, >=, <= (tylko liczby; inaczej fałsz + Uwaga). Dzielimy szablon, nie wartości z danych.
+  const warunek = (expr, where) => String(expr).split('|').some((lub) => lub.split('&').every((czlon) => {
+    const m = /^(.*?)(>=|<=|!=|=|>|<)(.*)$/.exec(czlon);
+    if (!m) return value(czlon) !== '';
+    const [, l, op, r] = m;
+    if (op === '>' || op === '<' || op === '>=' || op === '<=') {
+      const [ls, rs] = [value(l), value(r)];
+      const [ln, rn] = [liczbaZTekstu(ls), liczbaZTekstu(rs)];
+      if (Number.isNaN(ln) || Number.isNaN(rn)) {
+        const zla = Number.isNaN(ln) ? ls : rs;
+        if (zla !== '') ctx.warn.add(`${where}: ${ctx.label}: „${zla}” w warunku jeśli=${czlon.trim()} to nie liczba – warunek fałszywy`);
+        return false;
+      }
+      return op === '>' ? ln > rn : op === '<' ? ln < rn : op === '>=' ? ln >= rn : ln <= rn;
+    }
+    const a = value(l).toLowerCase(), b = value(r).toLowerCase();
     const same = (a !== '' && b !== '' && !Number.isNaN(+a) && !Number.isNaN(+b)) ? +a === +b : a === b;   // 001 = 1
-    return m[2] === '=' ? same : !same;
-  };
+    return op === '=' ? same : !same;
+  }));
   const rich = (s, kolumny) => {
     let h = renderText(s, ctx.icons, ctx.warn)
       .replace(/\*\*([\s\S]+?)\*\*/g, '<b>$1</b>').replace(/\*([^*]+?)\*/g, '<i>$1</i>');
@@ -859,7 +873,7 @@ function renderCard(tpl, cmds, row, ctx) {
 
   let bg = '', html = '';
   for (const c of cmds) {
-    if (c.opt.jesli !== undefined && !condition(c.opt.jesli)) continue;
+    if (c.opt.jesli !== undefined && !warunek(c.opt.jesli, c.where)) continue;
     const o = c.opt, f = c.flags;
     if (c.kom === 'tlo') {
       const v = value(c.args[0]);

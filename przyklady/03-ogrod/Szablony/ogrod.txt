@@ -1,7 +1,7 @@
 ; ═══════════════════════════════════════════════════════════════════
 ;  PRZYKŁAD 3 – kilka talii w jednym pliku
 ;  • część wspólna (przed pierwszą [TALIA …]) dotyczy obu talii,
-;  • karta pozioma (Pogoda), warunki jeśli=, rewersy.
+;  • karta pozioma (Pogoda), warunki jeśli= (też pusta kolumna, & i |, liczby), rewersy.
 ; ═══════════════════════════════════════════════════════════════════
 
 ; ── Wspólne ───────────────────────────────────────────────────────
@@ -32,6 +32,10 @@ TEKST   = 6, 6, 44, 9, [Nazwa], czcionka="Patrick Hand, cursive", rozmiar=16, pi
 OBRAZEK = 11, 17, 41, 40, [Obrazek]
 TEKST   = 6, 60, 51, 9, "Lubi: [Lubi]", ikony=1.6, pion=środek
 TEKST   = 6, 70, 51, 12, "Plon: **[Plon]**", rozmiar=14, wyrównanie=prawo, pion=dół
+
+; Warunki: „[Kolumna]=” = kolumna pusta; & (i) wiąże mocniej niż | (lub); > < >= <= tylko dla liczb
+TEKST   = 6, 60, 51, 9, "Bez wymagań", pion=środek, kolor=#6b6b6b, jeśli=[Lubi]=
+TEKST   = 6, 70, 26, 12, "Rekord plonu!", rozmiar=10, pogrubienie, kolor=#B23A48, pion=dół, jeśli=[Grządka]=grzyby | [Plon]>=7 & [Lubi]=
 
 [REWERS]
 TŁO       = #4E7A3A

@@ -1904,6 +1904,75 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-uklad.png', (await wc.capturePage(uklad.rect)).toPNG());
     await wc.executeJavaScript("document.getElementById('test-uklad').remove(); files.delete('test-obraz.svg')");
   }
+  // Warunki jeśli= (issue #72, --test-edytor, bez zmian w plikach projektu): pusta kolumna, & i |, porównania liczb, Uwagi.
+  let jesli = null;
+  if (process.argv.includes('--test-edytor')) {
+    jesli = await wc.executeJavaScript(`(() => {
+      const r = (linie, row) => {
+        const t = parseTemplate('[TALIA Test]\\nKARTA = 63, 88\\n' + linie + '\\n', 'test.txt').talie[0];
+        const warn = new Set();
+        const w = renderCard(t, t.awers, row || {}, { warn, icons: RAPORT.icons, label: 'Test 1', plik: 'test.txt', kolumny: true, wbudowane: {} });
+        return { html: w.html, n: (w.html.match(/class="el /g) || []).length, uwagi: [...warn] };
+      };
+      const wyniki = {};
+      const spr = (nazwa, warunek) => { wyniki[nazwa] = !!warunek; };
+      const p = (warunek, row) => r('PROSTOKĄT = 1, 1, 5, 5, kolor=#f00, jeśli=' + warunek, row);
+      // 1. pusta / niepusta kolumna (też same spacje) i dotychczasowe formy
+      spr('pusta', p('[A]=', { A: '' }).n === 1 && p('[A]=', { A: 'x' }).n === 0 && p('[A]=', { A: '  ' }).n === 1);
+      spr('niepusta', p('[A]!=', { A: 'x' }).n === 1 && p('[A]!=', { A: '' }).n === 0);
+      spr('stare', p('[A]', { A: 'x' }).n === 1 && p('[A]', { A: '' }).n === 0 && p('[A]=Tak', { A: 'tAK' }).n === 1
+        && p('[A]!=tak', { A: 'nie' }).n === 1 && p('[A]=1', { A: '001' }).n === 1 && p('[A]=1', { A: '2' }).n === 0);
+      // 2. & (i) i | (lub), & mocniej niż |
+      const ab = (a, b, c) => ({ A: a, B: b, C: c });
+      spr('i', p('[A]=x & [B]=y', ab('x', 'y')).n === 1 && p('[A]=x & [B]=y', ab('x', 'z')).n === 0 && p('[A]=x & [B]=y', ab('q', 'y')).n === 0);
+      spr('lub', p('[A]=x | [B]=y', ab('q', 'y')).n === 1 && p('[A]=x | [B]=y', ab('x', 'q')).n === 1 && p('[A]=x | [B]=y', ab('q', 'q')).n === 0);
+      // A | B & C = A lub (B i C)
+      spr('priorytet', p('[A]=x | [B]=y & [C]=z', ab('x', 'q', 'q')).n === 1 && p('[A]=x | [B]=y & [C]=z', ab('q', 'y', 'z')).n === 1
+        && p('[A]=x | [B]=y & [C]=z', ab('q', 'y', 'q')).n === 0 && p('[A]=x & [B]=y | [C]=z', ab('x', 'q', 'z')).n === 1 && p('[A]=x & [B]=y | [C]=z', ab('x', 'q', 'q')).n === 0);
+      spr('puste_i_niepuste', p('[A]= & [B]!=', ab('', 'x')).n === 1 && p('[A]= & [B]!=', ab('', '')).n === 0);
+      // 3. liczby
+      const l = (w, a) => p(w, { A: a }).n === 1;
+      spr('wieksze', l('[A]>10', '11') && !l('[A]>10', '10') && l('[A]>=10', '10') && !l('[A]>=10', '9'));
+      spr('mniejsze', l('[A]<10', '9') && !l('[A]<10', '10') && l('[A]<=10', '10') && !l('[A]<=10', '11'));
+      spr('przecinek', l('[A]>2.5', '2,6') && !l('[A]<2.5', '2,6') && l('[A]<=2.5', '2,5') && l('[A]>-1', '-0,5'));
+      spr('dwieKolumny', p('[A]<[B]', ab('3', '12')).n === 1 && p('[A]<[B]', ab('30', '12')).n === 0);
+      spr('liczbyBezUwag', !p('[A]>10', { A: '11' }).uwagi.length);
+      // 4. nie liczba: fałsz + Uwaga zależna od danych (raz), pusta kolumna – fałsz bez Uwagi
+      let a = r('PROSTOKĄT = 1, 1, 5, 5, kolor=#f00, jeśli=[A]>10\\nTEKST = 1, 10, 20, 5, "x", jeśli=[A]>10', { A: 'dużo' });
+      spr('nieLiczba', a.n === 0 && a.uwagi.length === 2 && a.uwagi.every((u) => /^test\\.txt, wiersz \\d+: Test 1: „dużo” w warunku jeśli=\\[A\\]>10 to nie liczba/.test(u)));
+      a = p('[A]>10', { A: '' });
+      spr('pustaLiczba', a.n === 0 && !a.uwagi.length);
+      a = p('[A]>10 | [B]=x', { A: 'abc', B: 'x' });
+      spr('lubPoBledzie', a.n === 1 && a.uwagi.length === 1);
+      // 5. zgodność wstecz: HTML kart bez nowych form jak dotąd
+      a = r('PROSTOKĄT = 1, 2, 3, 4, kolor=#f00, jeśli=[A]=tak', { A: 'tak' });
+      spr('zgodnosc', a.html === '<div class="el ksztalt" style="left:1mm;top:2mm;width:3mm;height:4mm;background:#f00;"></div>');
+      // 6. edytor: kolorowanie nowych form bez wyjątku, tekst zachowany
+      const kol = kolorujLinie('PROSTOKĄT = 1, 1, 5, 5, kolor=#f00, jeśli=[Plon]>=7 & [Lubi]= | [Rzadka]!=');
+      const tekst = new DOMParser().parseFromString(kol, 'text/html').body.textContent;
+      spr('kolorowanie', tekst === 'PROSTOKĄT = 1, 1, 5, 5, kolor=#f00, jeśli=[Plon]>=7 & [Lubi]= | [Rzadka]!=');
+      // karta do zrzutu: każdy kwadrat to inny warunek; rysować się mają tylko pierwszy, trzeci, czwarty, szósty i siódmy
+      const kw = (i, w, kolor) => 'PROSTOKĄT = ' + (4 + (i % 4) * 14) + ', ' + (4 + Math.floor(i / 4) * 14) + ', 12, 12, kolor=' + kolor + ', jeśli=' + w + '\\n';
+      const t = parseTemplate('[TALIA Test]\\nKARTA = 63, 88, zaokrąglenie=3\\nTŁO = #e9dcc0\\n'
+        + kw(0, '[Opis]=', '#4e7a3a') + kw(1, '[Opis]!=', '#b23a48') + kw(2, '[Plon]>=7 & [Opis]=', '#2f5d8a') + kw(3, '[Plon]<5 | [Rzadka]=', '#c9a227')
+        + kw(4, '[Plon]>10', '#000001') + kw(5, '[Plon]>=7 & [Rzadka]=tak | [Plon]=8', '#6e9f5a') + kw(6, '[Rzadka]=', '#4a4e69') + kw(7, '[Plon]<[Opis]', '#000002') + '\\n', 'test.txt').talie[0];
+      const warn = new Set();
+      const rt = renderCard(t, t.awers, { Opis: '', Plon: '8', Rzadka: '' }, { warn, icons: RAPORT.icons, label: 'Test 1', plik: 'test.txt', kolumny: true, wbudowane: {} });
+      spr('zrzutKwadraty', (rt.html.match(/class="el ksztalt"/g) || []).length === 5 && !rt.html.includes('#000001') && !rt.html.includes('#000002') && rt.html.includes('#4e7a3a') && !rt.html.includes('#b23a48'));
+      spr('zrzutUwaga', warn.size === 0);
+      const d = document.createElement('div');
+      d.id = 'test-jesli';
+      d.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;background:#fff;padding:8px';
+      d.innerHTML = '<div class="karta" data-talia="Test" title="jesli" style="' + esc(rt.style) + '">' + rt.html + '</div>';
+      document.body.appendChild(d);
+      const ok = Object.values(wyniki).every(Boolean);
+      const rect = d.getBoundingClientRect();
+      return { ok, wyniki, uwagi: [...warn], rect: { x: 0, y: 0, width: Math.ceil(rect.width), height: Math.ceil(rect.height) } };
+    })()`);
+    await wc.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))');
+    fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-jesli.png', (await wc.capturePage(jesli.rect)).toPNG());
+    await wc.executeJavaScript("document.getElementById('test-jesli').remove()");
+  }
   await wc.executeJavaScript('buildPrint()');
   await pdfDoPliku(wc, wynik);
   // Menu aplikacji: własne (polskie), a nie domyślne Electrona.
@@ -1914,8 +1983,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
     && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
+  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
