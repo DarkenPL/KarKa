@@ -11,6 +11,7 @@ const fs = require('fs');
 const { utworzSerwer } = require('./serwer');
 const historia = require('./historia');
 const drukarnia = require('./drukarnia');
+const cmyk = require('./cmyk');
 const aktualizacje = require('./aktualizacje');
 
 // Kod aplikacji: z paczki albo z nakładki po aktualizacji (start.js, nakladka.js). Zasoby leżą obok kodu
@@ -394,13 +395,68 @@ const listaPrzykladow = () => {
 // Zapis wprost do pliku – w rozmiarze stron z @page (A4 albo rozmiar karty), bez okna drukowania.
 // druk (układ Drukarnia, plan z buildPrint): dokładny rozmiar stron, TrimBox i ewentualny podział
 // na awersy i rewersy (drukarnia.js) – wtedy wynik to lista plików, inaczej jedna ścieżka.
+// druk.cmyk = { plik, nazwa } (profil już rozwiązany – profilDoDruku): każda część przez Ghostscripta (cmyk.js),
+// ramki stron jeszcze raz z planu, kontrola wyniku. Pliki zapisywane dopiero, gdy wszystkie części się udały –
+// przy błędzie nie powstaje żaden plik (RGB nie udaje CMYK). Wynik wtedy: { pliki, cmyk: { profil, ghostscript, pliki[] } }.
 async function pdfDoPliku(webContents, plik, druk) {
   const dane = await webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: 'none' } });
   if (!druk) { fs.writeFileSync(plik, dane); return plik; }
   const czesci = await drukarnia.przygotujDruk(dane, druk, plik, ZASOBY);
+  let raport = null;
+  if (druk.cmyk) {
+    const gs = cmyk.znajdzGs({ odswiez: true });
+    if (!gs.ok) throw new Error(gs.powod);
+    if (!druk.cmyk.plik) throw new Error('brak profilu CMYK');
+    raport = { profil: druk.cmyk.nazwa, ghostscript: gs.wersja, czas: 0, pliki: [] };
+    const PDFLib = drukarnia.pdfLib(ZASOBY);
+    for (const c of czesci) {
+      const w = await cmyk.konwertujBufor(c.bufor, { gs, profil: druk.cmyk.plik, PDFLib,
+        po: (b) => drukarnia.ustawRamki(b, druk, c.indeksy, ZASOBY) });
+      const k = w.kontrola, nazwa = path.basename(c.plik);
+      if (k.strony !== c.strony) throw new Error(`${nazwa}: po konwersji ${k.strony} stron zamiast ${c.strony}`);
+      const zle = [k.rgb && `${k.rgb}× kolor RGB w treści`, k.przestrzenieRgb && `${k.przestrzenieRgb}× przestrzeń barw RGB`,
+        k.obrazki.inne.length && `obrazki nie w CMYK: ${[...new Set(k.obrazki.inne)].join(', ')}`, k.trimBox !== k.strony && 'brak TrimBox'].filter(Boolean);
+      if (zle.length) throw new Error(`kontrola CMYK: ${nazwa} – ${zle.join('; ')}`);
+      c.bufor = w.bufor;
+      raport.czas += w.czas;
+      raport.pliki.push({ plik: c.plik, ...k, czas: w.czas });
+    }
+  }
   for (const c of czesci) fs.writeFileSync(c.plik, c.bufor);
-  return czesci.map((c) => c.plik);
+  const pliki = czesci.map((c) => c.plik);
+  return raport ? { pliki, cmyk: raport } : pliki;
 }
+
+// ── CMYK (issue #66, etap 2) ─────────────────────────────────────────────────
+// Profil drukarni: klucz (fogra39 / fogra51 – pobierany raz z eci.org do <dane>/profile) albo plik .icc.
+// pytaj: okno PDF pyta przed pobraniem; zlecenie pobiera samo. null = użytkownik zrezygnował.
+const folderProfili = () => path.join(app.getPath('userData'), 'profile');
+async function profilDoDruku(profil, { pytaj, folder }) {
+  if (profil && !cmyk.czyKlucz(profil) && folder && !path.isAbsolute(profil)) profil = path.resolve(folder, profil);
+  const r = cmyk.rozwiazProfil(profil, folderProfili());
+  if (r.plik) return r;
+  const opis = cmyk.PROFILE[r.brak];
+  if (pytaj) {
+    const o = await dialog.showMessageBox(okno, { type: 'question', buttons: ['Pobierz', 'Anuluj'], defaultId: 0, cancelId: 1,
+      message: `Pobrać profil kolorów ${opis.nazwa} z eci.org?`,
+      detail: `Do PDF w CMYK potrzebny jest profil drukarni (paczka ok. ${opis.paczkaMB} MB). Pobierany jest raz i zostaje w danych aplikacji. Możesz też wskazać własny plik .icc w oknie Druk i PDF.` });
+    if (o.response !== 0) return null;
+  }
+  try {
+    const plik = await cmyk.pobierzProfil(r.brak, folderProfili(), { fetch: pobieraj, zasoby: ZASOBY,
+      postep: (u) => { if (okno && !okno.isDestroyed()) okno.setProgressBar(u); } });
+    return { plik, nazwa: opis.nazwa, klucz: r.brak };
+  } finally { if (okno && !okno.isDestroyed()) okno.setProgressBar(-1); }
+}
+// Stan do okna Druk i PDF: Ghostscript (opcja wyszarzona bez niego) i które profile są już pobrane.
+ipcMain.handle('cmyk:stan', () => ({ gs: cmyk.znajdzGs({ odswiez: true }),
+  profile: Object.fromEntries(Object.entries(cmyk.PROFILE).map(([k, p]) => [k, { nazwa: p.nazwa, pobrany: !!cmyk.profilLokalny(k, folderProfili()), paczkaMB: p.paczkaMB }])) }));
+ipcMain.handle('cmyk:wybierzProfil', async () => {
+  const r = await dialog.showOpenDialog(okno, { title: 'Profil kolorów drukarni (CMYK)', properties: ['openFile'], filters: [{ name: 'Profil ICC', extensions: ['icc', 'icm'] }] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  try { return cmyk.sprawdzPlikIcc(r.filePaths[0]); }
+  catch (e) { await dialog.showMessageBox(okno, { type: 'warning', message: 'Tego pliku nie da się użyć', detail: e.message }); return null; }
+});
 
 ipcMain.handle('projekt:info', (e) => {
   const p = projektZ(e);
@@ -474,6 +530,19 @@ ipcMain.handle('pcio:zapisz', async (e, nazwa, dane) => {
 });
 ipcMain.handle('pdf:zapisz', async (e, nazwa, druk) => {
   const p = projektZ(e);
+  // CMYK: Ghostscript i profil przed oknem zapisu (bez nich nie pytamy o nazwę pliku).
+  if (druk && druk.cmyk) {
+    try {
+      const gs = cmyk.znajdzGs({ odswiez: true });
+      if (!gs.ok) throw new Error(gs.powod);
+      const prof = await profilDoDruku(druk.cmyk.profil, { pytaj: !testowy, folder: p.folder });
+      if (!prof) return null;
+      druk = { ...druk, cmyk: { ...druk.cmyk, plik: prof.plik, nazwa: prof.nazwa } };
+    } catch (er) {
+      if (!testowy) await dialog.showMessageBox(okno, { type: 'warning', message: 'PDF w CMYK nie powstał', detail: er.message });
+      throw er;
+    }
+  }
   const katalog = p.zapisywalny ? p.folder : app.getPath('documents');
   const r = await dialog.showSaveDialog(okno, {
     title: 'Zapisz PDF', defaultPath: path.join(katalog, `${nazwa || 'karty'}.pdf`),
@@ -608,6 +677,12 @@ ipcMain.handle('zlecenie:pdf', async (e, nazwa, druk) => {
   const rel = path.relative(p.folder, cel);
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('plik PDF musi być w folderze projektu');
   fs.mkdirSync(path.dirname(cel), { recursive: true });
+  if (druk && druk.cmyk) {
+    const gs = cmyk.znajdzGs({ odswiez: true });
+    if (!gs.ok) throw new Error(gs.powod);
+    const prof = await profilDoDruku(druk.cmyk.profil, { pytaj: false, folder: p.folder });
+    druk = { ...druk, cmyk: { ...druk.cmyk, plik: prof.plik, nazwa: prof.nazwa } };
+  }
   return pdfDoPliku(e.sender, cel, druk);
 });
 ipcMain.handle('historia:przywroc', (e, czas) => {
