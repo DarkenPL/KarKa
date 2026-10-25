@@ -364,7 +364,7 @@ const plan = (pliki, plikiStron) => ({ uklad: 'drukarnia', szer: 69, wys: 94, sp
       const zly = path.join(T, 'gs-pada');
       fs.writeFileSync(zly, '#!/bin/sh\nfor a in "$@"; do case "$a" in -sOutputFile=*) echo czesc > "${a#-sOutputFile=}";; esac; done\necho "Error: /undefined in x" >&2\nexit 1\n', { mode: 0o755 });
       const wy = path.join(T, 'pada-cmyk.pdf');
-      await assert.rejects(cmyk.konwertuj(we, wy, { gs: { ok: true, sciezka: zly, wersja: '10.0.0' }, profil: iccCmyk }), /Ghostscript zakończył się błędem \(kod 1\).*undefined/);
+      await assert.rejects(cmyk.konwertuj(we, wy, { gs: { ok: true, sciezka: zly, wersja: '10.0.0', katalogIcc: cmyk.katalogIccGs(gs) }, profil: iccCmyk }), /Ghostscript zakończył się błędem \(kod 1\).*undefined/);
       assert.ok(!fs.existsSync(wy), 'plik wyjściowy nie istnieje');
     });
     await krok('konwertuj: obcięty PDF – gs kończy kodem 0 i daje pusty PDF', async () => {
@@ -402,7 +402,7 @@ const plan = (pliki, plikiStron) => ({ uklad: 'drukarnia', szer: 69, wys: 94, sp
       const wolny = path.join(T, 'gs-wolny');
       fs.writeFileSync(wolny, '#!/bin/sh\nsleep 5\n', { mode: 0o755 });
       const wy = path.join(T, 'wolny-cmyk.pdf');
-      await assert.rejects(cmyk.konwertuj(we, wy, { gs: { ok: true, sciezka: wolny, wersja: '10.0.0' }, profil: iccCmyk, limit: 200 }), /nie skończył w/);
+      await assert.rejects(cmyk.konwertuj(we, wy, { gs: { ok: true, sciezka: wolny, wersja: '10.0.0', katalogIcc: cmyk.katalogIccGs(gs) }, profil: iccCmyk, limit: 200 }), /nie skończył w/);
       assert.ok(!fs.existsSync(wy));
     });
     await krok('konwertujBufor: sprząta folder tymczasowy', async () => {
