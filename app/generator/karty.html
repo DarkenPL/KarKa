@@ -70,6 +70,7 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 .raport ul { margin: 2px 0 0; padding-left: 18px; }
 .raport .ok { color: #2f7d4a; }
 .raport .zamknij { float: right; }
+.raport .raport-drukarnia { display: block; margin-bottom: 8px; }
 .uwagi ul { margin: 4px 0 0; padding-left: 18px; }
 .start { max-width: 600px; margin: 60px auto; padding: 24px 28px; background: #fff; border-radius: 10px; border: 1px solid #ddd6cc; }
 .start h2 { margin-top: 0; }
@@ -1167,10 +1168,241 @@ async function obrazkiNiskiejRozdzielczosci(prog = 300) {
     .map(([p, x]) => `${esc(p)} – <b>${Math.round(x.dpi)} dpi</b> <span class="opis">(${esc([...x.talie].join(', '))})</span>`);
 }
 
-async function raportProjektu() {
+// ── Raport – tryb drukarni (#66) ────────────────────────────────────────────
+// Trzy sprawdzenia przed wysłaniem PDF do drukarni (panel Raport → „Tryb drukarni”, zlecenie
+// raport z drukarnia = tak). Liczone na kartach podglądu po fitAll (rzeczywisty układ tekstu):
+// 1. odstęp tekstu i ikon od linii cięcia – z obwiedni glifów (prostokąty linii tekstu z Range,
+//    w pionie zawężone do faktycznej wysokości znaków z measureText), próg MARGINES_DRUKARNI;
+// 2. „prawie czerń” (jasność L* < 20, ale nie #000) w kolorach tekstu, obrysów, obwódek, linii i ikon SVG –
+//    po konwersji do CMYK wychodzi z niej rich black (czterokolorowa), a drukarnie chcą tekstu w K100;
+// 3. kolor pasa 0–3 mm wewnątrz linii cięcia (awersy i rewersy, z obrazka karty): jednolity → Pantone,
+//    fiolet / szarość / brąz bez białej obwódki → słaba powtarzalność, czarny → „border black” C40 K100.
+const MARGINES_DRUKARNI = 3;          // mm od linii cięcia (tolerancja cięcia ±1 mm)
+const PROG_CZERNI = 20;               // L* (0–100); #000 ma 0, domyślny kolor tekstu #1d1b19 ≈ 10
+const DOMYSLNY_KOLOR_TEKSTU = 'rgb(29, 27, 25)';     // .karta { color: #1d1b19 }
+let OSTATNI_RAPORT_DRUKARNI = null;
+const PASY_KART = new Map();          // odcisk karty → wynik analizy pasa (obrazek karty jest drogi)
+const KOLORY_SVG = new Map();         // adres ikony → lista kolorów z pliku SVG
+
+const rgbZCss = (c) => { const m = String(c).match(/rgba?\(([^)]+)\)/); if (!m) return null; const v = m[1].split(/[\s,/]+/).filter(Boolean).map(parseFloat); return [v[0], v[1], v[2], v.length > 3 ? v[3] : 1]; };
+const rgbZHex = (h) => { h = h.replace('#', ''); if (h.length <= 4) h = [...h].map((x) => x + x).join(''); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)).concat(h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1); };
+const hexZRgb = ([r, g, b]) => '#' + [r, g, b].map((x) => Math.round(x).toString(16).padStart(2, '0')).join('');
+function labZRgb([r, g, b]) {
+  const lin = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  const [R, G, B] = [lin(r), lin(g), lin(b)];
+  const f = (t) => (t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116);
+  const X = f((0.4124 * R + 0.3576 * G + 0.1805 * B) / 0.95047), Y = f(0.2126 * R + 0.7152 * G + 0.0722 * B), Z = f((0.0193 * R + 0.1192 * G + 0.9505 * B) / 1.08883);
+  return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)];
+}
+const prawieCzarny = (rgb) => !!rgb && rgb[3] > 0 && !(rgb[0] === 0 && rgb[1] === 0 && rgb[2] === 0) && labZRgb(rgb)[0] < PROG_CZERNI;
+const opisKarty = (k) => k.classList.contains('rewers') ? `${k.dataset.talia} – rewers` : (k.title || `${k.dataset.talia} ${k.dataset.id || ''}`).trim();
+
+// Obwiednia glifów elementu (px, układ okna): prostokąty fragmentów tekstu z Range, w pionie
+// zawężone do wysokości znaków (measureText – actualBoundingBox), plus ikony (img, .ikona-kolor).
+let MIARKA = null;
+function obwiedniaGlifow(el) {
+  if (!MIARKA) MIARKA = document.createElement('canvas').getContext('2d');
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  const dodaj = (l, t, r, b) => { x1 = Math.min(x1, l); y1 = Math.min(y1, t); x2 = Math.max(x2, r); y2 = Math.max(y2, b); };
+  const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  const zakres = document.createRange();
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    if (n.nodeType === 1) {
+      if (n.matches('img.ikona, .ikona-kolor')) { const r = n.getBoundingClientRect(); if (r.width && r.height) dodaj(r.left, r.top, r.right, r.bottom); }
+      continue;
+    }
+    const tekst = n.nodeValue;
+    if (!tekst.trim()) continue;
+    const st = getComputedStyle(n.parentElement);
+    MIARKA.font = st.font;
+    const m = MIARKA.measureText(tekst.trim());
+    const obrys = (parseFloat(st.webkitTextStrokeWidth) || 0) / 2;
+    zakres.selectNodeContents(n);
+    for (const r of zakres.getClientRects()) {
+      if (r.width < 0.5 || r.height < 0.5) continue;
+      // Prostokąt fragmentu = obszar treści czcionki (fontBoundingBox); znaki są niższe.
+      const linia = r.top + (m.fontBoundingBoxAscent ?? r.height * 0.8) * (r.height / ((m.fontBoundingBoxAscent + m.fontBoundingBoxDescent) || r.height));
+      const gora = Number.isFinite(m.actualBoundingBoxAscent) ? linia - m.actualBoundingBoxAscent : r.top;
+      const dol = Number.isFinite(m.actualBoundingBoxDescent) ? linia + m.actualBoundingBoxDescent : r.bottom;
+      dodaj(r.left - obrys, Math.max(r.top, gora) - obrys, r.right + obrys, Math.min(r.bottom, dol) + obrys);
+    }
+  }
+  return x1 === Infinity ? null : { x1, y1, x2, y2 };
+}
+
+// Najmniejszy odstęp tekstu/ikon od krawędzi karty (linii cięcia) – w mm, z kierunkiem.
+function odstepyKarty(k) {
+  const kr = k.getBoundingClientRect();
+  if (!kr.width) return null;
+  const pxNaMm = kr.width / cardMm(k)[0];
+  let naj = null;
+  for (const el of k.querySelectorAll('.el.tekst, .el.ikony')) {
+    if (getComputedStyle(el).display === 'none') continue;
+    const o = obwiedniaGlifow(el);
+    if (!o) continue;
+    const strony = [['lewa', o.x1 - kr.left], ['górna', o.y1 - kr.top], ['prawa', kr.right - o.x2], ['dolna', kr.bottom - o.y2]];
+    for (const [strona, px] of strony) {
+      const mmOd = px / pxNaMm;
+      if (!naj || mmOd < naj.odstep) naj = { odstep: mmOd, krawedz: strona, element: el.classList.contains('ikony') ? 'IKONA' : 'TEKST', tekst: el.textContent.trim().replace(/\s+/g, ' ').slice(0, 40) };
+    }
+  }
+  return naj;
+}
+
+// Kolory do sprawdzenia „prawie czerni” w karcie: [{ rgb, rodzaj }].
+async function koloryKarty(k) {
+  const out = [];
+  for (const el of k.querySelectorAll('.el')) {
+    const st = getComputedStyle(el);
+    if (st.display === 'none') continue;
+    if (el.classList.contains('tekst') && el.textContent.trim()) {
+      const c = rgbZCss(st.color);
+      out.push({ rgb: c, rodzaj: st.color === DOMYSLNY_KOLOR_TEKSTU && !el.style.color ? 'tekst (domyślny kolor KarKi #1d1b19)' : 'tekst' });
+      if (parseFloat(st.webkitTextStrokeWidth) > 0) out.push({ rgb: rgbZCss(st.webkitTextStrokeColor), rodzaj: 'obrys tekstu' });
+    }
+    if (parseFloat(st.borderTopWidth) > 0) out.push({ rgb: rgbZCss(st.borderTopColor), rodzaj: 'obwódka' });
+    for (const s of el.querySelectorAll('svg [stroke], svg [fill]')) for (const a of ['stroke', 'fill']) {
+      const v = s.getAttribute(a);
+      if (v && v !== 'none') out.push({ rgb: /^#/.test(v) ? rgbZHex(v) : rgbZCss(v), rodzaj: 'linia' });
+    }
+    for (const sp of el.querySelectorAll('.ikona-kolor')) { const v = sp.style.getPropertyValue('--k').trim(); if (/^#/.test(v)) out.push({ rgb: rgbZHex(v), rodzaj: 'ikona koloru' }); }
+    for (const img of el.querySelectorAll('img.ikona')) for (const c of await koloryIkonySvg(img)) out.push({ rgb: c.rgb, rodzaj: 'ikona ' + c.plik });
+  }
+  return out;
+}
+async function koloryIkonySvg(img) {
+  const plik = (URL_PLIK.get(img.src) || '').replace(/@.*$/, '');
+  if (!/\.svg$/i.test(plik)) return [];
+  if (!KOLORY_SVG.has(img.src)) {
+    let kolory = [];
+    try {
+      const t = await (await fetch(img.src)).text();
+      const wart = [...t.matchAll(/(?:fill|stroke|stop-color|color)\s*[:=]\s*["']?\s*(#[0-9a-f]{3,8}\b|rgba?\([^)]*\))/gi)].map((m) => m[1]);
+      kolory = [...new Set(wart.map((v) => v.toLowerCase()))].map((v) => ({ rgb: v[0] === '#' ? rgbZHex(v) : rgbZCss(v), plik: plik.split('/').pop() }));
+    } catch (e) { /* ikona nieczytelna – pomijamy */ }
+    KOLORY_SVG.set(img.src, kolory);
+  }
+  return KOLORY_SVG.get(img.src);
+}
+
+// Pas 0–3 mm wewnątrz linii cięcia: obrazek karty (72 dpi), piksele pasa w Lab.
+async function pasKarty(k) {
+  const klucz = skrot(htmlKarty(k));
+  if (PASY_KART.has(klucz)) return PASY_KART.get(klucz);
+  let wynik = null;
+  try {
+    const dpi = 72, blob = await obrazKarty(k, { dpi, format: 'png' });
+    const bm = await createImageBitmap(blob);
+    const c = document.createElement('canvas'); c.width = bm.width; c.height = bm.height;
+    const g = c.getContext('2d'); g.drawImage(bm, 0, 0);
+    const { data, width: W, height: H } = g.getImageData(0, 0, c.width, c.height);
+    const pas = MARGINES_DRUKARNI * dpi / 25.4, brzeg = 1 * dpi / 25.4;
+    const piks = [], zewn = [];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const d = Math.min(x, y, W - 1 - x, H - 1 - y);
+      if (d >= pas) { x = Math.max(x, W - 1 - Math.ceil(pas)); continue; }
+      const i = (y * W + x) * 4;
+      if (data[i + 3] < 128) continue;                       // zaokrąglone rogi (wycina drukarnia)
+      const rgb = [data[i], data[i + 1], data[i + 2]];
+      piks.push(rgb); if (d < brzeg) zewn.push(rgb);
+    }
+    if (piks.length) wynik = ocenPas(piks, zewn);
+  } catch (e) { wynik = { blad: String(e.message || e) }; }
+  PASY_KART.set(klucz, wynik);
+  return wynik;
+}
+function ocenPas(piks, zewn) {
+  const bialy = (rgb) => { const [L, a, b] = labZRgb(rgb); return L > 92 && Math.hypot(a, b) < 8; };
+  if (zewn.length && zewn.filter(bialy).length / zewn.length >= 0.9) return { rodzaj: 'biała obwódka' };
+  const lab = piks.map(labZRgb);
+  const med = [0, 1, 2].map((i) => { const v = lab.map((x) => x[i]).sort((p, q) => p - q); return v[v.length >> 1]; });
+  const blisko = lab.filter((x) => Math.hypot(x[0] - med[0], x[1] - med[1], x[2] - med[2]) < 10).length / lab.length;
+  // Kolor dominujący jako RGB (średnia pikseli bliskich medianie).
+  const bl = piks.filter((_, i) => Math.hypot(lab[i][0] - med[0], lab[i][1] - med[1], lab[i][2] - med[2]) < 10);
+  const sr = [0, 1, 2].map((i) => bl.reduce((s, p) => s + p[i], 0) / (bl.length || 1));
+  const kolor = hexZRgb(sr), [r, g, b] = sr.map((v) => v / 255);
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), s = mx ? (mx - mn) / mx : 0;
+  let h = 0;
+  if (mx !== mn) h = (mx === r ? (g - b) / (mx - mn) : mx === g ? 2 + (b - r) / (mx - mn) : 4 + (r - g) / (mx - mn)) * 60;
+  if (h < 0) h += 360;
+  const jednolity = blisko >= 0.9, wspolny = blisko >= 0.6;
+  if (med[0] > 92 && Math.hypot(med[1], med[2]) < 8) return { rodzaj: 'biały', kolor };
+  if (med[0] < 20 && Math.hypot(med[1], med[2]) < 15) return { rodzaj: jednolity ? 'czarny' : 'mieszany', kolor, udzial: blisko };
+  const odcien = s > 0.15 && h >= 255 && h <= 335 ? 'fiolet' : s < 0.1 && mx > 0.15 && mx < 0.9 ? 'szarość' : s > 0.2 && h >= 10 && h <= 50 && mx < 0.6 ? 'brąz' : '';
+  if (odcien && wspolny) return { rodzaj: 'ryzykowny', odcien, kolor, udzial: blisko };
+  return { rodzaj: jednolity ? 'jednolity' : 'mieszany', kolor, udzial: blisko };
+}
+
+// Wynik: { margines, odstep: [{ karta, talia, strona, odstep, krawedz, element, tekst }], czern: [...], krawedz: [...] }
+async function raportDrukarni() {
+  const praca = async () => {
+    const filtr = $('filtr').value; $('filtr').value = ''; applyFilter();      // odfiltrowane talie też
+    try {
+      const karty = [...$('podglad').querySelectorAll('.talia .karta')];
+      const odstep = [], czern = new Map(), pasy = new Map(), widziane = new Set();
+      for (const k of karty) {
+        const rewers = k.classList.contains('rewers');
+        const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' : k.dataset.row);
+        const pierwsza = !widziane.has(klucz); widziane.add(klucz);
+        const o = odstepyKarty(k);
+        if (o && o.odstep < MARGINES_DRUKARNI - 0.005) {
+          const byla = odstep.find((x) => x.klucz === klucz);
+          if (!byla) odstep.push({ klucz, karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...o, odstep: Math.round(o.odstep * 100) / 100 });
+          else if (o.odstep < byla.odstep) Object.assign(byla, o, { odstep: Math.round(o.odstep * 100) / 100 });
+        }
+        if (!pierwsza) continue;                                   // kopie tej samej karty – raz
+        for (const { rgb, rodzaj } of await koloryKarty(k)) {
+          if (!prawieCzarny(rgb)) continue;
+          const kolor = hexZRgb(rgb), kk = kolor + '|' + rodzaj;
+          const x = czern.get(kk) || { kolor, rodzaj, jasnosc: Math.round(labZRgb(rgb)[0]), karty: [] };
+          if (!x.karty.includes(opisKarty(k))) x.karty.push(opisKarty(k));
+          czern.set(kk, x);
+        }
+        const p = await pasKarty(k);
+        if (p && !p.blad && ['czarny', 'ryzykowny', 'jednolity'].includes(p.rodzaj)) {
+          const kk = k.dataset.talia + '|' + (rewers ? 'r' : 'a') + '|' + p.rodzaj + '|' + (p.odcien || '') + '|' + p.kolor;
+          const x = pasy.get(kk) || { talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', rodzaj: p.rodzaj, odcien: p.odcien, kolor: p.kolor, karty: [] };
+          x.karty.push(opisKarty(k)); pasy.set(kk, x);
+        }
+      }
+      odstep.sort((a, b) => a.odstep - b.odstep);
+      odstep.forEach((x) => delete x.klucz);
+      return { margines: MARGINES_DRUKARNI, odstep, czern: [...czern.values()], krawedz: [...pasy.values()] };
+    } finally { $('filtr').value = filtr; applyFilter(); }
+  };
+  // Obrazki kart (html-to-image) czytają podgląd – na wyłączność, chyba że eksport już trwa.
+  return (OSTATNI_RAPORT_DRUKARNI = EKSPORT_TRWA ? await praca() : await naWylacznosc(praca));
+}
+
+// Sekcje raportu dla trybu drukarni (ten sam kształt h3 + ul/div.ok – raportJson je odczyta).
+async function sekcjeDrukarni(lista) {
+  const r = await raportDrukarni();
+  const mm = (v) => String(v.toFixed(1)).replace('.', ',') + ' mm';
+  const ileKart = (a) => a.length > 6 ? a.slice(0, 6).map(esc).join(', ') + ` … (+${a.length - 6})` : a.map(esc).join(', ');
+  const POKAZ = 25;
+  lista(`Drukarnia: tekst bliżej niż ${MARGINES_DRUKARNI} mm od linii cięcia`, r.odstep.slice(0, POKAZ).map((x) =>
+    `<b>${mm(x.odstep)}</b> – ${esc(x.karta)}: ${x.element === 'IKONA' ? 'ikona' : '„' + esc(x.tekst) + '”'}, ${x.krawedz} krawędź`)
+    .concat(r.odstep.length > POKAZ ? [`… i ${r.odstep.length - POKAZ} kart więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
+    `tekst i ikony są co najmniej ${MARGINES_DRUKARNI} mm od linii cięcia`);
+  lista('Drukarnia: „prawie czerń” zamiast #000', r.czern.map((x) =>
+    `<b>${esc(x.kolor)}</b> (jasność ${x.jasnosc}) – ${esc(x.rodzaj)}: ${ileKart(x.karty)}. Po konwersji do CMYK wyjdzie czerń czterokolorowa – drukarnie chcą tekstu i małych ikon w czystej czerni (K100): wpisz #000`),
+    'czarne teksty, obrysy i ikony są w #000');
+  const RADA = {
+    czarny: 'czarna ramka – drukarnia zaleca „border black” C40 M0 Y0 K100',
+    jednolity: 'jednolity kolor przy krawędzi – drukarnia zaleca kolor Pantone (stały między arkuszami)',
+    ryzykowny: 'słaba powtarzalność między arkuszami – rozważ białą obwódkę',
+  };
+  lista('Drukarnia: kolor przy krawędzi karty (pas 0–3 mm)', r.krawedz.map((x) =>
+    `${esc(x.talia)} – ${x.strona === 'rewers' ? 'rewers' : 'awersy (' + x.karty.length + ')'}: <b>${esc(x.kolor)}</b>${x.odcien ? ' (' + x.odcien + ')' : ''} – ${RADA[x.rodzaj]}` + (x.strona === 'awers' ? `: ${ileKart(x.karty)}` : '')),
+    'przy krawędziach nie ma jednolitych ani trudnych kolorów');
+}
+
+// o.drukarnia (albo przełącznik „Tryb drukarni” w panelu) – dodatkowe sekcje dla drukarni na początku.
+async function raportProjektu(o = {}) {
   const sekcje = [];
   const lista = (tyt, el, pusto) => sekcje.push(`<h3>${esc(tyt)}</h3>` + (el.length
     ? '<ul>' + el.map((x) => '<li>' + x + '</li>').join('') + '</ul>' : `<div class="ok">✓ ${esc(pusto)}</div>`));
+  if (o.drukarnia ?? raportDrukarniWlaczony()) await sekcjeDrukarni(lista);
   const tekst = RAPORT.tekst, tl = tekst.toLowerCase();
   const uzytaKolumna = (k) => tl.includes('[' + k.trim().toLowerCase() + ']');
   const SPECJALNE = ['ilosc', 'id', 'nazwa'];
@@ -1240,12 +1472,24 @@ async function raportProjektu() {
   lista('Obrazki nieużywane', nieuzyteObrazki, 'w folderach projektu nie ma nieużywanych obrazków');
   return sekcje.join('');
 }
+// Przełącznik „Tryb drukarni” w panelu Raport – zapamiętany w przeglądarce (dla wszystkich projektów).
+function raportDrukarniWlaczony() { try { return localStorage.getItem('raportDrukarnia') === '1'; } catch (e) { return false; } }
+let RAPORT_NR = 0;
 async function pokazRaport(pokaz = $('raport').hidden) {
   const r = $('raport');
   r.hidden = !pokaz;
   if (!pokaz) return;
-  r.innerHTML = '<button class="zamknij" id="raportZamknij">Zamknij</button>' + await raportProjektu();
+  const nr = ++RAPORT_NR;                         // przy szybkich przebudowach wygrywa ostatni raport
+  const druk = raportDrukarniWlaczony();
+  const tresc = await raportProjektu();
+  if (nr !== RAPORT_NR) return;
+  r.innerHTML = '<button class="zamknij" id="raportZamknij">Zamknij</button>'
+    + `<label class="raport-drukarnia"><input type="checkbox" id="raportDrukarnia"${druk ? ' checked' : ''}> Tryb drukarni <span class="opis">– odstęp tekstu od linii cięcia (${MARGINES_DRUKARNI} mm), „prawie czerń”, kolor przy krawędzi</span></label>` + tresc;
   $('raportZamknij').onclick = () => pokazRaport(false);
+  $('raportDrukarnia').onchange = (e) => {
+    try { localStorage.setItem('raportDrukarnia', e.target.checked ? '1' : '0'); } catch (er) { /* bez zapamiętywania */ }
+    pokazRaport(true);
+  };
 }
 window.raportProjektu = raportProjektu;
 $('raportPrzycisk').onclick = () => pokazRaport();
@@ -1589,8 +1833,14 @@ function kartaZeSpadem(k, w, h, s) {
   return c;
 }
 
-// o: { uklad: 'a4' | 'pojedyncze' | 'drukarnia', ciecie, spad, rewersy, szkic, karty } – z okna Druk / PDF
-// (domyślnie wszystkie karty, A4, z rewersami).
+// o: { uklad: 'a4' | 'pojedyncze' | 'drukarnia', ciecie, spad, strony, rewersy, szkic, karty } – z okna Druk / PDF
+// (domyślnie wszystkie karty, A4, z rewersami). Zwraca plan druku (PLAN_DRUKU) – dla układu Drukarnia
+// main.js ustawia według niego dokładny rozmiar stron, TrimBox i dzieli PDF na pliki (drukarnia.js):
+// { szer, wys, spad (mm), pliki: [''] | ['awersy', 'rewersy'], strony: [{ plik, ciecie: [x, y, w, h] }] }.
+const SPAD_DRUKARNI = 3;              // domyślny spad (mm) – wymóg drukarni (#66)
+let PLAN_DRUKU = null;
+// Odcisk rewersu do porównania talii: ten sam wygląd i rozmiar = ten sam rewers (bez data-talia i title).
+const wygladRewersu = (g) => g.w + 'x' + g.h + '|' + g.back.style.cssText + '|' + g.back.innerHTML;
 function buildPrint(o = {}) {
   const tryb = o.uklad || 'a4';
   const ciecie = o.ciecie || 'znaczniki';      // znaczniki | nozyczki | oba
@@ -1609,24 +1859,51 @@ function buildPrint(o = {}) {
   const cellOf = (g) => [Math.min(g.w, g.h), Math.max(g.w, g.h)];
 
   if (tryb === 'pojedyncze' || tryb === 'drukarnia') {
-    // Drukarnia: strona = karta + spad z każdej strony, bez znaczników; awers i rewers na przemian, strona na kopię.
-    const s = tryb === 'drukarnia' ? Math.max(0, num(o.spad ?? 2) || 0) : 0;
+    // Drukarnia: strona = karta + spad z każdej strony, bez znaczników, strona na kopię.
+    // strony: 'osobno' (domyślnie, wymóg drukarni) – najpierw wszystkie awersy; jeden wspólny rewers →
+    // ostatnia strona tego samego pliku, różne rewersy → drugi plik, w którym strona N to rewers awersu N
+    // (karta talii bez rewersu → pusta strona); 'naprzemian' – awers, rewers, awers… (jak do 0.5.8).
+    const s = tryb === 'drukarnia' ? Math.max(0, num(o.spad ?? SPAD_DRUKARNI) || 0) : 0;
     // Jeden format strony dla całego wydruku: największa karta (pionowo); mniejsze karty na środku.
     const pw = Math.max(...[...groups.values()].map((g) => cellOf(g)[0])) + 2 * s;
     const ph = Math.max(...[...groups.values()].map((g) => cellOf(g)[1])) + 2 * s;
-    const page = (k, w, h) => {
-      if (s) { k = kartaZeSpadem(k, w, h, s); w += 2 * s; h += 2 * s; }
-      const [cw, ch] = cellOf({ w, h });
+    const plan = { uklad: tryb, szer: pw, wys: ph, spad: s, pliki: [''], strony: [] };
+    // Zapas spadu: Chromium zaokrągla stronę PDF (np. 94 → 93,8 mm), więc strona jest o 2 × ZAPAS większa,
+    // a karta ma spad + ZAPAS (wystaje poza arkusz). main.js przycina stronę do pw × ph (MediaBox) –
+    // bez białej kreski przy dolnej i prawej krawędzi spadu.
+    const ZAPAS = s && o.zapas !== false ? 0.5 : 0;    // druk przez okno systemowe (drukuj) – bez zapasu
+    const page = (k, w, h, plik = 0) => {
+      const [tw, th] = cellOf({ w, h });             // karta po cięciu (TrimBox)
+      plan.strony.push({ plik, ciecie: [(pw - tw) / 2, (ph - th) / 2, tw, th] });
       const a = document.createElement('div'); a.className = 'arkusz';
       a.style.cssText = `width:${pw}mm;height:${ph}mm;`;
+      if (ZAPAS) a.style.overflow = 'visible';
+      druk.appendChild(a);
+      if (!k) return;                                 // pusta strona (talia bez rewersu w pliku rewersów)
+      if (s) { const z = s + ZAPAS; k = kartaZeSpadem(k, w, h, z); w += 2 * z; h += 2 * z; }
+      const [cw, ch] = cellOf({ w, h });
       const box = printCard(k, w, h);
       box.style.position = 'absolute'; box.style.left = mm((pw - cw) / 2); box.style.top = mm((ph - ch) / 2);
-      a.appendChild(box); druk.appendChild(a);
+      a.appendChild(box);
     };
-    for (const { w, h, cards, back } of groups.values())
-      for (const k of cards) { page(k, w, h); if (zRewersami && back) page(back, w, h); }
-    $('styl-strony').textContent = `@page { size: ${pw}mm ${ph}mm; margin: 0; }`;
-    return;
+    if (tryb === 'drukarnia' && o.strony !== 'naprzemian') {
+      const awersy = [...groups.values()].flatMap((g) => g.cards.map((k) => ({ k, g })));
+      for (const { k, g } of awersy) page(k, g.w, g.h);
+      const zRewersem = awersy.filter(({ g }) => g.back);
+      if (zRewersami && zRewersem.length) {
+        const wyglady = new Set(zRewersem.map(({ g }) => wygladRewersu(g)));
+        if (wyglady.size === 1 && zRewersem.length === awersy.length) { const { g } = awersy[0]; page(g.back, g.w, g.h); }
+        else {
+          plan.pliki = ['awersy', 'rewersy'];
+          for (const { g } of awersy) page(g.back || null, g.w, g.h, 1);
+        }
+      }
+    } else {
+      for (const { w, h, cards, back } of groups.values())
+        for (const k of cards) { page(k, w, h); if (zRewersami && back) page(back, w, h); }
+    }
+    $('styl-strony').textContent = `@page { size: ${pw + 2 * ZAPAS}mm ${ph + 2 * ZAPAS}mm; margin: 0; }`;
+    return (PLAN_DRUKU = plan);
   }
 
   // A4 pionowo; siatka kart wyśrodkowana na arkuszu, znaczniki cięcia na marginesach.
@@ -1681,12 +1958,13 @@ function buildPrint(o = {}) {
     }
   }
   $('styl-strony').textContent = `@page { size: ${PW}mm ${PH}mm; margin: 0; }`;
+  return (PLAN_DRUKU = { uklad: 'a4', szer: PW, wys: PH, spad: 0, pliki: [''], strony: null });
 }
 
 function drukuj(o = {}) {
   const karty = kartyEksportu(o);
   if (!karty.length) { status('Brak kart do druku – sprawdź wybór kart i talii.'); return; }
-  buildPrint({ ...o, karty }); window.print();
+  buildPrint({ ...o, karty, zapas: false }); window.print();
   punktHistorii('druk');
 }
 window.drukuj = drukuj;
@@ -1904,8 +2182,8 @@ Object.assign(window, { katalogPng, zapiszKatalog, oknoKatalogu, zlecenieKatalog
 const KLUCZE_ZLECEN = {
   katalog: ['talie', 'id'],
   stan: [],
-  raport: [],
-  pdf: ['uklad', 'ciecie', 'rewersy', 'szkic', 'spad', 'przesunieciex', 'przesunieciey', 'talie', 'id', 'tylkozmienione', 'plik'],
+  raport: ['drukarnia'],
+  pdf: ['uklad', 'ciecie', 'rewersy', 'strony', 'szkic', 'spad', 'przesunieciex', 'przesunieciey', 'talie', 'id', 'tylkozmienione', 'plik'],
   obrazki: ['dpi', 'format', 'talie', 'id', 'rewersy'],
   pcio: ['dpi', 'talie', 'id'],
 };
@@ -1952,6 +2230,8 @@ function opcjeZlecenia(polecenie, surowe = {}) {
   if (v.uklad !== undefined) o.uklad = wybor('uklad', ['a4', 'pojedyncze', 'drukarnia'], { osobne: 'pojedyncze' });
   if (v.ciecie !== undefined) o.ciecie = wybor('ciecie', ['znaczniki', 'nozyczki', 'oba'], { linie: 'nozyczki' });
   if (v.rewersy !== undefined) o.rewersy = tak('rewersy');
+  if (v.strony !== undefined) o.strony = wybor('strony', ['osobno', 'naprzemian'], { przemian: 'naprzemian', na_przemian: 'naprzemian', osobne: 'osobno' });
+  if (v.drukarnia !== undefined) o.drukarnia = tak('drukarnia');
   if (v.szkic !== undefined) o.szkic = tak('szkic');
   if (v.spad !== undefined) o.spad = liczba('spad', 0, 10);
   if (v.przesunieciex !== undefined) o.przesuniecieX = liczba('przesunieciex', -10, 10);
@@ -2000,9 +2280,9 @@ function stanKart() {
 }
 
 // Raport projektu (to samo co panel Raport) jako lista sekcji z pozycjami tekstowymi.
-async function raportJson() {
+async function raportJson(o = {}) {
   const d = document.createElement('div');
-  d.innerHTML = await raportProjektu();
+  d.innerHTML = await raportProjektu({ drukarnia: !!o.drukarnia });     // zlecenie: tryb drukarni tylko z kluczem
   return [...d.querySelectorAll('h3')].map((h) => {
     const nast = h.nextElementSibling;
     const pozycje = nast && nast.tagName === 'UL' ? [...nast.querySelectorAll('li')].map((li) => li.textContent.trim()) : [];
@@ -2016,13 +2296,25 @@ const ZADANIA_ZLECEN = {
     return { ok: !!r, ...(r || {}) };
   },
   async stan() { return { ok: true, ...stanKart() }; },
-  async raport() { return { ok: true, raport: await raportJson() }; },
+  async raport(o) {
+    const wynik = { ok: true, raport: await raportJson(o) };
+    if (o.drukarnia) wynik.drukarnia = OSTATNI_RAPORT_DRUKARNI;     // pełne listy (w raporcie – skrót)
+    return wynik;
+  },
   async pdf(o) {
     const karty = kartyEksportu(o);
     if (!karty.length) throw new Error(o.ktore === 'zmienione' ? 'brak kart zmienionych od ostatniego PDF' : 'brak kart do PDF – sprawdź talie i id');
-    const plik = await zapiszPdf({ ...o, zlecenie: true });
-    if (!plik) throw new Error('PDF nie został zapisany');
-    return { ok: true, pliki: [plik], karty: karty.length, strony: $('druk').querySelectorAll('.arkusz').length || null };
+    const pliki = await zapiszPdf({ ...o, zlecenie: true });
+    if (!pliki) throw new Error('PDF nie został zapisany');
+    const wynik = { ok: true, pliki, karty: karty.length, strony: $('druk').querySelectorAll('.arkusz').length || null };
+    const plan = PLAN_DRUKU;
+    if (o.uklad === 'drukarnia' && plan) {
+      // Strony w każdym pliku i rozmiar strony w mm (TrimBox = strona − spad z każdej strony).
+      wynik.stronyPlikow = plan.pliki.map((_, n) => plan.strony.filter((x) => x.plik === n).length).filter(Boolean);
+      wynik.strona = [plan.szer, plan.wys].map((x) => Math.round(x * 100) / 100);
+      wynik.spad = plan.spad;
+    }
+    return wynik;
   },
   async obrazki(o) {
     const r = await eksportObrazkow({ ...o, zlecenie: true });
@@ -2332,17 +2624,21 @@ const APP = window.generatorApp || null;
 async function zapiszPdf(o = {}) {
   const karty = kartyEksportu(o);
   if (!karty.length) { status('Brak kart do PDF – sprawdź wybór kart i talii.'); return; }
-  buildPrint({ ...o, karty });
+  const plan = buildPrint({ ...o, karty });
+  // Drukarnia: plan idzie do main.js – dokładny rozmiar stron, TrimBox, podział na awersy i rewersy.
+  const druk = o.uklad === 'drukarnia' ? { szer: plan.szer, wys: plan.wys, spad: plan.spad, pliki: plan.pliki, strony: plan.strony } : null;
   const info = await APP.info();
   const nazwa = (PROJEKT || info.nazwa || 'karty') + ({ pojedyncze: ' – karty pojedynczo', drukarnia: ' – drukarnia' }[o.uklad] || ' – karty A4')
     + (o.ktore === 'zaznaczone' ? ' – wybrane' : '') + (o.ktore === 'zmienione' ? ' – zmienione' : '') + (o.szkic ? ' – szkic' : '');
   status('Zapisywanie PDF…');
   try {
     // Zlecenie z pliku: zapis bez okna – o.plik (ścieżka w projekcie) albo nazwa jak przy ręcznym zapisie.
-    const plik = o.zlecenie ? await APP.zapiszPdfZlecenia(o.plik || nazwa + '.pdf') : await APP.zapiszPdf(nazwa);
-    status(plik ? 'Zapisano PDF: ' + plik : 'Zapis PDF anulowany.');
-    if (plik) { await zapamietajDruk(karty); punktHistorii(({ pojedyncze: 'PDF – osobne strony', drukarnia: 'PDF – drukarnia' }[o.uklad] || 'PDF A4') + (o.zlecenie ? ' (zlecenie)' : '')); }
-    return plik;
+    // Wynik: lista plików (Drukarnia – awersy i rewersy osobno daje dwa) albo null (anulowano).
+    const w = o.zlecenie ? await APP.zapiszPdfZlecenia(o.plik || nazwa + '.pdf', druk) : await APP.zapiszPdf(nazwa, druk);
+    const pliki = w ? [].concat(w) : null;
+    status(pliki ? 'Zapisano PDF: ' + pliki.join(', ') : 'Zapis PDF anulowany.');
+    if (pliki) { await zapamietajDruk(karty); punktHistorii(({ pojedyncze: 'PDF – osobne strony', drukarnia: 'PDF – drukarnia' }[o.uklad] || 'PDF A4') + (o.zlecenie ? ' (zlecenie)' : '')); }
+    return pliki;
   } catch (e) { status('Nie udało się zapisać PDF: ' + e.message); if (o.zlecenie) throw e; }
 }
 window.zapiszPdf = zapiszPdf;
@@ -2356,8 +2652,8 @@ const OKNA = {
     domyslne: { dpi: 150, format: 'jpg', ktore: 'wszystkie', rewersy: true, pominTalie: [] },
     przyciski: [['ok', 'Eksportuj']],
     opis: 'Każda karta jako osobny plik w folderze Export projektu.' },
-  druk: { tytul: 'Druk i PDF', pola: ['uklad', 'ciecie', 'spad', 'rewersy', 'przesuniecie', 'szkic', 'ktore', 'talie'],
-    domyslne: { uklad: 'a4', ciecie: 'znaczniki', spad: 2, rewersy: true, przesuniecieX: 0, przesuniecieY: 0, szkic: false, ktore: 'wszystkie', pominTalie: [] },
+  druk: { tytul: 'Druk i PDF', pola: ['uklad', 'ciecie', 'spad', 'strony', 'rewersy', 'przesuniecie', 'szkic', 'ktore', 'talie'],
+    domyslne: { uklad: 'a4', ciecie: 'znaczniki', spad: SPAD_DRUKARNI, strony: 'osobno', rewersy: true, przesuniecieX: 0, przesuniecieY: 0, szkic: false, ktore: 'wszystkie', pominTalie: [] },
     przyciski: [['drukuj', 'Drukuj…'], ['pdf', 'Zapisz PDF']] },
   katalog: { tytul: 'Katalog talii', pola: ['talie'], domyslne: { pominTalie: [] },
     przyciski: [['ok', 'Zapisz katalog']],
@@ -2377,7 +2673,7 @@ function poleOkna(nazwa, rodzaj, u) {
       [300, '300 dpi <span class="opis">– druk, drukarnie (≈ 744×1039 px)</span>']]);
     case 'format': return radio('Format', 'format', [['jpg', 'JPG <span class="opis">– mniejsze pliki, rogi białe</span>'], ['png', 'PNG <span class="opis">– przezroczyste zaokrąglone rogi</span>']]);
     case 'uklad': return radio('Układ', 'uklad', [['a4', 'A4 ze znacznikami cięcia (karty 1:1)'], ['pojedyncze', 'Każda karta na osobnej stronie'],
-      ['drukarnia', 'Drukarnia <span class="opis">– strona na kopię: awers, rewers, awers…; ze spadem, bez znaczników</span>']]);
+      ['drukarnia', 'Drukarnia <span class="opis">– strona na kopię, ze spadem, bez znaczników, z TrimBox</span>']]);
     case 'ciecie': return radio('Linie cięcia <span class="opis">(układ A4)</span>', 'ciecie', [['znaczniki', 'Znaczniki na marginesie <span class="opis">– gilotyna, nóż</span>'],
       ['nozyczki', 'Przerywane linie wzdłuż kart <span class="opis">– nożyczki</span>'], ['oba', 'Jedno i drugie']]);
     case 'przesuniecie': {
@@ -2385,7 +2681,15 @@ function poleOkna(nazwa, rodzaj, u) {
       return `<fieldset><legend>Przesunięcie rewersów <span class="opis">(układ A4, druk dwustronny)</span></legend><label>${pole('przesuniecieX', 'w prawo')}</label> <label>${pole('przesuniecieY', 'w dół')}</label>` +
         '<div class="opis">Gdy po wydruku rewersy są przesunięte względem awersów, wpisz korektę: np. rewers 1 mm za bardzo w prawo → „w prawo” −1.</div></fieldset>';
     }
-    case 'spad': return `<fieldset><legend>Spad <span class="opis">(układ Drukarnia)</span></legend><label><input type="number" name="spad" min="0" max="10" step="0.5" value="${esc(u.spad ?? 2)}" style="width:4em"> mm <span class="opis">– tło i elementy przy krawędzi wychodzą poza linię cięcia</span></label></fieldset>`;
+    case 'spad': {
+      // 2 albo 3 mm; inna wartość (zapamiętana dawniej albo ze zlecenia) zostaje jako trzecia pozycja.
+      const opcje = [[3, '3 mm <span class="opis">– wymóg większości drukarni gier</span>'], [2, '2 mm']];
+      if (u.spad != null && ![2, 3].includes(+u.spad)) opcje.push([+u.spad, `${String(u.spad).replace('.', ',')} mm <span class="opis">– zapamiętane</span>`]);
+      return radio('Spad <span class="opis">(układ Drukarnia) – tło i elementy przy krawędzi wychodzą poza linię cięcia</span>', 'spad', opcje);
+    }
+    case 'strony': return radio('Strony <span class="opis">(układ Drukarnia)</span>', 'strony', [
+      ['osobno', 'Awersy i rewersy osobno <span class="opis">– plik awersów (karta na stronę), wspólny rewers na ostatniej stronie; różne rewersy → drugi plik: strona N = rewers awersu N</span>'],
+      ['naprzemian', 'Na przemian <span class="opis">– awers, rewers, awers… w jednym pliku</span>']]);
     case 'rewersy': return pole('rewersy', rodzaj === 'druk' ? 'Rewersy <span class="opis">– po każdym arkuszu kart arkusz rewersów (druk dwustronny)</span>' : 'Rewersy talii <span class="opis">– osobne pliki</span>');
     case 'szkic': return pole('szkic', 'Szkic <span class="opis">– bez teł i obrazków, tekst czarny (oszczędza tusz)</span>');
     case 'ktore': {
@@ -2429,7 +2733,7 @@ function otworzOkno(rodzaj, domyslna) {
           const v = parseFloat(String(form.querySelector(`[name=${n}]`)?.value ?? '').replace(',', '.'));
           o[n] = Number.isNaN(v) ? (u[n] || 0) : Math.round(Math.min(10, Math.max(-10, v)) * 10) / 10;
         }
-        else if (p === 'spad') { const v = parseFloat(String(form.querySelector('[name=spad]')?.value ?? '').replace(',', '.')); o.spad = Number.isNaN(v) ? u.spad : Math.min(10, Math.max(0, v)); }
+        else if (p === 'spad') { const v = parseFloat(form.querySelector('[name=spad]:checked')?.value ?? ''); o.spad = Number.isNaN(v) ? u.spad : Math.min(10, Math.max(0, v)); }
         else { const x = form.querySelector(`[name=${p}]:checked`); o[p] = x ? (p === 'dpi' ? +x.value : x.value) : u[p]; }
       }
       return o;

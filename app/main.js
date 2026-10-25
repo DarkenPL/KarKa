@@ -10,6 +10,7 @@ const path = require('path');
 const fs = require('fs');
 const { utworzSerwer } = require('./serwer');
 const historia = require('./historia');
+const drukarnia = require('./drukarnia');
 const aktualizacje = require('./aktualizacje');
 
 // Kod aplikacji: z paczki albo z nakładki po aktualizacji (start.js, nakladka.js). Zasoby leżą obok kodu
@@ -391,10 +392,14 @@ const listaPrzykladow = () => {
 
 // ── PDF ─────────────────────────────────────────────────────────────────────
 // Zapis wprost do pliku – w rozmiarze stron z @page (A4 albo rozmiar karty), bez okna drukowania.
-async function pdfDoPliku(webContents, plik) {
+// druk (układ Drukarnia, plan z buildPrint): dokładny rozmiar stron, TrimBox i ewentualny podział
+// na awersy i rewersy (drukarnia.js) – wtedy wynik to lista plików, inaczej jedna ścieżka.
+async function pdfDoPliku(webContents, plik, druk) {
   const dane = await webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: 'none' } });
-  fs.writeFileSync(plik, dane);
-  return plik;
+  if (!druk) { fs.writeFileSync(plik, dane); return plik; }
+  const czesci = await drukarnia.przygotujDruk(dane, druk, plik, ZASOBY);
+  for (const c of czesci) fs.writeFileSync(c.plik, c.bufor);
+  return czesci.map((c) => c.plik);
 }
 
 ipcMain.handle('projekt:info', (e) => {
@@ -467,7 +472,7 @@ ipcMain.handle('pcio:zapisz', async (e, nazwa, dane) => {
   fs.writeFileSync(plik, Buffer.from(dane));
   return plik;
 });
-ipcMain.handle('pdf:zapisz', async (e, nazwa) => {
+ipcMain.handle('pdf:zapisz', async (e, nazwa, druk) => {
   const p = projektZ(e);
   const katalog = p.zapisywalny ? p.folder : app.getPath('documents');
   const r = await dialog.showSaveDialog(okno, {
@@ -475,8 +480,7 @@ ipcMain.handle('pdf:zapisz', async (e, nazwa) => {
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
   });
   if (r.canceled || !r.filePath) return null;
-  await pdfDoPliku(e.sender, r.filePath);
-  return r.filePath;
+  return pdfDoPliku(e.sender, r.filePath, druk);
 });
 
 // ── Odciski kart z ostatniego PDF (druk tylko zmienionych, porównanie) ──────
@@ -596,7 +600,7 @@ async function sprawdzZlecenia() {
 }
 setInterval(sprawdzZlecenia, 3000);
 // PDF ze zlecenia: zapis bez okna, tylko w folderze projektu (domyślna nazwa jak przy ręcznym zapisie).
-ipcMain.handle('zlecenie:pdf', async (e, nazwa) => {
+ipcMain.handle('zlecenie:pdf', async (e, nazwa, druk) => {
   const p = projektZ(e);
   if (!p.zlecenieTrwa || !p.zapisywalny) throw new Error('zapis PDF bez okna działa tylko w zleceniu z pliku');
   let cel = path.resolve(p.folder, String(nazwa || 'karty.pdf'));
@@ -604,7 +608,7 @@ ipcMain.handle('zlecenie:pdf', async (e, nazwa) => {
   const rel = path.relative(p.folder, cel);
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('plik PDF musi być w folderze projektu');
   fs.mkdirSync(path.dirname(cel), { recursive: true });
-  return pdfDoPliku(e.sender, cel);
+  return pdfDoPliku(e.sender, cel, druk);
 });
 ipcMain.handle('historia:przywroc', (e, czas) => {
   const p = projektZ(e);
@@ -1260,7 +1264,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     drukarnia = await wc.executeJavaScript(`(() => {
       const karty = kartyEksportu({});
       const rewersy = karty.filter((k) => backOf(k.dataset.talia)).length;
-      buildPrint({ uklad: 'drukarnia', spad: 2, karty });
+      buildPrint({ uklad: 'drukarnia', spad: 2, strony: 'naprzemian', karty });
       const strony = document.querySelectorAll('#druk .arkusz');
       const [w, h] = cardMm(karty[0]);
       return { strony: strony.length, oczekiwane: karty.length + rewersy, rozmiar: strony[0].style.width + ' ' + strony[0].style.height,
@@ -1283,6 +1287,114 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     })()`);
     const pr = drukarnia.przesuniecie;
     drukarnia.ok = drukarnia.ok && (pr.brak || (pr.dx === 1.5 && pr.dy === -2 && pr.bez));
+  }
+  // PDF dla drukarni (issue #66, --test-edytor, każdy projekt, pliki w katalogu tymczasowym): a) osobno, spad 3,
+  // b) naprzemian, spad 2, c) bez rewersów, d) okno Druk i PDF (spad, strony), e) raport drukarni (sekcje, odstęp, czerń).
+  // Oczekiwania (liczba plików i stron) liczone z DOM – wygląd rewersu jak w wygladRewersu() w karty.html.
+  let drukarniaPdf = null;
+  if (process.argv.includes('--test-edytor')) {
+    const js = (k) => wc.executeJavaScript(k);
+    const { PDFDocument } = require(path.join(ZASOBY, 'vendor', 'pdf-lib.min.js'));
+    const MMpt = 72 / 25.4, bliskie = (a, b) => Math.abs(a - b) <= 0.01;
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'gk-drukarnia-'));
+    const o = await js(`(() => {
+      const karty = kartyEksportu({});
+      const wyglady = new Set(); let zRewersem = 0;
+      const kom = karty.map((k) => { const [w, h] = cardMm(k); const b = backOf(k.dataset.talia);
+        if (b) { zRewersem++; wyglady.add(w + 'x' + h + '|' + b.style.cssText + '|' + b.innerHTML); }
+        return [Math.min(w, h), Math.max(w, h)]; });
+      return { karty: karty.length, zRewersem, wyglady: wyglady.size, szer: Math.max(...kom.map((c) => c[0])), wys: Math.max(...kom.map((c) => c[1])) };
+    })()`);
+    const bledy = [];
+    // Plan → zapis przez pdfDoPliku (jak IPC) → kontrola każdego pliku pdf-lib-em.
+    const przebieg = async (nazwa, opcje, spad, strony, szerMm, wysMm) => {
+      const b = [];
+      const plan = await js(`buildPrint(${JSON.stringify({ uklad: 'drukarnia', ...opcje })})`);
+      const lista = await pdfDoPliku(wc, path.join(tmp, nazwa + '.pdf'), plan);
+      const wPlanie = plan.pliki.map((_, n) => plan.strony.filter((s) => s.plik === n)).filter((a) => a.length);
+      if (!bliskie(plan.szer, szerMm) || !bliskie(plan.wys, wysMm) || plan.spad !== spad) b.push(`plan: ${plan.szer}×${plan.wys} spad ${plan.spad}, oczekiwano ${szerMm}×${wysMm} spad ${spad}`);
+      if (lista.length !== strony.length) b.push(`plików ${lista.length}, oczekiwano ${strony.length}`);
+      if (wPlanie.map((a) => a.length).join() !== strony.join()) b.push(`strony w planie ${wPlanie.map((a) => a.length)}, oczekiwano ${strony}`);
+      const W = szerMm * MMpt, H = wysMm * MMpt;
+      let przySpadzie = 0;
+      for (let n = 0; n < lista.length; n++) {
+        if (!fs.existsSync(lista[n])) { b.push('brak pliku ' + lista[n]); continue; }
+        if (lista.length === 2 && !lista[n].endsWith(n ? ' – rewersy.pdf' : ' – awersy.pdf')) b.push('nazwa pliku ' + path.basename(lista[n]));
+        if (lista.length === 1 && !lista[0].endsWith(nazwa + '.pdf')) b.push('nazwa pliku ' + path.basename(lista[0]));
+        const strony_ = (await PDFDocument.load(fs.readFileSync(lista[n]))).getPages();
+        if (strony_.length !== strony[n]) b.push(`plik ${n}: stron ${strony_.length}, oczekiwano ${strony[n]}`);
+        strony_.forEach((s, i) => {
+          const mb = s.getMediaBox(), tb = s.getTrimBox(), bb = s.getBleedBox(), cb = s.getCropBox();
+          if (!(bliskie(mb.x, 0) && bliskie(mb.y, 0) && bliskie(mb.width, W) && bliskie(mb.height, H))) b.push(`plik ${n} str. ${i + 1}: MediaBox ${[mb.x, mb.y, mb.width, mb.height].map((x) => x.toFixed(2))}`);
+          for (const [nz, x] of [['BleedBox', bb], ['CropBox', cb]]) if (!(bliskie(x.x, mb.x) && bliskie(x.y, mb.y) && bliskie(x.width, mb.width) && bliskie(x.height, mb.height))) b.push(`plik ${n} str. ${i + 1}: ${nz} ≠ MediaBox`);
+          const l = tb.x, d = tb.y, p = W - tb.x - tb.width, g = H - tb.y - tb.height, min = spad * MMpt - 0.01;
+          if (!(bliskie(l, p) && bliskie(d, g)) || Math.min(l, p, d, g) < min) b.push(`plik ${n} str. ${i + 1}: TrimBox ${[l, p, d, g].map((x) => x.toFixed(2))} (marginesy)`);
+          if (bliskie(l, spad * MMpt) && bliskie(d, spad * MMpt)) przySpadzie++;
+          const c = wPlanie[n][i] && wPlanie[n][i].ciecie;       // zgodność z planem: [x, y, w, h] od lewego górnego rogu
+          if (!c || !bliskie(tb.x, c[0] * MMpt) || !bliskie(tb.width, c[2] * MMpt) || !bliskie(tb.height, c[3] * MMpt) || !bliskie(tb.y, H - (c[1] + c[3]) * MMpt)) b.push(`plik ${n} str. ${i + 1}: TrimBox ≠ ciecie z planu`);
+        });
+      }
+      if (!przySpadzie) b.push('żadna strona nie ma TrimBox = MediaBox − spad (karta największego rozmiaru)');
+      bledy.push(...b.map((x) => nazwa + ': ' + x));
+      return { nazwa, pliki: lista.map((p) => path.basename(p)), strony, szer: szerMm, wys: wysMm, bledy: b };
+    };
+    const osobnoStrony = !o.zRewersem ? [o.karty] : (o.wyglady === 1 && o.zRewersem === o.karty ? [o.karty + 1] : [o.karty, o.karty]);
+    drukarniaPdf = { oczekiwanie: o };
+    drukarniaPdf.osobno = await przebieg('osobno', { spad: 3, strony: 'osobno' }, 3, osobnoStrony, o.szer + 6, o.wys + 6);
+    drukarniaPdf.naprzemian = await przebieg('naprzemian', { spad: 2, strony: 'naprzemian' }, 2, [o.karty + o.zRewersem], o.szer + 4, o.wys + 4);
+    drukarniaPdf.bezRewersow = await przebieg('bez-rewersow', { spad: 3, strony: 'osobno', rewersy: false }, 3, [o.karty], o.szer + 6, o.wys + 6);
+    // d) okno Druk i PDF: domyślnie spad 3 i strony „osobno”; zapamiętany spad 2,5 jako trzecia pozycja.
+    drukarniaPdf.okno = await js(`(async () => {
+      const przed = USTAWIENIA_OKIEN.druk, f = () => document.getElementById('oknoForm');
+      const stan = async (ust) => {
+        if (ust) USTAWIENIA_OKIEN.druk = ust; else delete USTAWIENIA_OKIEN.druk;
+        const p = otworzOkno('druk');
+        const r = { spady: [...f().querySelectorAll('[name=spad]')].map((x) => x.value), spad: (f().querySelector('[name=spad]:checked') || {}).value,
+          strony: [...f().querySelectorAll('[name=strony]')].map((x) => x.value), stronyWybrane: (f().querySelector('[name=strony]:checked') || {}).value };
+        document.getElementById('okno').dispatchEvent(new Event('cancel')); await p;
+        return r;
+      };
+      try { return { domyslnie: await stan(null), zapamietane: await stan({ spad: 2.5 }) }; }
+      finally { if (przed) USTAWIENIA_OKIEN.druk = przed; else delete USTAWIENIA_OKIEN.druk; }
+    })()`);
+    const ow = drukarniaPdf.okno;
+    drukarniaPdf.okno.ok = ow.domyslnie.spad === '3' && ow.domyslnie.spady.join() === '3,2' && ow.domyslnie.strony.join() === 'osobno,naprzemian' && ow.domyslnie.stronyWybrane === 'osobno'
+      && ow.zapamietane.spad === '2.5' && ow.zapamietane.spady.length === 3 && ow.zapamietane.spady.includes('2.5');
+    if (!ow.ok) bledy.push('okno: ' + JSON.stringify(ow));
+    // e) raport drukarni: sekcje tylko z drukarnia: true.
+    const sekcje = await js(`(async () => ({ z: (await raportJson({ drukarnia: true })).map((x) => x.tytul), bez: (await raportJson({})).map((x) => x.tytul) }))()`);
+    drukarniaPdf.raport = { z: sekcje.z.filter((t) => t.startsWith('Drukarnia:')).length, pierwsze: sekcje.z.slice(0, 3).every((t) => t.startsWith('Drukarnia:')), bez: sekcje.bez.filter((t) => t.startsWith('Drukarnia:')).length };
+    drukarniaPdf.raport.ok = drukarniaPdf.raport.z === 3 && drukarniaPdf.raport.pierwsze && drukarniaPdf.raport.bez === 0;
+    if (!drukarniaPdf.raport.ok) bledy.push('raport: ' + JSON.stringify(drukarniaPdf.raport));
+    // Zmiana szablonu (tylko testowa kopia): tekst 1 mm od krawędzi, kolor „prawie czerń” – w pierwszej talii, przed jej [REWERS].
+    if (!jestPrzykladem(szablon)) {
+      const oryginal = fs.readFileSync(szablon, 'utf8');
+      const edytorByl = !(await js("document.getElementById('edytor').hidden"));
+      const wpisz = (t) => js(`(() => { const p = document.getElementById('edPole'); p.value = ${JSON.stringify(t)}; p.dispatchEvent(new Event('input')); })()`);
+      const talia = await js("document.querySelector('#podglad .talia').dataset.talia");
+      const start = Math.max(0, oryginal.search(/^\[TALIA\b/mi));
+      const nast = oryginal.slice(start + 1).search(/^\[TALIA\b/mi);
+      const koniec = nast < 0 ? oryginal.length : start + 1 + nast;
+      const wBloku = oryginal.slice(start, koniec).search(/^\[REWERS\]/mi);
+      const miejsce = wBloku < 0 ? koniec : start + wBloku;
+      const dopisek = '\nTEKST = 1, 1, 40, 8, "Próba drukarni", rozmiar=10, kolor=#2a1a3a\n';
+      await js('przelaczEdytor(true)');
+      await wpisz(oryginal.slice(0, miejsce) + dopisek + oryginal.slice(miejsce)); await czekaj(3500);
+      const z = await js('raportDrukarni()');
+      await wpisz(oryginal); await czekaj(3500);
+      const po = await js('raportDrukarni()');
+      if (!edytorByl) await js('przelaczEdytor(false)');
+      const probaOdstep = (r) => r.odstep.filter((x) => x.tekst === 'Próba drukarni');
+      drukarniaPdf.szablon = { talia,
+        zmiana: { odstep: z.odstep.filter((x) => x.talia === talia).map((x) => x.odstep).slice(0, 3), czern: z.czern.map((x) => x.kolor) },
+        po: { odstepProba: probaOdstep(po).length, czern: po.czern.map((x) => x.kolor) } };
+      drukarniaPdf.szablon.ok = z.odstep.some((x) => x.talia === talia && x.odstep >= 0.8 && x.odstep <= 1.6) && z.czern.some((x) => x.kolor.toLowerCase() === '#2a1a3a')
+        && !po.czern.some((x) => x.kolor.toLowerCase() === '#2a1a3a') && !probaOdstep(po).some((x) => x.odstep < 1.6);
+      if (!drukarniaPdf.szablon.ok) bledy.push('szablon: ' + JSON.stringify(drukarniaPdf.szablon));
+    }
+    fs.rmSync(tmp, { recursive: true, force: true });
+    drukarniaPdf.bledy = bledy;
+    drukarniaPdf.ok = !bledy.length;
   }
   // Katalog (--test-edytor, poza przykładami): A – Export/katalog; B – zlecenie z pliku → wynik.json.
   let katalog = null;
@@ -1360,6 +1472,35 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       holdery: pcio.holdery, ostrzezenia: pcio.ostrzezenia, zip: opisPcio(pcio.pliki && widgetsPcio(pcio.pliki[0])), oczek };
     const pcioId = await zlec('pcio', `id = ${pierwsza.id}\n`);
     z.pcioId = pcioId && { ok: pcioId.ok, karty: pcioId.karty, ostrzezenia: pcioId.ostrzezenia, zip: opisPcio(pcioId.pliki && widgetsPcio(pcioId.pliki[0])) };
+    // Drukarnia (issue #66): PDF z układem drukarnia (osobno / na przemian), błędna wartość „strony”, raport z sekcjami drukarni.
+    {
+      const { PDFDocument } = require(path.join(ZASOBY, 'vendor', 'pdf-lib.min.js'));
+      const stronyPliku = async (pliki) => { const a = []; for (const p of pliki || []) a.push((await PDFDocument.load(fs.readFileSync(path.join(projekt, p)))).getPageCount()); return a; };
+      const dr = {};
+      const d1 = await zlec('pdf', 'uklad = drukarnia\nplik = Export/drukarnia.pdf\n');
+      dr.osobno = d1 && { ok: d1.ok, pliki: d1.pliki, stronyPlikow: d1.stronyPlikow, spad: d1.spad, strona: d1.strona, blad: d1.blad };
+      if (dr.osobno && d1.ok) dr.osobno.naDysku = await stronyPliku(d1.pliki);
+      dr.osobno.ok = !!(d1 && d1.ok && [1, 2].includes(d1.pliki.length) && d1.pliki.every((p) => fs.existsSync(path.join(projekt, p)))
+        && (d1.pliki.length === 1 || (d1.pliki[0].endsWith(' – awersy.pdf') && d1.pliki[1].endsWith(' – rewersy.pdf')))
+        && Array.isArray(d1.stronyPlikow) && d1.stronyPlikow.join() === dr.osobno.naDysku.join() && d1.spad === 3 && d1.strona && d1.strona.length === 2);
+      const d2 = await zlec('pdf', 'uklad = drukarnia\nstrony = na przemian\nspad = 2\nplik = Export/przemian.pdf\n');
+      dr.naprzemian = d2 && { ok: d2.ok, pliki: d2.pliki, stronyPlikow: d2.stronyPlikow, spad: d2.spad, blad: d2.blad };
+      if (d2 && d2.ok) dr.naprzemian.naDysku = await stronyPliku(d2.pliki);
+      dr.naprzemian.ok = !!(d2 && d2.ok && d2.pliki.length === 1 && fs.existsSync(path.join(projekt, d2.pliki[0])) && d2.spad === 2
+        && Array.isArray(d2.stronyPlikow) && d2.stronyPlikow.join() === dr.naprzemian.naDysku.join());
+      const d3 = await zlec('pdf', 'uklad = drukarnia\nstrony = bokiem\nplik = Export/bokiem.pdf\n');
+      dr.bokiem = d3 && { ok: d3.ok, blad: d3.blad, plik: fs.existsSync(path.join(projekt, 'Export', 'bokiem.pdf')) };
+      dr.bokiem.ok = !!(d3 && d3.ok === false && /strony/i.test(d3.blad || '') && !dr.bokiem.plik);
+      const r1 = await zlec('raport', 'drukarnia = tak\n');
+      dr.raportTak = r1 && { ok: r1.ok, sekcje: (r1.raport || []).map((x) => x.tytul).filter((t) => t.startsWith('Drukarnia:')).length,
+        pola: r1.drukarnia ? ['odstep', 'czern', 'krawedz'].map((k) => Array.isArray(r1.drukarnia[k])) : null };
+      dr.raportTak.ok = !!(r1 && r1.ok && dr.raportTak.sekcje === 3 && dr.raportTak.pola && dr.raportTak.pola.every(Boolean));
+      const r2 = await zlec('raport');
+      dr.raportBez = r2 && { ok: r2.ok, sekcje: (r2.raport || []).map((x) => x.tytul).filter((t) => t.startsWith('Drukarnia:')).length, wynikDrukarnia: 'drukarnia' in r2 };
+      dr.raportBez.ok = !!(r2 && r2.ok && dr.raportBez.sekcje === 0 && !dr.raportBez.wynikDrukarnia);
+      dr.ok = ['osobno', 'naprzemian', 'bokiem', 'raportTak', 'raportBez'].every((k) => dr[k] && dr[k].ok);
+      z.drukarnia = dr;
+    }
     // Niezapisany edytor: zmiana tytułu kart w edytorze; zlecenie widzi wersję z dysku, edytor zostaje bez zmian.
     const nazwaKarty = await js("document.querySelector('#podglad .karta:not(.rewers)').title");
     await js("(() => { const p = document.getElementById('edPole'); p.value = p.value.replace(/^PROJEKT(\\s*)=(\\s*)/m, 'PROJEKT$1=$2ZMIANA ') + '\\n; zmiana z testu\\n'; p.dispatchEvent(new Event('input')); })()");
@@ -1398,6 +1539,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       && (z.pcio.ostrzezenia || []).some((x) => x.includes('Nie ma takiej'))
       && z.pcioId && z.pcioId.ok && !(z.pcioId.ostrzezenia || []).length && z.pcioId.zip && z.pcioId.zip.karty === z.pcio.oczek.zId && z.pcioId.zip.holdery.length === z.pcio.oczek.taliiZId
       && z.edytor && z.edytor.niezapisane && !/ZMIANA/.test(z.edytor.projekt) && /ZMIANA/.test(z.edytor.projektEd) && /ZMIANA/.test(z.edytor.poZleceniu.projekt) && z.edytor.poZleceniu.zmiany && z.edytor.poZleceniu.tekst
+      && z.drukarnia && z.drukarnia.ok
       && z.ustawieniaBezZmian && !z.pozostale.length
       && !/ZDYSKU/.test(z.zDysku.przedZleceniem) && /ZDYSKU/.test(z.zDysku.wZleceniu) && !/ZDYSKU/.test(z.zDysku.poPrzywroceniu));
     z.nazwaKarty = nazwaKarty;
@@ -1491,9 +1633,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     && Menu.getApplicationMenu().items[0].submenu.items.some((i) => i.label === 'Sprawdź aktualizacje…');
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
-    && (!drukarnia || drukarnia.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
+    && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, katalog, zlecenia, aktualizacja, podfolder, formatowanie, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, katalog, zlecenia, aktualizacja, podfolder, formatowanie, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

@@ -20,6 +20,7 @@ kopiuj(path.join(APP, 'szablon-startowy'), path.join(CEL, 'szablon-startowy'));
 kopiuj(path.join(NM, 'html-to-image/dist/html-to-image.js'), path.join(CEL, 'vendor/html-to-image.js'));
 kopiuj(path.join(NM, 'jszip/dist/jszip.min.js'), path.join(CEL, 'vendor/jszip.min.js'));
 kopiuj(path.join(NM, 'xlsx/dist/xlsx.full.min.js'), path.join(CEL, 'vendor/xlsx.full.min.js'));
+kopiuj(path.join(NM, 'pdf-lib/dist/pdf-lib.min.js'), path.join(CEL, 'vendor/pdf-lib.min.js'));   // PDF dla drukarni (main, drukarnia.js)
 
 // Czcionki wbudowane w generator: EB Garamond (400, 600, 400 kursywa) i Patrick Hand (400).
 const czcionki = [
