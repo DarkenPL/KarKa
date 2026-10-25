@@ -271,3 +271,36 @@ Przykład – złota ramka tylko dla rzadkich kart:
 ```
 PROSTOKĄT = 1.5, 1.5, 60, 85, kolor=brak, obwódka=1.2, kolor_obwódki=#C9A227, jeśli=[Rzadka]=tak
 ```
+
+### Pusta kolumna
+
+| Zapis | Element rysowany, gdy… |
+|---|---|
+| `jeśli=[Dopisek]=` | kolumna jest pusta (same spacje też się liczą jako pusta) |
+| `jeśli=[Dopisek]!=` | kolumna nie jest pusta (to samo co `jeśli=[Dopisek]`) |
+
+### Kilka warunków – `&` (i) oraz `|` (lub)
+
+Warunki łączysz znakami `&` i `|`, **bez nawiasów**. `&` wiąże mocniej niż `|`, więc `A | B & C` znaczy „A albo (B i C)”.
+
+| Zapis | Element rysowany, gdy… |
+|---|---|
+| `jeśli=[Typ]=burza & [Rzadka]=tak` | oba warunki są spełnione |
+| `jeśli=[Typ]=burza \| [Typ]=wichura` | spełniony jest którykolwiek |
+| `jeśli=[Rzadka]=tak \| [Typ]=burza & [Plon]>=5` | rzadka, albo burza z plonem co najmniej 5 |
+| `jeśli=[Dopisek]= & [Układ]!=portret` | dopisek pusty i układ inny niż „portret” |
+
+(W tabeli `\|` to zwykły znak `|` – w szablonie piszesz go bez ukośnika.) Spacje wokół `&` i `|` są dowolne. Znaki `&` i `|` w *danych* nie mają znaczenia – dzielony jest tylko zapis w szablonie.
+
+### Porównania liczb – `>`, `<`, `>=`, `<=`
+
+`jeśli=[Plon]>=5`, `jeśli=[Waga]<[Limit]`, `jeśli=[Koszt]>2.5` – obie strony muszą być liczbami (w danych może być przecinek dziesiętny: `2,5` = `2.5`; w szablonie piszesz kropkę, bo przecinek rozdziela argumenty). `=` i `!=` działają jak dotąd (bez względu na wielkość liter, `001` = `1`).
+
+Gdy któraś strona nie jest liczbą (np. `dużo`), warunek jest fałszywy, a w Uwagach pojawia się komunikat z numerem wiersza szablonu i kartą. Pusta komórka też daje fałsz, ale bez Uwagi (karty bez wartości są zwyczajne).
+
+Przykład z `przyklady/03-ogrod`:
+
+```
+TEKST = 6, 60, 51, 9, "Bez wymagań", jeśli=[Lubi]=
+TEKST = 6, 70, 26, 12, "Rekord plonu!", jeśli=[Grządka]=grzyby | [Plon]>=7 & [Lubi]=
+```
