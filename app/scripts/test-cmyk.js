@@ -61,6 +61,8 @@ function znajdzIcc(rodzaj, gsSciezka) {
   if (env && rodzaj === 'cmyk') return fs.existsSync(env) ? env : null;
   if (env) foldery.push(path.dirname(env));
   foldery.push(...folderyIcc(gsSciezka));
+  // Ghostscript z wkompilowanymi zasobami (%rom%, Homebrew) – profile wypakowane przez cmyk.katalogIccGs.
+  if (gsSciezka) { const g = cmyk.znajdzGs({ kandydaci: [gsSciezka] }); const k = g.ok && cmyk.katalogIccGs(g); if (k) foldery.push(k); }
   for (const d of foldery) for (const n of nazwy) if (fs.existsSync(path.join(d, n))) return path.join(d, n);
   return null;
 }
@@ -165,6 +167,17 @@ const plan = (pliki, plikiStron) => ({ uklad: 'drukarnia', szer: 69, wys: 94, sp
     }
     profilGotowy = true;
     return iccCmyk;
+  });
+  await krok('katalog profili Ghostscripta (dysk albo wypakowany z %rom%)', () => {
+    if (!gsPrawdziwy) return 'pominięto – brak gs';
+    const k = cmyk.katalogIccGs({ ...gsPrawdziwy });
+    assert.ok(k, 'nie znaleziono ani nie wypakowano iccprofiles');
+    for (const f of ['default_cmyk.icc', 'default_gray.icc', 'default_rgb.icc']) assert.ok(fs.existsSync(path.join(k, f)), f);
+    // Wypakowanie Ghostscriptem (ta sama droga co %rom%) z katalogu na dysku – ścieżka ze spacją i polskim znakiem.
+    const cel = path.join(T, 'wypakowane ą');
+    cmyk.wypakujProfileGs(gsPrawdziwy, k.replace(/\/?$/, '/'), cel);
+    assert.ok(fs.readFileSync(path.join(cel, 'default_cmyk.icc')).equals(fs.readFileSync(path.join(k, 'default_cmyk.icc'))));
+    return k;
   });
   const tekstowy = path.join(T, 'x.txt');
   fs.writeFileSync(tekstowy, 'to nie jest profil\n'.repeat(20));

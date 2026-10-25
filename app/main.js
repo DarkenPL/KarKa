@@ -1485,6 +1485,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         if (!baza) continue;
         try { for (const w of fs.readdirSync(path.join(baza, 'share', 'ghostscript'))) kandydaci.push(path.join(baza, 'share', 'ghostscript', w, 'iccprofiles', 'default_cmyk.icc')); } catch (e) { /* brak */ }
       }
+      const katalog = gs.ok && cmyk.katalogIccGs(gs);   // także profile wypakowane z %rom% (Homebrew)
+      if (katalog) kandydaci.push(path.join(katalog, 'default_cmyk.icc'));
       return kandydaci.filter(Boolean).find((p) => { try { cmyk.sprawdzPlikIcc(p); return true; } catch (e) { return false; } }) || null;
     };
     const icc = gs.ok ? szukajIcc() : null;

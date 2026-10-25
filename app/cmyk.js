@@ -66,19 +66,53 @@ function argumentyGs(wejscie, wyjscie, katalogIcc) {
     `-sOutputFile=${wyjscie}`, wejscie];
 }
 
-// Katalog profili Ghostscripta (iccprofiles – obok Resource/ z listy „Search path” w gs -h; Homebrew, Debian).
+// Katalog profili Ghostscripta (iccprofiles). Na dysku: obok Resource/ z listy „Search path” w gs -h (Debian),
+// share/ghostscript/<wersja>/iccprofiles. Ghostscript z wkompilowanymi zasobami (%rom%, np. Homebrew) nie ma ich
+// na dysku – wtedy wypakowuje je sam Ghostscript (wypakujProfileGs) do katalogu tymczasowego (raz na uruchomienie).
 const PROFILE_GS = ['default_cmyk.icc', 'default_gray.icc', 'default_rgb.icc'];
+const maKomplet = (k) => PROFILE_GS.every((f) => fs.existsSync(path.join(k, f)));
 function katalogIccGs(gs) {
-  if (gs.katalogIcc !== undefined) return gs.katalogIcc;
+  if (gs.katalogIcc && maKomplet(gs.katalogIcc)) return gs.katalogIcc;
   const kandydaci = [];
   const r = spawnSync(gs.sciezka, ['-h'], { encoding: 'utf8', timeout: 10000 });
-  for (const m of String(r.stdout || '').matchAll(/(\/[^\s:]*?)\/Resource\/Init\b/g)) kandydaci.push(path.join(m[1], 'iccprofiles'));
-  const prefiks = path.dirname(path.dirname(fs.realpathSync(gs.sciezka)));
-  const share = path.join(prefiks, 'share', 'ghostscript');
-  try { for (const n of fs.readdirSync(share)) kandydaci.push(path.join(share, n, 'iccprofiles')); } catch (e) { /* brak */ }
-  kandydaci.push(path.join(share, 'iccprofiles'), '/usr/share/color/icc/ghostscript');
-  gs.katalogIcc = kandydaci.find((k) => PROFILE_GS.every((f) => fs.existsSync(path.join(k, f)))) || null;
-  return gs.katalogIcc;
+  const pomoc = String(r.stdout || '');
+  for (const m of pomoc.matchAll(/(\/[^\s:]*?)\/Resource\/Init\b/g)) kandydaci.push(path.join(m[1], 'iccprofiles'));
+  let prefiks = null;
+  try { prefiks = path.dirname(path.dirname(fs.realpathSync(gs.sciezka))); } catch (e) { /* brak */ }
+  if (prefiks) {
+    const share = path.join(prefiks, 'share', 'ghostscript');
+    try { for (const n of fs.readdirSync(share)) kandydaci.push(path.join(share, n, 'iccprofiles')); } catch (e) { /* brak */ }
+    kandydaci.push(path.join(share, 'iccprofiles'));
+  }
+  kandydaci.push('/usr/share/color/icc/ghostscript');
+  let katalog = kandydaci.find(maKomplet) || null;
+  if (!katalog && /%rom%/.test(pomoc)) {
+    const cel = path.join(os.tmpdir(), `karka-gs-icc-${String(gs.wersja || '').replace(/[^\w.]/g, '')}-${process.pid}`);
+    try { wypakujProfileGs(gs, '%rom%iccprofiles/', cel); if (maKomplet(cel)) katalog = cel; } catch (e) { /* katalog = null → czytelny błąd niżej */ }
+  }
+  gs.katalogIcc = katalog;
+  return katalog;
+}
+// Kopiuje Ghostscriptem wszystkie pliki <zrodlo>* (np. %rom%iccprofiles/) do katalogu cel (PostScript: filenameforall).
+function wypakujProfileGs(gs, zrodlo, cel) {
+  fs.mkdirSync(cel, { recursive: true });
+  const ps = (t) => '(' + String(t).replace(/[\\()]/g, (z) => '\\' + z) + ')';
+  const program = `/dest ${ps(cel.replace(/\/?$/, '/'))} def /n ${zrodlo.length} def /buf 65536 string def
+${ps(zrodlo + '*')} {
+  dup length string copy /src exch def
+  /nazwa src n src length n sub getinterval def
+  /d dest length nazwa length add string def d 0 dest putinterval d dest length nazwa putinterval
+  /we src (r) file def /wy d (w) file def
+  { we buf readstring exch wy exch writestring not { exit } if } loop
+  we closefile wy closefile
+} 1024 string filenameforall`;
+  const plik = path.join(cel, '.wypakuj.ps');
+  fs.writeFileSync(plik, program);
+  try {
+    const r = spawnSync(gs.sciezka, ['-q', '-dNODISPLAY', '-dNOSAFER', '-dBATCH', '-dNOPAUSE', plik], { encoding: 'utf8', timeout: 30000 });
+    if (r.status !== 0) throw new Error(`wypakowanie profili Ghostscripta: ${opisBleduGs(String(r.stdout) + r.stderr)}`);
+  } finally { fs.rmSync(plik, { force: true }); }
+  return cel;
 }
 // Kopia katalogu profili Ghostscripta z profilem drukarni jako default_cmyk.icc (gs potrzebuje kompletu profili).
 function katalogZProfilem(gs, profil, cel) {
@@ -398,4 +432,4 @@ async function konwertujBufor(buf, { gs, profil, sygnal, PDFLib, po } = {}) {
 
 module.exports = { PROFILE, DOMYSLNY, PODPOWIEDZ_GS, MIN_WERSJA_GS, znajdzGs, argumentyGs, konwertuj, opisBleduGs,
   sprawdzPlikIcc, profilLokalny, pobierzProfil, rozwiazProfil, adresPaczki, czyKlucz, sprawdzPdf, konwertujBufor, sha256,
-  czernK100, grupyCmyk, katalogIccGs, sprawdzProfilGs };
+  czernK100, grupyCmyk, katalogIccGs, wypakujProfileGs, sprawdzProfilGs };
