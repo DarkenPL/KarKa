@@ -1973,6 +1973,82 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-jesli.png', (await wc.capturePage(jesli.rect)).toPNG());
     await wc.executeJavaScript("document.getElementById('test-jesli').remove()");
   }
+  // Mieszane rozmiary w polu TEKST (issue #71 a, --test-edytor, bez zmian w plikach projektu):
+  // <small> 0,6, <big> 1,4, <rozmiar=N> w pt względem pola; całość skaluje się razem w fitAll (także z grupa=).
+  let rozmiary = null;
+  if (process.argv.includes('--test-edytor')) {
+    rozmiary = await wc.executeJavaScript(`(() => {
+      const wyniki = {};
+      const spr = (nazwa, warunek) => { wyniki[nazwa] = !!warunek; };
+      const d = document.createElement('div');
+      d.id = 'test-rozmiary';
+      d.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;background:#fff;padding:8px;display:flex;gap:8px';
+      document.body.appendChild(d);
+      const karta = (linie, row, naglowek) => {
+        const t = parseTemplate('[TALIA Test]\\n' + (naglowek || 'KARTA = 63, 88, zaokrąglenie=3\\nTŁO = #f4ecd8\\n') + linie + '\\n', 'test.txt').talie[0];
+        const warn = new Set(), fmt = new Set();
+        const r = renderCard(t, t.awers, row || {}, { warn, icons: RAPORT.icons, label: 'Test 1', plik: 'test.txt', kolumny: true, formatowanie: fmt, wbudowane: {} });
+        const k = document.createElement('div');
+        k.className = 'karta'; k.dataset.talia = 'Test'; k.title = 'rozmiary'; k.style.cssText = r.style;
+        k.innerHTML = r.html;
+        d.appendChild(k);
+        return { k, uwagi: [...warn], fmt: [...fmt], html: r.html };
+      };
+      const px = (el) => parseFloat(getComputedStyle(el).fontSize);
+      const blisko = (a, b, tol = 0.01) => Math.abs(a - b) <= tol;
+      // 1. stosunki rozmiarów (pole 20 pt), pion=środek
+      const a = karta('TEKST = 4, 4, 55, 40, "Efekt główny <small>(dopisek)</small> <big>Duży</big> <rozmiar=12>dwanaście</rozmiar> <big><small>razem</small></big> <big><rozmiar=10,5>pt</rozmiar></big>", rozmiar=20, wyrównanie=środek, pion=środek');
+      fitAll(d);
+      const pa = a.k.querySelector('.el.tekst'), P = px(pa);
+      const sm = a.k.querySelector('.tresc > small'), bg = a.k.querySelector('.tresc > big'), rz = a.k.querySelector('.tresc > .rozmiar');
+      const zag = a.k.querySelector('big > small'), rzb = a.k.querySelector('big > .rozmiar');
+      spr('bezZmniejszania', blisko(P, 20 * 96 / 72, 0.05) && !a.k.classList.contains('za-dlugi'));
+      spr('small', !!sm && blisko(px(sm) / P, 0.6));
+      spr('big', !!bg && blisko(px(bg) / P, 1.4));
+      spr('rozmiarPt', !!rz && blisko(px(rz), 12 * 96 / 72, 0.05));
+      spr('zagniezdzone', !!zag && blisko(px(zag) / P, 0.84));
+      spr('rozmiarWBig', !!rzb && blisko(px(rzb), 10.5 * 96 / 72, 0.05));
+      spr('bezUwag', !a.uwagi.length);
+      const er = pa.getBoundingClientRect(), tr = pa.firstElementChild.getBoundingClientRect();
+      spr('pionSrodek', Math.abs((er.top + er.bottom) / 2 - (tr.top + tr.bottom) / 2) < 1.5 && tr.height < er.height - 10);
+      // 2. za długi tekst: całość zmniejsza się, stosunki zostają
+      const b = karta('TEKST = 4, 4, 55, 14, "Bardzo długi efekt, który się nie mieści w polu, więc musi się zmniejszyć <small>(dopisek, który też się zmniejsza)</small> <big>Duży</big> <rozmiar=12>dwanaście</rozmiar>", rozmiar=20, min=0.3');
+      fitAll(d);
+      const pb = b.k.querySelector('.el.tekst'), Pb = px(pb);
+      const ratio = (sel) => px(b.k.querySelector(sel)) / Pb;
+      spr('zmniejszone', Pb < 20 * 96 / 72 * 0.9 && !b.k.classList.contains('za-dlugi'));
+      spr('zmniejszoneStosunki', blisko(ratio('.tresc > small'), 0.6) && blisko(ratio('.tresc > big'), 1.4) && blisko(ratio('.tresc > .rozmiar'), 0.6));
+      // 3. grupa=: dwa pola skalują się razem, fragmenty zachowują stosunki
+      const g = karta('TEKST = 4, 4, 26, 12, "Koszt <small>(za sztukę i jeszcze trochę tekstu)</small>", rozmiar=16, grupa=g\\nTEKST = 33, 4, 26, 12, "<big>Punkty</big>", rozmiar=16, grupa=g');
+      fitAll(d);
+      const [g1, g2] = g.k.querySelectorAll('.el.tekst');
+      spr('grupa', blisko(px(g1), px(g2), 0.05) && px(g1) < 16 * 96 / 72 && blisko(px(g1.querySelector('small')) / px(g1), 0.6) && blisko(px(g2.querySelector('big')) / px(g2), 1.4));
+      // 4. dane, niedomknięty znacznik, bez_formatowania, zły rozmiar
+      const c = karta('TEKST = 4, 4, 55, 20, "[A]", rozmiar=14\\nTEKST = 4, 26, 55, 20, "[A]", rozmiar=14, bez_formatowania\\nTEKST = 4, 50, 55, 20, "x <rozmiar=abc>y</rozmiar>", rozmiar=14', { A: 'Efekt <small>(dopisek' });
+      const [c1, c2, c3] = [...c.k.querySelectorAll('.el.tekst .tresc')];
+      spr('daneNiedomkniete', /<small>\\(dopisek<\\/small>$/.test(c1.innerHTML) && c.uwagi.some((w) => /Test 1 \\(kolumna \\[A\\]\\): niedomknięty znacznik <small>/.test(w)) && c.fmt.includes('Test 1 – [A]'));
+      spr('bezFormatowania', !c2.querySelector('small') && c2.innerHTML.includes('&lt;small&gt;(dopisek'));
+      spr('zlyRozmiar', !c3.querySelector('.rozmiar') && c3.innerHTML.includes('&lt;rozmiar=abc&gt;') && c.uwagi.some((w) => /<rozmiar=abc> – potrzebny rozmiar/.test(w)));
+      d.removeChild(g.k); d.removeChild(c.k);
+      // 5. raport drukarni: obwiednia glifów liczona osobno dla fragmentów o różnym rozmiarze
+      const o = karta('TEKST = 4, 4, 55, 20, "MMM", rozmiar=20\\nTEKST = 4, 30, 55, 20, "<small>MMM</small>", rozmiar=20\\nTEKST = 4, 56, 55, 20, "<rozmiar=12>MMM</rozmiar>", rozmiar=20');
+      fitAll(d);
+      const [o1, o2, o3] = [...o.k.querySelectorAll('.el.tekst')].map(obwiedniaGlifow).map((x) => x.y2 - x.y1);
+      spr('obwiednia', blisko(o2 / o1, 0.6, 0.06) && blisko(o3 / o1, 0.6, 0.06));
+      d.removeChild(o.k);
+      // 6. zgodność: pole bez nowych znaczników – HTML jak w 0.5.14
+      const z = karta('TEKST = 1, 2, 30, 10, "<b>A</b> <i>b</i>", rozmiar=9, pion=środek', {}, 'KARTA = 63, 44\\n');
+      spr('zgodnosc', z.html === '<div class="el tekst" style="left:1mm;top:2mm;width:30mm;height:10mm;;font-size:9pt;line-height:1.15;text-align:left;justify-content:center" data-pt="9"><div class="tresc"><b>A</b> <i>b</i></div></div>');
+      d.removeChild(z.k);
+      const ok = Object.values(wyniki).every(Boolean);
+      const rect = d.getBoundingClientRect();
+      return { ok, wyniki, html: pa.innerHTML.slice(0, 500), uwagi: [...a.uwagi, ...c.uwagi], obwiednia: [o1, o2, o3], zgodnosc: z.html,
+        rect: { x: 0, y: 0, width: Math.ceil(rect.width), height: Math.ceil(rect.height) } };
+    })()`);
+    await wc.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))');
+    fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-rozmiary.png', (await wc.capturePage(rozmiary.rect)).toPNG());
+    await wc.executeJavaScript("document.getElementById('test-rozmiary').remove()");
+  }
   await wc.executeJavaScript('buildPrint()');
   await pdfDoPliku(wc, wynik);
   // Menu aplikacji: własne (polskie), a nie domyślne Electrona.
@@ -1983,8 +2059,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
     && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
+  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

@@ -166,11 +166,16 @@ W tekście szablonu i w komórkach danych (CSV/XLSX) działają:
 | `<i>…</i>`, `<em>…</em>` | kursywa | tak | tak |
 | `<u>…</u>` | podkreślenie | tak | tak |
 | `<s>…</s>`, `<del>…</del>`, `<strike>…</strike>` | przekreślenie | tak | tak |
+| `<small>…</small>` | mniejszy tekst – 0,6 rozmiaru otoczenia | tak | tak |
+| `<big>…</big>` | większy tekst – 1,4 rozmiaru otoczenia | tak | tak |
+| `<rozmiar=12>…</rozmiar>` | tekst 12 pt (także `10,5`, `12pt`) | tak | tak |
 
 - Znaczniki piszemy **bez atrybutów** (`<b>`, nie `<b class="x">`), wielkość liter nie ma znaczenia (`<B>` = `<b>`). Każdy inny znacznik (`<img>`, `<br>`, `<span>`…) zostaje na karcie zwykłym tekstem.
 - W danych `**…**` i `~~…~~` muszą mieć parę w tej samej komórce. Pojedyncze `*` i `~` to zwykłe znaki.
 - Niedomknięty znacznik (`<b>` bez `</b>`) jest domykany na końcu pola – formatowanie nie przechodzi na inne elementy karty. W Uwagach pojawia się wpis z kartą i kolumną. Zamknięcie bez otwarcia (`</b>` bez `<b>`) zostaje tekstem (też z Uwagą).
 - Ikony działają wewnątrz znaczników: `<b>{moneta} 3</b>`.
+- **Rozmiary w jednym polu** (od 0.5.15): `<small>` i `<big>` liczą się od tekstu wokół, więc zagnieżdżone mnożą się (`<big><small>…</small></big>` = 0,84). `<rozmiar=12>` to zawsze 12 pt przy rozmiarze pola z `rozmiar=` – także wewnątrz `<big>`. Cała treść pola to jeden blok: `pion=środek` wyśrodkowuje razem efekt i dopisek, a wiersze z większym tekstem są odpowiednio wyższe. Ikony w mniejszym tekście też są mniejsze.
+- Gdy tekst się nie mieści, pole zmniejsza się **całe** (także w `grupa=`) – fragmenty zachowują proporcje: pole 20 pt z dopiskiem `<rozmiar=12>` zmniejszone do 15 pt ma dopisek 9 pt. `<rozmiar=…>` bez liczby (`<rozmiar>`, `<rozmiar=duży>`) zostaje tekstem z Uwagą.
 - Raport projektu ma sekcję **„Formatowanie z danych”** – listę kart i kolumn, w których dane zawierają formatowanie. Po aktualizacji z wersji 0.5.4 to właśnie te karty zmieniają wygląd (i pokażą się jako „zmienione od ostatniego PDF”); pozostałe karty wyglądają tak samo.
 - Flaga **`bez_formatowania`** w `TEKST` wyłącza formatowanie z danych w tym polu: gwiazdki, tyldy i znaczniki z komórek zostają zwykłym tekstem. Formatowanie zapisane w samym szablonie nadal działa.
 
@@ -187,7 +192,19 @@ TEKST = 4, 50, 55, 22, [Efekt], rozmiar=9
 TEKST = 4, 74, 55, 8, [Cytat], rozmiar=7, kursywa, bez_formatowania   ; gwiazdki z danych dosłownie
 ```
 
-Cały przykład: `przyklady/05-zaklecia` (kolumna `Opis` z każdym znacznikiem, kolumna `Cytat` z `bez_formatowania`).
+Efekt z dopiskiem w nawiasie, wyśrodkowane razem w jednej ramce:
+
+```
+; karty.csv
+ID;Efekt
+03;Dobierz 2 karty. <small>(Jeśli masz mniej niż 3 – dobierz 3.)</small>
+
+; szablon
+TEKST = 4, 50, 55, 22, [Efekt], rozmiar=20, wyrównanie=środek, pion=środek
+TEKST = 4, 74, 55, 8, "<big>Uwaga!</big> Reszta <rozmiar=8>drobnym drukiem</rozmiar>", rozmiar=10
+```
+
+Cały przykład: `przyklady/05-zaklecia` (kolumna `Opis` z każdym znacznikiem – karty 09 i 10 z `<small>`, `<big>` i `<rozmiar=6>`, kolumna `Cytat` z `bez_formatowania`).
 
 ![Formatowanie z danych – przed (0.5.4) i po (0.5.5)](img/formatowanie.jpg)
 
