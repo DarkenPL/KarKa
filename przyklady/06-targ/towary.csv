@@ -1,0 +1,5 @@
+ID;Ilość;Nazwa;Ilustracja;KadrX;KadrY;Skala;Odbicie;Z1;Z1x;Z1y;Z2;Z2x;Z2y;Z2odbicie;Z3;Z3x;Z3y;Z3krycie;Z3obrót;Mnożnik;MnożnikX;Opis
+1;2;Przyprawy;Ikony/przyprawy.svg;;;;;Ikony/zloto.svg;8;48;Ikony/drewno.svg;26;49;poziome;Ikony/kamien.svg;44;48;50%;30;x2;43;Trzy żetony: drugi odbity, trzeci półprzezroczysty i obrócony.
+2;2;Wielbłąd;Ikony/wielblad.svg;-4;3;115;poziome;Ikony/drewno.svg;12;49;Ikony/zloto.svg;40;49;;;;;;;;;Kadr: obraz powiększony do 115 % i przesunięty, odbity w poziomie.
+3;1;Amfory;Ikony/amfora.svg;0;-4;125;;Ikony/kamien.svg;26;48;;;;;;;;;;x3;6;Jeden żeton na środku, mnożnik po lewej.
+4;1;Daktyle;Ikony/palma.svg;;;;;;;;;;;;;;;;;;;Bez żetonów – puste pozycje, elementów nie ma.

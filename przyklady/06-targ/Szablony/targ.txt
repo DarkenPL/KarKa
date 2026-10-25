@@ -1,0 +1,44 @@
+; ═══════════════════════════════════════════════════════════════════
+;  PRZYKŁAD 6 – układ z danych: pozycja z kolumn, kadr, krycie, odbicie
+;  Każda karta ma żetony w innym miejscu – pozycje są w kolumnach
+;  Z1x, Z1y… Pusta pozycja = żetonu nie ma.
+; ═══════════════════════════════════════════════════════════════════
+
+PROJEKT = Targ                             ; nazwa gry w plikach JPG i PDF
+NAZWA = Towary
+DANE  = towary.csv
+KARTA = 63, 88, zaokrąglenie=3
+
+STAŁA = żeton, 11                          ; bok żetonu w mm
+
+CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#1d1b19
+
+; ── Awers ─────────────────────────────────────────────────────────
+TŁO       = #e9dcc0
+PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=#fffaf0, zaokrąglenie=3
+
+; Ilustracja w ramce: kadr = przesunięcie X i Y (mm) i skala (%) z danych.
+; Bez wartości w kolumnach obraz wypełnia ramkę (skala 100 %).
+PROSTOKĄT = 6, 6, 51, 40, kolor=#d8c7a4
+OBRAZEK   = 6, 6, 51, 40, [Ilustracja], kadr=[KadrX] [KadrY] [Skala], odbicie=[Odbicie]
+
+; Żetony: pozycje z kolumn, rozmiar ze stałej, krycie i obrót z danych.
+ELIPSA    = [Z1x], [Z1y], [=żeton], [=żeton], kolor=#fffaf0, obwódka=0.4, kolor_obwódki=#8a6d3b
+OBRAZEK   = [Z1x], [Z1y], [=żeton], [=żeton], [Z1]
+ELIPSA    = [Z2x], [Z2y], [=żeton], [=żeton], kolor=#fffaf0, obwódka=0.4, kolor_obwódki=#8a6d3b
+OBRAZEK   = [Z2x], [Z2y], [=żeton], [=żeton], [Z2], odbicie=[Z2odbicie]
+ELIPSA    = [Z3x], [Z3y], [=żeton], [=żeton], kolor=#fffaf0, obwódka=0.4, kolor_obwódki=#8a6d3b, krycie=[Z3krycie]
+OBRAZEK   = [Z3x], [Z3y], [=żeton], [=żeton], [Z3], krycie=[Z3krycie], obrót=[Z3obrót]
+
+; Mnożnik tylko na niektórych kartach – w miejscu z danych.
+TEKST     = [MnożnikX], 8, 14, 9, [Mnożnik], rozmiar=18, pogrubienie, kolor=#ffffff, obrys=0.3, kolor_obrysu=#5a4632, wyrównanie=środek, pion=środek
+
+TEKST = 6, 62, 51, 9,  [Nazwa], czcionka="Patrick Hand, cursive", rozmiar=15, wyrównanie=środek, pion=środek
+TEKST = 6, 72, 51, 10, [Opis], rozmiar=8, kursywa, wyrównanie=środek
+
+; ── Rewers ────────────────────────────────────────────────────────
+[REWERS]
+TŁO       = #5a4632
+IKONA     = 0, 28, 63, 22, {kowadlo}, krycie=40%
+IKONA     = 0, 28, 63, 22, {kowadlo}, odbicie=poziome, krycie=40%
+TEKST     = 0, 53, 63, 13, "Targ", czcionka="Patrick Hand, cursive", rozmiar=26, kolor=#ffffff, wyrównanie=środek, pion=środek, interlinia=1

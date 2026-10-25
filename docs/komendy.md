@@ -10,7 +10,7 @@ KOMENDA = argument, argument, opcja=wartość, flaga
 
 - **Wymiary w milimetrach.** Punkt `(0, 0)` to lewy górny róg karty. Można liczyć: `88 - 1.6 - 10.35`. Ułamki zapisuje się z kropką: `3.5`.
 - **Rozmiar czcionki w punktach (pt).**
-- `[Kolumna]` wstawia wartość z pliku danych (CSV/XLSX), np. `[Nazwa]`.
+- `[Kolumna]` wstawia wartość z pliku danych (CSV/XLSX), np. `[Nazwa]`. W `OBRAZEK`, `IKONA`, `TEKST`, `PROSTOKĄT` i `ELIPSA` kolumna może też podawać położenie, rozmiar i obrót – patrz [Układ z danych](#układ-z-danych--pozycja-z-kolumn-kadr-krycie-odbicie).
 - `{znacznik}` wstawia ikonę z `ikony.csv` (patrz niżej). Działa też w danych.
 - `"tekst"` w cudzysłowie może zawierać przecinki. `\n` oznacza nową linię. Formatowanie tekstu (`**pogrubienie**`, `<i>kursywa</i>` i inne) – patrz [Formatowanie tekstu](#formatowanie-tekstu).
 - Komentarz zaczyna się od `;` albo `#` na początku linii. Komentarz na końcu linii zaczyna się od ` ;` (ze spacją przed średnikiem).
@@ -109,9 +109,10 @@ Opcje:
 - `obwódka` – grubość w mm,
 - `kolor_obwódki`,
 - `styl_obwódki` – `przerywana` albo `kropkowana` (domyślnie ciągła),
-- `krycie` – od 0 do 1,
+- `krycie` – od 0 do 1 (albo `50%`), może być z kolumny – [układ z danych](#układ-z-danych--pozycja-z-kolumn-kadr-krycie-odbicie),
 - `kolor` może być gradientem: `kolor=#000000 > #00000000, kierunek=90` (zanikający pasek),
-- `obrót` – jak niżej.
+- `obrót` – jak niżej,
+- `x`, `y`, szerokość i wysokość mogą być `[Kolumną]` albo `[=stałą]` – [układ z danych](#układ-z-danych--pozycja-z-kolumn-kadr-krycie-odbicie).
 
 ### `ELIPSA = x, y, szer, wys, kolor=…`
 Jak `PROSTOKĄT`, ale okrągła.
@@ -191,7 +192,7 @@ Cały przykład: `przyklady/05-zaklecia` (kolumna `Opis` z każdym znacznikiem, 
 ![Formatowanie z danych – przed (0.5.4) i po (0.5.5)](img/formatowanie.jpg)
 
 ### Obrót – `obrót=90`
-Opcja wszystkich elementów (`TEKST`, `OBRAZEK`, `IKONA`, `PROSTOKĄT`, `ELIPSA`): obrót w stopniach zgodnie z ruchem wskazówek zegara, wokół środka pola. Pole podajesz tak jak bez obrotu, np. pionowy napis wzdłuż prawej krawędzi: `TEKST = 35, 40, 40, 8, "Rzadka", obrót=90`. Ujemne wartości obracają w lewo.
+Opcja wszystkich elementów (`TEKST`, `OBRAZEK`, `IKONA`, `PROSTOKĄT`, `ELIPSA`): obrót w stopniach zgodnie z ruchem wskazówek zegara, wokół środka pola. Pole podajesz tak jak bez obrotu, np. pionowy napis wzdłuż prawej krawędzi: `TEKST = 35, 40, 40, 8, "Rzadka", obrót=90`. Ujemne wartości obracają w lewo. Kąt może być z kolumny lub stałej: `obrót=[Kąt]` – [układ z danych](#układ-z-danych--pozycja-z-kolumn-kadr-krycie-odbicie).
 
 ### `OBRAZEK = x, y, szer, wys, [Obrazek], pion=dół`
 Plik obrazka podany w kolumnie albo wprost, np. `Art/lis.png`. Obsługiwane formaty to PNG, JPG, SVG, GIF i WEBP.
@@ -199,10 +200,48 @@ Plik obrazka podany w kolumnie albo wprost, np. `Art/lis.png`. Obsługiwane form
 Opcje:
 - `dopasuj=zmieść | wypełnij | rozciągnij`,
 - `wyrównanie=lewo | środek | prawo`,
-- `pion=góra | środek | dół`.
+- `pion=góra | środek | dół`,
+- `kadr=dx dy skala` – ramka z obrazem w środku, jak w InDesignie; `krycie=` i `odbicie=` – patrz [Układ z danych](#układ-z-danych--pozycja-z-kolumn-kadr-krycie-odbicie).
 
 ### `IKONA = x, y, szer, wys, {znacznik}`
-Ikona (lub kilka) o wysokości pola, wyśrodkowana. Opcje: `wyrównanie`, `pion`.
+Ikona (lub kilka) o wysokości pola, wyśrodkowana. Opcje: `wyrównanie`, `pion`, `krycie`, `odbicie` (dwie ostatnie – [układ z danych](#układ-z-danych--pozycja-z-kolumn-kadr-krycie-odbicie)).
+
+### Układ z danych – pozycja z kolumn, kadr, krycie, odbicie
+Położenie, rozmiar i wygląd elementu mogą zależeć od karty: zamiast liczby wpisujesz `[Kolumnę]` (z pliku danych) albo `[=stałą]` (z `STAŁA`). Dotyczy `OBRAZEK`, `IKONA`, `TEKST`, `PROSTOKĄT` i `ELIPSA`.
+
+```
+STAŁA = żeton, 11                                   ; bok żetonu w mm
+
+; ilustracja w ramce 51×40 mm, kadr z kolumn KadrX, KadrY, Skala
+OBRAZEK = 6, 6, 51, 40, [Ilustracja], kadr=[KadrX] [KadrY] [Skala], odbicie=[Odbicie]
+
+; żeton w miejscu z kolumn Z1x i Z1y (każda liczba w osobnej kolumnie)
+ELIPSA  = [Z1x], [Z1y], [=żeton], [=żeton], kolor=#fffaf0
+OBRAZEK = [Z1x], [Z1y], [=żeton], [=żeton], [Z1]
+
+; krycie i obrót z danych
+OBRAZEK = [Z3x], [Z3y], [=żeton], [=żeton], [Z3], krycie=[Z3krycie], obrót=[Z3obrót]
+
+; krycie i odbicie na stałe, także w IKONA
+IKONA   = 0, 28, 63, 22, {kowadlo}, odbicie=poziome, krycie=40%
+```
+
+| Opcja | Elementy | Wartość |
+|---|---|---|
+| `x`, `y`, szerokość, wysokość | `OBRAZEK`, `IKONA`, `TEKST`, `PROSTOKĄT`, `ELIPSA` | liczba w mm, `[Kolumna]` albo `[=stała]`; w danych może być przecinek dziesiętny (`17,8`) |
+| `obrót=` | jak wyżej | kąt w stopniach, także `[Kolumna]` albo `[=stała]` |
+| `kadr=dx dy skala` | `OBRAZEK` | `dx`, `dy` – przesunięcie obrazu od środka ramki w mm (w prawo i w dół dodatnie); `skala` – w % (100 = obraz wypełnia ramkę) |
+| `krycie=` | `OBRAZEK`, `IKONA` (oraz `PROSTOKĄT`, `ELIPSA`, `LINIA`) | `0.5` albo `50%`, także z kolumny |
+| `odbicie=` | `OBRAZEK`, `IKONA` | `poziome`, `pionowe` albo `oba`; także z kolumny, pusta = bez odbicia |
+
+Zasady:
+- **Jedna kolumna na jedną liczbę.** Dwa żetony na karcie to dwa wiersze szablonu, np. `Z1x`/`Z1y` i `Z2x`/`Z2y`.
+- **Puste pozycje.** Gdy wszystkie wartości położenia i rozmiaru brane z kolumn są puste, element nie jest rysowany (bez Uwagi) – tak karta może mieć jeden żeton, a inna trzy. Gdy pusta jest tylko część (np. jest `Z1x`, brak `Z1y`), element jest pominięty i w Uwagach pojawia się wpis. Tekst, który nie jest liczbą, też daje Uwagę.
+- **Kadr.** Części `kadr=` rozdzielasz **spacjami**, nie przecinkami – przecinek rozdziela argumenty komendy. Każda część może być kolumną: `kadr=[KadrX] [KadrY] [Skala]`. Pusta część to 0, 0 albo 100; gdy puste są wszystkie, obraz po prostu wypełnia ramkę. Z `kadr=` domyślne jest `dopasuj=wypełnij` (można je nadpisać). Ramka przycina obraz, który z niej wystaje.
+- **Raport.** Sekcja „obrazki poniżej 300 dpi” uwzględnia powiększenie ze `skala`.
+- **Uwagi** o kartach wskazują wiersz szablonu, którego dotyczą – w edytorze od razu go widać.
+
+Cały przykład: `przyklady/06-targ`.
 
 ### `CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#1d1b19`
 Domyślna czcionka, rozmiar i inne opcje (także flagi, np. `kursywa`) dla kolejnych `TEKST`-ów. Działa do następnej `CZCIONKA`.

@@ -104,3 +104,18 @@ Aplikacja ma w środku ich kopie (instalowane z npm przy budowaniu, nie są czę
 | `Ikony/eliksir.svg` | [health-potion](https://game-icons.net/1x1/delapouite/health-potion.html) | Delapouite |
 | `Ikony/runa.svg` | [rune-stone](https://game-icons.net/1x1/lorc/rune-stone.html) | Lorc |
 | `Ikony/mana.svg` | [drop](https://game-icons.net/1x1/lorc/drop.html) | Lorc |
+
+### `przyklady/06-targ`
+
+Kopie ikon z przykładów 02 i 04 (te same pliki i licencja).
+
+| Plik | Ikona | Autor |
+|---|---|---|
+| `Ikony/zloto.svg` | [gold-bar](https://game-icons.net/1x1/willdabeast/gold-bar.html) | Willdabeast |
+| `Ikony/drewno.svg` | [wood-pile](https://game-icons.net/1x1/delapouite/wood-pile.html) | Delapouite |
+| `Ikony/kamien.svg` | [stone-block](https://game-icons.net/1x1/lorc/stone-block.html) | Lorc |
+| `Ikony/kowadlo.svg` | [anvil](https://game-icons.net/1x1/lorc/anvil.html) | Lorc |
+| `Ikony/przyprawy.svg` | [powder](https://game-icons.net/1x1/lorc/powder.html) | Lorc |
+| `Ikony/wielblad.svg` | [camel](https://game-icons.net/1x1/delapouite/camel.html) | Delapouite |
+| `Ikony/amfora.svg` | [amphora](https://game-icons.net/1x1/delapouite/amphora.html) | Delapouite |
+| `Ikony/palma.svg` | [palm-tree](https://game-icons.net/1x1/delapouite/palm-tree.html) | Delapouite |

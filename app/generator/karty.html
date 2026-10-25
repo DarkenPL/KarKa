@@ -716,7 +716,8 @@ function liniaSvg(c, tpl, ctx, colorOf) {
     return '';
   };
   s += koniec(pocz, x1, y1, -ux, -uy) + koniec(kon, x2, y2, ux, uy);
-  const kr = o.krycie ? ` opacity="${num(o.krycie)}"` : '';
+  const kk = o.krycie ? krycieLiczba(o.krycie) : null;
+  const kr = kk !== null ? ` opacity="${kk}"` : '';
   return `<svg class="el linia" style="left:0;top:0;width:${tpl.w}mm;height:${tpl.h}mm;overflow:visible" viewBox="0 0 ${tpl.w} ${tpl.h}"${kr}>${s}</svg>`;
 }
 
@@ -755,6 +756,21 @@ function znacznikiTekstu(html) {
   return { html: out + stos.slice().reverse().map((x) => `</${x}>`).join(''), niedomkniete: stos, nadmiarowe };
 }
 
+// Liczba z tekstu – przecinek dziesiętny (17,8) jak kropka; przy nieczytelnej wartości NaN.
+const liczbaZTekstu = (v) => num(String(v ?? '').trim().replace(/(\d),(\d)/g, '$1.$2'));
+// Krycie: 0.5 albo 50% → 0.5; nieczytelne → null.
+function krycieLiczba(v) {
+  let s = String(v ?? '').trim();
+  if (!s) return null;
+  const proc = s.endsWith('%');
+  if (proc) s = s.slice(0, -1);
+  const n = liczbaZTekstu(s);
+  if (Number.isNaN(n)) return null;
+  return proc ? n / 100 : n;
+}
+// Odbicie: poziome | pionowe | oba → fragment transform.
+const ODBICIA = { poziome: 'scale(-1,1)', pionowe: 'scale(1,-1)', oba: 'scale(-1,-1)' };
+
 function renderCard(tpl, cmds, row, ctx) {
   // Wstawia wartości [Kolumna]; „empty” = tekst miał pola i wszystkie były puste.
   // formatowanie: false → dane jak zwykły tekst (bez_formatowania, kolory, ścieżki, warunki).
@@ -769,6 +785,40 @@ function renderCard(tpl, cmds, row, ctx) {
     return { s, empty: had && !any, kolumny };
   };
   const value = (str) => odmaskuj(field(str).s).trim();
+  // Liczba z szablonu albo z danych ([Kolumna] / [=stała]); pusta = kolumna(y) bez wartości.
+  const liczba = (a) => {
+    const s = String(a ?? '').trim();
+    if (!s.includes('[')) return { n: num(s), zKolumny: false, pusta: false, s };
+    const v = value(s);
+    return { n: v === '' ? NaN : liczbaZTekstu(v), zKolumny: true, pusta: v === '', s: v };
+  };
+  const krycieOf = (v, where) => {
+    if (v === undefined) return null;
+    const s = value(v);
+    if (s === '') return null;
+    const k = krycieLiczba(s);
+    if (k === null) ctx.warn.add(`${where}: ${ctx.label}: krycie „${s}” to nie liczba (np. krycie=0.5 albo krycie=50%)`);
+    return k;
+  };
+  const odbicieOf = (v, where) => {
+    if (v === undefined) return '';
+    const s = plain(value(v));
+    if (s === '' || s === 'brak' || s === 'nie') return '';
+    if (!ODBICIA[s]) { ctx.warn.add(`${where}: ${ctx.label}: odbicie= poziome, pionowe albo oba`); return ''; }
+    return ODBICIA[s];
+  };
+  // kadr=dx dy skala (mm, mm, %); części rozdzielone spacjami, każda może być [Kolumną].
+  const kadrOf = (v, where) => {
+    const tok = String(v ?? '').match(/(?:\[[^\[\]]*\]|[^\s\[\]])+/g) || [];
+    const cz = tok.flatMap((t) => { const x = value(t); return x === '' ? [''] : x.split(/\s+/); });
+    if (cz.every((x) => x === '')) return null;
+    const [dx, dy, sk] = [0, 1, 2].map((i) => (cz[i] === undefined || cz[i] === '' ? [0, 0, 100][i] : liczbaZTekstu(String(cz[i]).replace(/%$/, ''))));
+    if ([dx, dy, sk].some(Number.isNaN) || sk <= 0) {
+      ctx.warn.add(`${where}: ${ctx.label}: kadr= potrzebuje liczb „przesunięcie_x przesunięcie_y skala%”, np. kadr=-1.5 -3.5 108`);
+      return null;
+    }
+    return { dx, dy, s: sk / 100 };
+  };
   const colorOf = (expr) => {
     for (const part of String(expr ?? '').split('|')) {
       const v = value(part); if (!v) continue;
@@ -820,9 +870,18 @@ function renderCard(tpl, cmds, row, ctx) {
       continue;
     }
     if (c.kom === 'linia') { html += liniaSvg(c, tpl, ctx, colorOf); continue; }
-    const [x, y, w, h] = c.args.slice(0, 4).map(num);
+    const poz = [0, 1, 2, 3].map((i) => liczba(c.args[i]));
+    const zDanych = poz.filter((p) => p.zKolumny);
+    if (zDanych.length && zDanych.every((p) => p.pusta)) continue;        // pozycja z kolumn pusta → elementu nie ma
+    if (zDanych.some((p) => p.pusta)) { ctx.warn.add(`${c.where}: ${ctx.label}: część pozycji jest pusta (${poz.filter((p) => p.pusta).length} z 4 wartości) – element pominięty`); continue; }
+    const zla = zDanych.find((p) => Number.isNaN(p.n));
+    if (zla) { ctx.warn.add(`${c.where}: ${ctx.label}: „${zla.s}” w pozycji to nie liczba – element pominięty`); continue; }
+    const [x, y, w, h] = poz.map((p) => p.n);
     if ([x, y, w, h].some(Number.isNaN)) { ctx.warn.add(`${c.where}: potrzebne 4 liczby – x, y, szerokość, wysokość (w mm)`); continue; }
-    const box = `left:${x}mm;top:${y}mm;width:${w}mm;height:${h}mm;` + (o.obrot !== undefined && num(o.obrot) ? `transform:rotate(${num(o.obrot)}deg);` : '');
+    const obr = o.obrot !== undefined ? liczba(o.obrot).n : NaN;
+    const obrot = !Number.isNaN(obr) && obr ? `rotate(${obr}deg)` : '';
+    const pudlo = `left:${x}mm;top:${y}mm;width:${w}mm;height:${h}mm;`;
+    const box = pudlo + (obrot ? `transform:${obrot};` : '');
     const ph = plain(o.wyrownanie || ''), pv = plain(o.pion || '');
 
     if (c.kom === 'prostokat' || c.kom === 'elipsa') {
@@ -832,7 +891,7 @@ function renderCard(tpl, cmds, row, ctx) {
       else if (o.zaokraglenie) st += `border-radius:${mm(o.zaokraglenie)};`;
       const stylObw = { przerywana: 'dashed', kropkowana: 'dotted' }[plain(o.styl_obwodki || '')] || 'solid';
       if (o.obwodka) st += `border:${num(o.obwodka)}mm ${stylObw} ${colorOf(o.kolor_obwodki || '#000000') || '#000'};`;
-      if (o.krycie) st += `opacity:${num(o.krycie)};`;
+      if (o.krycie) { const k = krycieOf(o.krycie, c.where); if (k !== null) st += `opacity:${k};`; }
       html += `<div class="el ksztalt" style="${esc(st)}"></div>`;
     } else if (c.kom === 'tekst') {
       const tr = field(c.args[4], !f.has('bez_formatowania'));
@@ -858,12 +917,18 @@ function renderCard(tpl, cmds, row, ctx) {
       if (!p) continue;
       const u = fileUrl(p);
       if (!u) { ctx.warn.add(`${ctx.label}: brak pliku ${p}`); continue; }
-      const fit = { zmiesc: 'contain', wypelnij: 'cover', rozciagnij: 'fill' }[plain(o.dopasuj || 'zmiesc')] || 'contain';
-      html += `<div class="el obrazek" style="${box}"><img src="${u}" alt="" style="object-fit:${fit};object-position:${POS_H[ph] || 'center'} ${POS_V[pv] || 'center'}"></div>`;
+      const kadr = o.kadr !== undefined ? kadrOf(o.kadr, c.where) : null;
+      const fit = { zmiesc: 'contain', wypelnij: 'cover', rozciagnij: 'fill' }[plain(o.dopasuj || (o.kadr !== undefined ? 'wypelnij' : 'zmiesc'))] || 'contain';
+      const przeksz = [kadr ? `translate(${kadr.dx}mm,${kadr.dy}mm) scale(${kadr.s})` : '', odbicieOf(o.odbicie, c.where)].filter(Boolean).join(' ');
+      const kr = krycieOf(o.krycie, c.where);
+      const st = box + (kadr ? 'overflow:hidden;' : '') + (kr !== null ? `opacity:${kr};` : '');
+      html += `<div class="el obrazek" style="${st}"><img src="${u}" alt="" style="object-fit:${fit};object-position:${POS_H[ph] || 'center'} ${POS_V[pv] || 'center'}${przeksz ? ';transform:' + przeksz : ''}"></div>`;
     } else if (c.kom === 'ikona') {
       const tr = field(c.args[4]);
       if (tr.empty || tr.s.trim() === '') continue;
-      html += `<div class="el ikony" style="${box}align-items:${FLEX_V[pv] || 'center'};justify-content:${FLEX_H[ph] || 'center'};font-size:${h}mm">${renderText(odmaskuj(tr.s), ctx.icons, ctx.warn)}</div>`;
+      const odb = odbicieOf(o.odbicie, c.where), kr = krycieOf(o.krycie, c.where);
+      const st = (odb ? pudlo + `transform:${[obrot, odb].filter(Boolean).join(' ')};` : box) + (kr !== null ? `opacity:${kr};` : '');
+      html += `<div class="el ikony" style="${st}align-items:${FLEX_V[pv] || 'center'};justify-content:${FLEX_H[ph] || 'center'};font-size:${h}mm">${renderText(odmaskuj(tr.s), ctx.icons, ctx.warn)}</div>`;
     }
   }
   const k = (cmds === tpl.rewers && tpl.kartaRewers) || tpl.karta;
@@ -1154,8 +1219,9 @@ async function obrazkiNiskiejRozdzielczosci(prog = 300) {
       const box = img.parentElement, bw = box.offsetWidth / PX_MM, bh = box.offsetHeight / PX_MM;   // mm (bez obrotu)
       if (!nw || !nh || !bw || !bh) continue;
       const fit = img.style.objectFit;
+      const pow = +((/scale\(([\d.]+)\)/.exec(img.style.transform) || [])[1] || 1);   // kadr= powiększa obraz
       const mmNaPx = fit === 'cover' ? Math.max(bw / nw, bh / nh) : fit === 'fill' ? null : Math.min(bw / nw, bh / nh);
-      dodaj(img.src, mmNaPx === null ? Math.min(nw / bw, nh / bh) * 25.4 : 25.4 / mmNaPx, talia);
+      dodaj(img.src, (mmNaPx === null ? Math.min(nw / bw, nh / bh) * 25.4 : 25.4 / mmNaPx) / pow, talia);
     }
     const m = /url\(["']?(blob:[^"')]+)/.exec(k.style.backgroundImage || '');
     if (m) {
@@ -1827,7 +1893,13 @@ function kartaZeSpadem(k, w, h, s) {
     if (gora) { eh += y + s; y = -s; }
     if (prawo) ew = w + s - x;
     if (dol) eh = h + s - y;
-    if (lewo || gora || prawo || dol) Object.assign(el.style, { left: mm(x), top: mm(y), width: mm(ew), height: mm(eh) });
+    if (!(lewo || gora || prawo || dol)) continue;
+    // kadr= (ramka przycina obraz): jak w InDesignie ramka rośnie o spad, a obraz zostaje w tym samym miejscu
+    // i skali – w obszarze cięcia nic się nie zmienia, spad wypełnia część obrazu wystająca poza ramkę.
+    if (img && el.style.overflow === 'hidden' && /translate/.test(img.style.transform))
+      Object.assign(img.style, { position: 'absolute', left: mm(naMm(el.style.left, w) - x), top: mm(naMm(el.style.top, h) - y),
+        width: el.style.width, height: el.style.height });
+    Object.assign(el.style, { left: mm(x), top: mm(y), width: mm(ew), height: mm(eh) });
   }
   return c;
 }
