@@ -68,6 +68,7 @@ Są wbudowane w aplikację (menu **Plik → Przykłady**), a ich pliki leżą w 
 | [`03-ogrod`](przyklady/03-ogrod) | dwie talie w jednym pliku, karta pozioma, warunki `jeśli=`, wspólna paleta kolorów |
 | [`04-karawana`](przyklady/04-karawana) | dane z pliku XLSX (dwa arkusze, dwie talie), `STAŁA`, gradient tła, `ELIPSA` z `krycie`, obrócony tekst, `LINIA` ze strzałką, przerywane obwódki, `WERSJA` i numer karty w stopce, karta pominięta (`Ilość = 0`) |
 | [`05-zaklecia`](przyklady/05-zaklecia) | małe karty 44×68, CSV z przecinkami, tytuł z obrysem i cieniem, `wersaliki`, `jedna_linia`, `kursywa`, `podkreślenie`, kolorowe znaczniki `{kolor-…}`, `jeśli=` z `!=`, rewers z własnymi rogami i obwódką, `[AWERS]` po rewersie |
+| [`06-targ`](przyklady/06-targ) | układ z danych: pozycje żetonów z kolumn (`[Z1x]`, `[Z1y]`), rozmiar ze `STAŁA`, `kadr=` (ilustracja w ramce), `krycie`, `obrót` i `odbicie` z kolumn, puste pozycje = brak elementu |
 
 ## Dokumentacja
 

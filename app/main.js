@@ -1820,6 +1820,90 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-formatowanie.png', (await wc.capturePage(formatowanie.rect)).toPNG());
     await wc.executeJavaScript("document.getElementById('test-formatowanie').remove()");
   }
+  // Układ z danych (issue #70, --test-edytor, bez zmian w plikach projektu): pozycje, obrót, kadr, odbicie i krycie z [Kolumn].
+  // Obrazek testowy to tymczasowy plik w `files` (usuwany po teście).
+  let uklad = null;
+  if (process.argv.includes('--test-edytor')) {
+    uklad = await wc.executeJavaScript(`(() => {
+      files.set('test-obraz.svg', new File(['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#c0504d"/><circle cx="50" cy="50" r="30" fill="#f4d58d"/><path d="M0 0L100 100" stroke="#1d1b19" stroke-width="6"/></svg>'], 'test-obraz.svg', { type: 'image/svg+xml' }));
+      const r = (linie, row, naglowek) => {
+        const t = parseTemplate('[TALIA Test]\\n' + (naglowek || 'KARTA = 63, 88\\n') + linie + '\\n', 'test.txt').talie[0];
+        const warn = new Set();
+        const w = renderCard(t, t.awers, row || {}, { warn, icons: RAPORT.icons, label: 'Test 1', plik: 'test.txt', kolumny: true, wbudowane: {} });
+        return { html: w.html, style: w.style, uwagi: [...warn] };
+      };
+      const wyniki = {};
+      const spr = (nazwa, warunek) => { wyniki[nazwa] = !!warunek; };
+      const img = (x) => (/<img[^>]*style="([^"]*)"/.exec(x.html) || [])[1] || '';
+      // 1. pozycja z kolumn, przecinek dziesiętny
+      let a = r('OBRAZEK = [X], [Y], 10, 10, test-obraz.svg', { X: '12,5', Y: '3' });
+      spr('pozycja', a.html.includes('left:12.5mm;top:3mm;width:10mm;height:10mm;') && !a.uwagi.length);
+      // 2. puste / częściowo puste / nieliczbowe
+      a = r('OBRAZEK = [X], [Y], 10, 10, test-obraz.svg', { X: '', Y: '' });
+      spr('pustaPozycja', !a.html.includes('class="el obrazek"') && !a.uwagi.length);
+      a = r('OBRAZEK = [X], [Y], 10, 10, test-obraz.svg', { X: '5', Y: '' });
+      spr('czescPusta', !a.html.includes('class="el obrazek"') && a.uwagi.length === 1 && /część pozycji/.test(a.uwagi[0]) && /^test\\.txt, wiersz \\d+: /.test(a.uwagi[0]));
+      a = r('OBRAZEK = [X], [Y], 10, 10, test-obraz.svg', { X: 'abc', Y: '2' });
+      spr('nieLiczba', !a.html.includes('class="el obrazek"') && a.uwagi.length === 1 && /nie liczba/.test(a.uwagi[0]) && /^test\\.txt, wiersz \\d+: /.test(a.uwagi[0]));
+      // 3. kadr
+      a = r('OBRAZEK = 1, 1, 10, 10, test-obraz.svg, kadr=-1.5 -3.5 108');
+      spr('kadrStaly', /class="el obrazek" style="[^"]*overflow:hidden;/.test(a.html) && img(a).includes('translate(-1.5mm,-3.5mm) scale(1.08)') && img(a).includes('object-fit:cover'));
+      a = r('OBRAZEK = 1, 1, 10, 10, test-obraz.svg, kadr=[KX] [KY] [S]', { KX: '2,5', KY: '-1', S: '120' });
+      spr('kadrZDanych', img(a).includes('translate(2.5mm,-1mm) scale(1.2)') && a.html.includes('overflow:hidden;'));
+      a = r('OBRAZEK = 1, 1, 10, 10, test-obraz.svg, kadr=[KX] [KY] [S]', { KX: '', KY: '', S: '' });
+      spr('kadrPusty', img(a).includes('object-fit:cover') && !img(a).includes('transform') && !a.html.includes('overflow:hidden') && !a.uwagi.length);
+      a = r('OBRAZEK = 1, 1, 10, 10, test-obraz.svg, kadr=a b c');
+      spr('kadrZly', a.uwagi.length === 1 && /kadr=/.test(a.uwagi[0]) && /^test\\.txt, wiersz \\d+: /.test(a.uwagi[0]));
+      // 4. krycie
+      a = r('OBRAZEK = 1, 1, 10, 10, test-obraz.svg, krycie=50%\\nOBRAZEK = 1, 1, 10, 10, test-obraz.svg, krycie=0.5\\n'
+        + 'IKONA = 1, 1, 5, 5, A, krycie=50%\\nIKONA = 1, 1, 5, 5, A, krycie=0.5\\nPROSTOKĄT = 1, 1, 5, 5, kolor=#f00, krycie=50%\\nPROSTOKĄT = 1, 1, 5, 5, kolor=#f00, krycie=0.5');
+      spr('krycieStale', (a.html.match(/opacity:0\\.5;/g) || []).length === 6 && !a.uwagi.length);
+      a = r('OBRAZEK = 1, 1, 10, 10, test-obraz.svg, krycie=[K]\\nPROSTOKĄT = 1, 1, 5, 5, kolor=#f00, krycie=[K]', { K: '25%' });
+      spr('krycieZDanych', (a.html.match(/opacity:0\\.25;/g) || []).length === 2);
+      a = r('PROSTOKĄT = 1, 1, 5, 5, kolor=#f00, krycie=[K]', { K: 'dużo' });
+      spr('kryciePrzeciez', a.uwagi.length === 1 && /krycie/.test(a.uwagi[0]) && !a.html.includes('opacity'));
+      // 5. odbicie
+      a = r('OBRAZEK = 1, 1, 10, 10, test-obraz.svg, odbicie=poziome');
+      spr('odbicieObrazek', img(a).includes('transform:scale(-1,1)'));
+      a = r('IKONA = 1, 1, 5, 5, A, obrót=10, odbicie=poziome');
+      spr('odbicieIkona', /class="el ikony" style="[^"]*transform:rotate\\(10deg\\) scale\\(-1,1\\);/.test(a.html));
+      a = r('OBRAZEK = 1, 1, 10, 10, test-obraz.svg, odbicie=[O]\\nIKONA = 1, 1, 5, 5, A, odbicie=[O]', { O: '' });
+      spr('odbiciePuste', !a.html.includes('scale(-1') && !/<img[^>]*transform/.test(a.html) && !/class="el ikony" style="[^"]*transform/.test(a.html) && !a.uwagi.length);
+      a = r('OBRAZEK = 1, 1, 10, 10, test-obraz.svg, odbicie=[O]', { O: 'oba' });
+      spr('odbicieOba', img(a).includes('transform:scale(-1,-1)'));
+      // 6. obrót z kolumny
+      a = r('PROSTOKĄT = 1, 1, 5, 5, kolor=#f00, obrót=[R]', { R: '15' });
+      spr('obrotZDanych', a.html.includes('transform:rotate(15deg);'));
+      // 8. zgodność wstecz: szablon bez nowych opcji daje HTML jak w 0.5.11 (wzorzec ustalony na kodzie z main)
+      a = r('PROSTOKĄT = 1, 2, 3, 4, kolor=#f00, krycie=0.4, obrót=5\\nOBRAZEK = 5, 6, 10, 10, test-obraz.svg, dopasuj=wypełnij\\nIKONA = 20, 6, 8, 8, A, obrót=10', {}, 'KARTA = 63, 44\\nTŁO = #f4ecd8\\n');
+      const wzorzec = '<div class="el ksztalt" style="left:1mm;top:2mm;width:3mm;height:4mm;transform:rotate(5deg);background:#f00;opacity:0.4;"></div><div class="el obrazek" style="left:5mm;top:6mm;width:10mm;height:10mm;"><img src="BLOB" alt="" style="object-fit:cover;object-position:center center"></div><div class="el ikony" style="left:20mm;top:6mm;width:8mm;height:8mm;transform:rotate(10deg);align-items:center;justify-content:center;font-size:8mm">A</div>';
+      spr('zgodnosc', a.html.replace(/blob:[^"]+/, 'BLOB') === wzorzec);
+      // karta z kilkoma elementami do zrzutu
+      const t = parseTemplate('[TALIA Test]\\nKARTA = 63, 88, zaokrąglenie=3\\nTŁO = #e9dcc0\\n'
+        + 'PROSTOKĄT = 4, 4, 55, 38, kolor=#d8c7a4\\n'
+        + 'OBRAZEK = 4, 4, 26, 38, test-obraz.svg, kadr=-4 3 130\\nOBRAZEK = 33, 4, 26, 38, test-obraz.svg, kadr=[KX] [KY] [S], odbicie=poziome\\n'
+        + 'ELIPSA = [X], [Y], 12, 12, kolor=#fffaf0, obwódka=0.4, krycie=[K]\\nIKONA = 30, 50, 12, 12, A, obrót=20, odbicie=poziome, krycie=50%\\n'
+        + 'PROSTOKĄT = 8, 70, 20, 8, kolor=#5a4632, obrót=[R], krycie=0.6\\n', 'test.txt').talie[0];
+      const warn = new Set();
+      const rt = renderCard(t, t.awers, { KX: '-2', KY: '0', S: '150', X: '10', Y: '50', K: '40%', R: '-8' }, { warn, icons: RAPORT.icons, label: 'Test 1', plik: 'test.txt', kolumny: true, wbudowane: {} });
+      const d = document.createElement('div');
+      d.id = 'test-uklad';
+      d.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;background:#fff;padding:8px';
+      d.innerHTML = '<div class="karta" data-talia="Test" title="uklad" style="' + esc(rt.style) + '">' + rt.html + '</div>';
+      document.body.appendChild(d);
+      fitAll(d);
+      spr('zrzutBezUwag', warn.size === 0);
+      const ok = Object.values(wyniki).every(Boolean);
+      const rect = d.getBoundingClientRect();
+      return { ok, wyniki, zgodnosc: a.html, uwagi: [...warn], rect: { x: 0, y: 0, width: Math.ceil(rect.width), height: Math.ceil(rect.height) } };
+    })()`);
+    // zrzut dopiero po wczytaniu obrazków i odmalowaniu (inaczej capturePage łapie poprzednią klatkę)
+    await wc.executeJavaScript(`new Promise((r) => { const im = [...document.querySelectorAll('#test-uklad img')];
+      Promise.all(im.map((i) => (i.complete ? 0 : new Promise((z) => { i.onload = i.onerror = z; }))))
+        .then(() => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50)))); })`);
+    fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-uklad.png', (await wc.capturePage(uklad.rect)).toPNG());
+    await wc.executeJavaScript("document.getElementById('test-uklad').remove(); files.delete('test-obraz.svg')");
+  }
   await wc.executeJavaScript('buildPrint()');
   await pdfDoPliku(wc, wynik);
   // Menu aplikacji: własne (polskie), a nie domyślne Electrona.
@@ -1830,8 +1914,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
     && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
+  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
