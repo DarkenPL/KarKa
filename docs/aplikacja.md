@@ -60,18 +60,27 @@ Wersję, nazwę wydania i źródło kodu pokazuje **KarKa → O aplikacji KarKa*
 
    Szablon nadal możesz edytować w dowolnym innym edytorze tekstu.
 4. **Pasek** nad kartami: **Edytor**, **Historia**, **Raport**, wybór talii w podglądzie i **Eksport obrazków…**. Pod nim wiersz stanu: liczba kart, karty zmienione od ostatniego PDF i zaznaczone karty. Pozostałe polecenia są w menu **Plik** (druk, PDF, eksport do playingcards.io) i **Widok** (odświeżanie, raport).
-5. **Okna druku i eksportu.** Eksport obrazków (⌘E), druk (⌘P), zapis PDF (⇧⌘S) i pokój playingcards.io otwierają okno z opcjami. Okno **pamięta ostatnie ustawienia osobno dla każdego projektu**. Enter zatwierdza, Esc anuluje.
+5. <a id="okna"></a>**Okna druku i eksportu.** Eksport obrazków (⌘E), druk (⌘P), zapis PDF (⇧⌘S) i pokój playingcards.io otwierają okno z opcjami. Okno **pamięta ostatnie ustawienia osobno dla każdego projektu**. Enter zatwierdza, Esc anuluje.
    - **Obrazki:** rozdzielczość 150 dpi (ekran, playtesty online) albo 300 dpi (druk, drukarnie), format JPG albo PNG (przezroczyste zaokrąglone rogi), które karty, talie, rewersy jako osobne pliki.
    - **Druk i PDF:** układ, linie cięcia, spad, rewersy, **szkic** (bez teł i obrazków, czarny tekst – oszczędza tusz), które karty, talie; przyciski **Drukuj…** i **Zapisz PDF**.
      - Układy: **A4** (karty 1:1 w siatce, po każdym arkuszu arkusz rewersów), **każda karta na osobnej stronie** i **Drukarnia**.
      - **Przesunięcie rewersów** (A4, od 0.5.1): drukarki przy druku dwustronnym często przesuwają drugą stronę o 1–2 mm. Wydrukuj próbny arkusz, przyłóż kartkę do światła i zmierz, o ile rewersy uciekły; w oknie wpisz korektę w mm (np. rewers 1 mm za bardzo w prawo → „w prawo” −1, 0,5 mm za nisko → „w dół” −0,5). Okno zapamiętuje ją dla projektu.
      - **Linie cięcia** (układ A4): znaczniki na marginesie (gilotyna, nóż), przerywane szare linie wzdłuż krawędzi każdej karty (nożyczki) albo jedno i drugie. Arkusz rewersów nie ma linii.
-     - **Drukarnia** (PDF dla drukarni, np. LongPack): jedna strona na kopię karty; strona większa od karty o **spad** z każdej strony. Spad do wyboru **2 albo 3 mm, domyślnie 3 mm** (wymóg drukarni gier): karta 63 × 88 mm daje stronę 69 × 94 mm. Projekt, w którym okno zapamiętało 2 mm, zostaje przy 2 mm; inna zapamiętana wartość pokazuje się jako trzecia pozycja. Strona PDF ma **dokładny** rozmiar, a w pliku są ustawione **TrimBox** (linia cięcia, czyli karta bez spadu) i BleedBox (cała strona) – z nich drukarnie czytają format po cięciu. Przy kartach różnej wielkości strona ma rozmiar największej karty, mniejsza stoi na środku, a jej TrimBox jest wokół niej. Bez znaczników cięcia i bez zaokrąglonych rogów (rogi wycina drukarnia). Tło karty sięga do krawędzi strony; prostokąty i obrazki (`dopasuj=wypełnij` albo `rozciągnij`) dotykające krawędzi karty są przedłużone o spad. Teksty, ikony, linie i obwódka karty zostają na miejscu, więc trzymaj je min. 3 mm od krawędzi (sprawdza to [Raport w trybie drukarni](#raport)). PDF jest w RGB – konwersja do CMYK jest w planach, na razie robi ją drukarnia.
+     - **Drukarnia** (PDF dla drukarni, np. LongPack): jedna strona na kopię karty; strona większa od karty o **spad** z każdej strony. Spad do wyboru **2 albo 3 mm, domyślnie 3 mm** (wymóg drukarni gier): karta 63 × 88 mm daje stronę 69 × 94 mm. Projekt, w którym okno zapamiętało 2 mm, zostaje przy 2 mm; inna zapamiętana wartość pokazuje się jako trzecia pozycja. Strona PDF ma **dokładny** rozmiar, a w pliku są ustawione **TrimBox** (linia cięcia, czyli karta bez spadu) i BleedBox (cała strona) – z nich drukarnie czytają format po cięciu. Przy kartach różnej wielkości strona ma rozmiar największej karty, mniejsza stoi na środku, a jej TrimBox jest wokół niej. Bez znaczników cięcia i bez zaokrąglonych rogów (rogi wycina drukarnia). Tło karty sięga do krawędzi strony; prostokąty i obrazki (`dopasuj=wypełnij` albo `rozciągnij`) dotykające krawędzi karty są przedłużone o spad. Teksty, ikony, linie i obwódka karty zostają na miejscu, więc trzymaj je min. 3 mm od krawędzi (sprawdza to [Raport w trybie drukarni](#raport)). Kolor: PDF jest w RGB albo – po włączeniu opcji **Druk w drukarni (CMYK, Fogra39)** – w CMYK (opis niżej).
      - **Strony** (układ Drukarnia):
        - **Awersy i rewersy osobno** (domyślnie): plik awersów, karta na stronę, każda kopia osobno. Gdy wszystkie karty mają ten sam rewers, rewers jest **ostatnią stroną** tego pliku. Gdy rewersy są różne (kilka talii z różnymi rewersami), powstają **dwa pliki**: `<nazwa> – awersy.pdf` i `<nazwa> – rewersy.pdf`, w którym strona N to rewers awersu N (karta talii bez rewersu daje pustą stronę).
        - **Na przemian:** awers, rewers, awers, rewers… w jednym pliku (tak było do 0.5.8).
        - Bez rewersów (pole „Rewersy” wyłączone) – tylko awersy.
      - Drukarnie chcą obrazków min. **300 dpi** w rozmiarze na karcie – Raport pokazuje obrazki o mniejszej rozdzielczości.
+     - **Druk w drukarni (CMYK, Fogra39)** (od 0.5.11; układ Drukarnia): gotowy PDF przechodzi na końcu przez Ghostscript i jest wyłącznie w **CMYK** (profil drukarni). Czarny tekst oraz ikony i linie wektorowe wychodzą jako czysta czerń **C0 M0 Y0 K100**, przezroczystość zostaje. To PDF 1.6, bez PDF/X i bez Output Intent – drukarnie gier, np. LongPack, ich nie wymagają. TrimBox i BleedBox są ustawiane tak jak w RGB (jeszcze raz po konwersji). Obrazki nie są kompresowane stratnie ani zmniejszane.
+       - **Wymaga Ghostscripta 10 lub nowszego** z Homebrew: `brew install ghostscript`. Aplikacja szuka `/opt/homebrew/bin/gs`, potem `/usr/local/bin/gs`. Bez niego opcja jest wyszarzona z podpowiedzią. Ghostscript nie jest dołączony do KarKi (licencja AGPL).
+       - Opcja jest domyślnie włączona, gdy Ghostscript jest zainstalowany; wybór jest zapamiętywany dla projektu jak inne opcje okna.
+       - **Profil:** ISO Coated v2 (ECI) – Fogra39 (domyślny), PSO Coated v3 – Fogra51 albo **inny plik .icc…** (musi być profilem CMYK, inaczej aplikacja pokaże komunikat). Profile ECI nie są w aplikacji (licencja ECI/Heidelberg nie pozwala ich rozpowszechniać). Przy pierwszym użyciu aplikacja pyta „Pobrać profil … z eci.org?” (paczka ok. 17 MB dla Fogra39, ok. 2 MB dla Fogra51), zapisuje z niej tylko jeden plik w `~/Library/Application Support/KarKa/profile/` i sprawdza sumę SHA-256. Profil jest osadzany w gotowym PDF (to dozwolone).
+       - Brak internetu albo zła suma – komunikat „pobierz ręcznie z eci.org i wskaż plik”; aplikacja nie używa po cichu innego profilu. Ręcznie: [eci_offset_2009.zip](https://eci.org/lib/exe/eci_offset_2009.zip) → `ECI_Offset_2009/ISOcoated_v2_eci.icc` (Fogra39), [pso-coated_v3.zip](https://eci.org/lib/exe/pso-coated_v3.zip) → `PSOcoated_v3.icc` (Fogra51); potem wybierz **inny plik .icc…**.
+       - **Pliki** mają te same nazwy co w RGB (`… – drukarnia – awersy.pdf` i `– rewersy.pdf` albo jeden plik), tylko zawierają CMYK. Przy dwóch plikach konwertowane są oba. Przy błędzie konwersji nie powstaje żaden plik, tylko komunikat – plik RGB nie udaje CMYK.
+       - **Sprawdzenie po konwersji:** aplikacja sprawdza każdy plik – zero kolorów RGB, obrazki tylko w CMYK, TrimBox na każdej stronie, liczba stron – i liczy czystą czerń (`0 0 0 1 k`).
+       - **Dla autora kart:** K100 dostaje tylko czerń `#000` w szablonie i w ikonach SVG. Ciemne, ale nie czarne kolory (np. domyślny `#1d1b19`) wychodzą jako czerń złożona z kilku farb (rich black), a drukarnia odrzuca tekst w takiej czerni. Przed PDF dla drukarni sprawdź [Raport w trybie drukarni](#raport) (ostrzeżenie „prawie czerń”).
+       - **Obrazki w Display P3:** kolor takich obrazków przechodzi przez renderowanie Chromium – do sprawdzenia (w toku). Obrazki w Display P3 – wyniki próby w issue #66.
    - **playingcards.io:** rozdzielczość i talie ([opis](playingcards.md)).
    - **Które karty:** wszystkie, tylko zaznaczone albo tylko zmienione od ostatniego PDF.
 6. **Zaznaczanie i zmienione karty:**
@@ -90,7 +99,7 @@ Wersję, nazwę wydania i źródło kodu pokazuje **KarKa → O aplikacji KarKa*
 8. <a id="raport"></a>**Raport** (przycisk w pasku albo **Widok → Raport projektu**) sprawdza projekt: powtórzone ID, puste pola w kolumnach używanych w szablonie, kolumny, których szablon nie używa, karty pominięte (`Ilość = 0`), obrazki poniżej 300 dpi w rozmiarze na karcie (pliki SVG są pomijane), ikony bez użycia i obrazki w folderach projektu, do których nic się nie odwołuje. Raport odświeża się razem z kartami.
    - **Tryb drukarni** (przełącznik w panelu Raport, zapamiętywany) dodaje na początku raportu trzy sekcje:
      - „Drukarnia: tekst bliżej niż 3 mm od linii cięcia”: liczone z rzeczywistego tekstu po dopasowaniu (obwiednia liter i ikon w tekście, nie ramka pola `TEKST`), także elementy `IKONA`. Karty od najmniejszego odstępu z krawędzią (lewa, górna, prawa, dolna); panel pokazuje 25 pierwszych, pełna lista jest w zleceniu.
-     - „Drukarnia: „prawie czerń” zamiast #000”: kolory tekstu, obrysów, obwódek, linii, ikon koloru i plików ikon SVG bardzo ciemne (jasność L* < 20), ale nie `#000`. Po konwersji do CMYK wychodzą czernią czterokolorową, a drukarnie chcą tekstu i małych ikon w czystej czerni K100. Domyślny kolor tekstu KarKi to `#1d1b19` – do druku w drukarni wpisz `kolor=#000` w `CZCIONKA`.
+     - „Drukarnia: „prawie czerń” zamiast #000”: kolory tekstu, obrysów, obwódek, linii, ikon koloru i plików ikon SVG bardzo ciemne (jasność L* < 20), ale nie `#000`. Po konwersji do CMYK wychodzą czernią czterokolorową, a drukarnie chcą tekstu i małych ikon w czystej czerni K100. Domyślny kolor tekstu KarKi to `#1d1b19` – do druku w drukarni wpisz `kolor=#000` w `CZCIONKA`. W PDF w CMYK ([opis](#okna)) tylko `#000` daje czystą czerń K100.
      - „Drukarnia: kolor przy krawędzi karty (pas 0–3 mm)”: liczone z obrazka każdej karty (awersy i rewersy). Czarna jednolita ramka – drukarnia zaleca „border black” C40 M0 Y0 K100. Fiolet, szarość, brąz bez białej obwódki – słaba powtarzalność koloru między arkuszami, rozważ białą obwódkę. Biała obwódka (zewnętrzny 1 mm biały) – bez uwag. Pierwsze liczenie trwa chwilę, potem tylko zmienione karty.
 9. Aplikacja pamięta ostatnie szablony (**Plik → Ostatnie projekty**) i przy starcie otwiera ostatni.
 
@@ -127,7 +136,7 @@ Otwarta aplikacja wykonuje polecenia zapisane w plikach – bez klikania. Służ
 |---|---|---|
 | `stan` | talie i karty (ID, nazwa, kopie), karty zmienione i nowe od ostatniego PDF, Uwagi – bez plików | – |
 | `raport` | Raport projektu (powtórzone ID, puste pola, nieużywane kolumny, obrazki poniżej 300 dpi, nieużywane ikony i obrazki) – bez plików | `drukarnia` |
-| `pdf` | jak **Plik → Zapisz PDF**; zapamiętuje wydruk (potem „tylko zmienione” i Porównaj) | `uklad` (a4 / pojedyncze / drukarnia), `ciecie` (znaczniki / nozyczki / oba), `strony`, `rewersy`, `szkic`, `spad`, `przesuniecieX`, `przesuniecieY`, `talie`, `id`, `tylkoZmienione`, `plik` |
+| `pdf` | jak **Plik → Zapisz PDF**; zapamiętuje wydruk (potem „tylko zmienione” i Porównaj) | `uklad` (a4 / pojedyncze / drukarnia), `ciecie` (znaczniki / nozyczki / oba), `strony`, `rewersy`, `szkic`, `spad`, `profil`, `przesuniecieX`, `przesuniecieY`, `talie`, `id`, `tylkoZmienione`, `plik` |
 | `obrazki` | eksport JPG/PNG do `Export/` | `dpi` (150 / 300), `format` (jpg / png), `talie`, `id`, `rewersy` |
 | `pcio` | pokój playingcards.io w folderze projektu (`Projekt – playingcards.pcio`) – stos na każdą talię z wybranymi kartami | `dpi` (150 / 300), `talie`, `id` |
 | `katalog` | katalog talii (JPG) do `.generator/katalog/` | `talie`, `id` |
@@ -139,6 +148,8 @@ Otwarta aplikacja wykonuje polecenia zapisane w plikach – bez klikania. Służ
 - Brak klucza = ostatnie ustawienie z okna (Druk i PDF, Eksport obrazków, playingcards.io) albo domyślne. Zlecenie tych ustawień nie zmienia. Wyjątek: zlecenie zawsze bierze wszystkie karty (nie „zaznaczone”), chyba że `tylkoZmienione = tak`.
 - `plik` (PDF): ścieżka w folderze projektu, np. `plik = Druk/playtest 3.pdf`. Bez niej nazwa jak przy ręcznym zapisie (`Projekt – karty A4.pdf`, `Projekt – drukarnia.pdf`…) w folderze projektu.
 - `pdf` z `uklad = drukarnia`: w wyniku dodatkowo `pliki` (1 albo 2 – awersy i rewersy), `stronyPlikow` (liczba stron w każdym pliku), `strona` ([szerokość, wysokość] strony w mm) i `spad`. Przykład: `uklad = drukarnia` / `spad = 3` / `plik = Export/Ogród – drukarnia.pdf`.
+- `profil` (PDF, od 0.5.11): `fogra39` | `fogra51` | `rgb` | ścieżka do pliku `.icc` (względna, liczona od folderu projektu). Zlecenie z profilem daje PDF w CMYK ([opis](#okna)). **Bez klucza zlecenie daje RGB jak dotąd** – także gdy opcja CMYK jest włączona w oknie. `profil` działa tylko z `uklad = drukarnia`, inaczej jest błąd. Brakujący profil ECI zlecenie pobiera z eci.org bez pytania; bez sieci – `ok: false` z opisem. Bez Ghostscripta – `ok: false` i w `blad` podpowiedź `brew install ghostscript`.
+- Wynik `pdf` z profilem ma pole `cmyk`: `profil` (nazwa), `ghostscript` (wersja), `czas` (ms) i `pliki` – dla każdego pliku: `plik`, `strony`, `rgb` (0), `przestrzenieRgb` (0), `czern` (liczba wystąpień czystej czerni), `obrazki` (`cmyk`, `szare`, `inne` – lista, pusta), `trimBox` (liczba stron z TrimBox), `ok`, `czas`.
 - `raport` z `drukarnia = tak`: w `raport` dochodzą trzy sekcje „Drukarnia: …”, a w wyniku pole `drukarnia` z pełnymi listami: `margines` (3), `odstep` (`karta`, `talia`, `strona`: awers / rewers, `odstep` w mm, `krawedz`, `element`: TEKST / IKONA, `tekst`), `czern` (`kolor`, `rodzaj`, `jasnosc`, `karty`) i `krawedz` (`talia`, `strona`, `rodzaj`: czarny / ryzykowny, `odcien`, `kolor`, `karty`). Bez klucza raport jest jak dotąd – przełącznik w panelu nie wpływa na zlecenie.
 - Gdy w edytorze szablonu są niezapisane zmiany, zlecenie używa szablonu z dysku, a potem wraca podgląd z edytora (w wyniku `niezapisaneZmiany: true`).
 - Zlecenia `pdf`, `obrazki` i `pcio` dodają punkt w historii wersji z dopiskiem „(zlecenie)”.
@@ -158,6 +169,25 @@ Wynik `wynik-pdf.json` (skrót):
 ```json
 { "zlecenie": "pdf", "ok": true, "pliki": ["Ogród – karty A4 – zmienione.pdf"], "karty": 4, "strony": 2,
   "uwagi": [], "zaDlugie": [], "niezapisaneZmiany": false, "blad": null, "wersjaAplikacji": "0.4.11" }
+```
+
+Przykład – PDF dla drukarni w CMYK (Fogra39):
+
+```
+uklad = drukarnia
+spad = 3
+profil = fogra39
+plik = Export/Ogród – drukarnia.pdf
+```
+
+Fragment wyniku `wynik-pdf.json`:
+
+```json
+{ "zlecenie": "pdf", "ok": true, "pliki": ["Export/Ogród – drukarnia.pdf"],
+  "cmyk": { "profil": "ISO Coated v2 (ECI) – Fogra39", "ghostscript": "10.x", "czas": 5200,
+    "pliki": [{ "plik": "Export/Ogród – drukarnia.pdf", "strony": 24, "rgb": 0, "przestrzenieRgb": 0, "czern": 310,
+      "obrazki": { "cmyk": 6, "szare": 0, "inne": [] }, "trimBox": 24, "ok": true, "czas": 2600 }] },
+  "blad": null }
 ```
 
 - Wspólne pola wyniku: `ok`, `pliki` (ścieżki względem folderu projektu; w katalogu – nazwy w `folder`), `uwagi`, `zaDlugie` (karty z za długim tekstem), `niezapisaneZmiany`, `blad`, `wersjaAplikacji`, `opcje` (opcje po uzupełnieniu z okna), `ostrzezenia` (np. nieznany klucz, brak karty o podanym ID).
