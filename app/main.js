@@ -1438,8 +1438,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     if (!ow.ok) bledy.push('okno: ' + JSON.stringify(ow));
     // e) raport drukarni: sekcje tylko z drukarnia: true.
     const sekcje = await js(`(async () => ({ z: (await raportJson({ drukarnia: true })).map((x) => x.tytul), bez: (await raportJson({})).map((x) => x.tytul) }))()`);
-    drukarniaPdf.raport = { z: sekcje.z.filter((t) => t.startsWith('Drukarnia:')).length, pierwsze: sekcje.z.slice(0, 3).every((t) => t.startsWith('Drukarnia:')), bez: sekcje.bez.filter((t) => t.startsWith('Drukarnia:')).length };
-    drukarniaPdf.raport.ok = drukarniaPdf.raport.z === 3 && drukarniaPdf.raport.pierwsze && drukarniaPdf.raport.bez === 0;
+    drukarniaPdf.raport = { z: sekcje.z.filter((t) => t.startsWith('Drukarnia:')).length, pierwsze: sekcje.z.slice(0, 4).every((t) => t.startsWith('Drukarnia:')), bez: sekcje.bez.filter((t) => t.startsWith('Drukarnia:')).length };
+    drukarniaPdf.raport.ok = drukarniaPdf.raport.z === 4 && drukarniaPdf.raport.pierwsze && drukarniaPdf.raport.bez === 0;
     if (!drukarniaPdf.raport.ok) bledy.push('raport: ' + JSON.stringify(drukarniaPdf.raport));
     // Zmiana szablonu (tylko testowa kopia): tekst 1 mm od krawędzi, kolor „prawie czerń” – w pierwszej talii, przed jej [REWERS].
     if (!jestPrzykladem(szablon)) {
@@ -1470,6 +1470,136 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     fs.rmSync(tmp, { recursive: true, force: true });
     drukarniaPdf.bledy = bledy;
     drukarniaPdf.ok = !bledy.length;
+  }
+  // Spad obrazków przy krawędzi (#74; --test-edytor, poza przykładami – zmienia szablon testowej kopii i dopisuje obrazek):
+  // do pierwszej talii trafiają obrazek „wypełnij” (3 krawędzie) i „rozciągnij” (dolna krawędź) o znanym rozmiarze.
+  // a) DOM: obraz w klonie ze spadem ma tę samą skalę i położenie co w pierwotnej ramce;
+  // b) PDF drukarni ze spadem 0 i 3 mm → pdftoppm 254 dpi (1 mm = 10 px) → obszar cięcia (TrimBox) piksel po pikselu:
+  //    w ramkach obrazków średnia różnica < 2/255 i < 1 % pikseli różnych o > 32 (wygładzanie krawędzi); bez pdftoppm – tylko a);
+  // c) Raport drukarni zgłasza obrazek, który w spadzie nie ma czym wypełnić tła (nadmiar cover < 3 mm).
+  let spadTest = null;
+  if (process.argv.includes('--test-edytor') && !jestPrzykladem(szablon)) {
+    const js = (k) => wc.executeJavaScript(k);
+    const bledy = [];
+    spadTest = {};
+    const oryginal = fs.readFileSync(szablon, 'utf8');
+    const edytorByl = !(await js("document.getElementById('edytor').hidden"));
+    const wpisz = (t) => js(`(() => { const p = document.getElementById('edPole'); p.value = ${JSON.stringify(t)}; p.dispatchEvent(new Event('input')); })()`);
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'gk-spad-'));
+    const obrazek = path.join(projekt, 'spad-test.png');
+    try {
+      // PNG 400 × 200 px (2 : 1): szachownica 32 px + gradient – każda zmiana skali widać w pikselach.
+      const NW = 400, NH = 200, bmp = Buffer.alloc(NW * NH * 4);
+      for (let y = 0; y < NH; y++) for (let x = 0; x < NW; x++) {
+        const i = (y * NW + x) * 4, sz = (((x >> 5) + (y >> 5)) & 1) ? 255 : 40;
+        bmp[i] = sz; bmp[i + 1] = Math.round(y * 255 / NH); bmp[i + 2] = Math.round(x * 255 / NW); bmp[i + 3] = 255;   // BGRA
+      }
+      fs.writeFileSync(obrazek, require('electron').nativeImage.createFromBitmap(bmp, { width: NW, height: NH }).toPNG());
+      const talia = await js("document.querySelector('#podglad .talia').dataset.talia");
+      const pierwsza = `document.querySelector('#podglad .talia[data-talia=' + JSON.stringify(${JSON.stringify(talia)}) + '] .karta:not(.rewers)')`;
+      const [kw, kh] = await js(`cardMm(${pierwsza})`);
+      const start = Math.max(0, oryginal.search(/^\[TALIA\b/mi));
+      const nast = oryginal.slice(start + 1).search(/^\[TALIA\b/mi);
+      const koniec = nast < 0 ? oryginal.length : start + 1 + nast;
+      const wBloku = oryginal.slice(start, koniec).search(/^\[REWERS\]/mi);
+      const miejsce = wBloku < 0 ? koniec : start + wBloku;
+      // Ramka 1: 3 krawędzie (lewa, górna, prawa), 30 mm wysokości – obraz 2 : 1 jest w niej szerszy niż wyższy,
+      // więc nadmiar jest tylko w pionie; ramka 2: dolna krawędź, rozciągnięty obraz (nic nie wystaje).
+      const r1 = [0, 0, kw, 30], r2 = [kw / 4, kh - 15, kw / 2, 15];
+      const dopisek = `\nOBRAZEK = ${r1.join(', ')}, spad-test.png, dopasuj=wypełnij\nOBRAZEK = ${r2.join(', ')}, spad-test.png, dopasuj=rozciągnij\n`;
+      await js('przelaczEdytor(true)');
+      await wpisz(oryginal.slice(0, miejsce) + dopisek + oryginal.slice(miejsce)); await czekaj(3500);
+      // a) geometria w klonie ze spadem
+      spadTest.dom = await js(`(() => {
+        const k = ${pierwsza};
+        const [w, h] = cardMm(k), s = 3, PX = 96 / 25.4;
+        const c = kartaZeSpadem(k, w, h, s);
+        const tlo = document.createElement('div'); tlo.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden'; tlo.appendChild(c); document.body.appendChild(tlo);
+        try {
+          const cr = c.getBoundingClientRect();
+          return [...c.querySelectorAll('.el.obrazek img')].filter((i) => /spad-test/.test(URL_PLIK.get(i.src) || '')).map((i) => {
+            const r = i.getBoundingClientRect(), f = i.parentElement.getBoundingClientRect();
+            return { x: (r.left - cr.left) / PX - s, y: (r.top - cr.top) / PX - s, w: r.width / PX, h: r.height / PX,
+              fx: (f.left - cr.left) / PX - s, fy: (f.top - cr.top) / PX - s, fw: f.width / PX, fh: f.height / PX };
+          });
+        } finally { tlo.remove(); }
+      })()`);
+      const bl = (a, b) => Math.abs(a - b) < 0.05;
+      const [i1, i2] = spadTest.dom;
+      const sk1 = Math.max(kw / 400, 30 / 200);       // skala cover w pierwotnej ramce (mm na px obrazu)
+      if (!i1 || !bl(i1.w, 400 * sk1) || !bl(i1.h, 200 * sk1) || !bl(i1.x, (kw - 400 * sk1) / 2) || !bl(i1.y, (30 - 200 * sk1) / 2)) bledy.push('dom: wypełnij ' + JSON.stringify(i1));
+      if (!i1 || !bl(i1.fx, -3) || !bl(i1.fy, -3) || !bl(i1.fw, kw + 6) || !bl(i1.fh, 33)) bledy.push('dom: ramka wypełnij ' + JSON.stringify(i1));
+      if (!i2 || !bl(i2.x, r2[0]) || !bl(i2.y, r2[1]) || !bl(i2.w, r2[2]) || !bl(i2.h, r2[3]) || !bl(i2.fh, 18) || !bl(i2.fy, r2[1])) bledy.push('dom: rozciągnij ' + JSON.stringify(i2));
+
+      // b) PDF-y ze spadem 0 i 3 → piksele
+      const pdftoppm = require('child_process').spawnSync('pdftoppm', ['-v'], { encoding: 'utf8' });
+      if (pdftoppm.error) spadTest.piksele = 'brak narzędzia pdftoppm';
+      else {
+        const DPI = 254, pxMm = DPI / 25.4;      // 10 px / mm
+        const nativeImage = require('electron').nativeImage;
+        const renderuj = async (spad) => {
+          const plan = await js(`buildPrint({ uklad: 'drukarnia', spad: ${spad}, strony: 'osobno', rewersy: false, karty: [${pierwsza}] })`);
+          const pdf = path.join(tmp, `spad${spad}.pdf`);
+          const pliki = await pdfDoPliku(wc, pdf, plan);
+          const wynikPng = path.join(tmp, `spad${spad}`);
+          const pp = require('child_process').spawnSync('pdftoppm', ['-r', String(DPI), '-f', '1', '-l', '1', '-png', '-singlefile', pliki[0], wynikPng], { encoding: 'utf8' });
+          if (pp.status !== 0) throw new Error('pdftoppm: ' + pp.stderr);
+          const obraz = nativeImage.createFromPath(wynikPng + '.png');
+          return { plan, bmp: obraz.toBitmap(), rozm: obraz.getSize(), png: wynikPng + '.png' };
+        };
+        const A = await renderuj(0), B = await renderuj(3);
+        const ciecie = (r) => r.plan.strony[0].ciecie.map((v) => Math.round(v * pxMm));
+        const ca = ciecie(A), cb = ciecie(B);
+        spadTest.rozmiary = { a: [A.rozm.width, A.rozm.height], b: [B.rozm.width, B.rozm.height], ciecieA: ca, ciecieB: cb };
+        if (ca[2] !== cb[2] || ca[3] !== cb[3]) bledy.push('piksele: różne obszary cięcia ' + JSON.stringify([ca, cb]));
+        // Chromium przyciąga położenie obrazu do pikseli CSS (0,26 mm), więc przy przesunięciu o 3 mm obraz w PDF może
+        // się różnić o ≤ 0,3 mm – szukamy najlepszego przesunięcia ±3 px (0,3 mm); błąd skali o 10 % (stary kod) jest
+        // dużo większy (średnia różnica > 30/255).
+        const porownaj = (rect) => {      // rect w mm względem karty (po cięciu)
+          const [rx, ry, rw, rh] = rect.map((v) => Math.round(v * pxMm));
+          let najlepszy = null;
+          for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+            let suma = 0, duze = 0, n = 0;
+            for (let y = ry + 4; y < ry + rh - 4; y++) for (let x = rx + 4; x < rx + rw - 4; x++) {      // 4 px marginesu przy krawędzi ramki
+              const ia = ((ca[1] + y) * A.rozm.width + ca[0] + x) * 4, ib = ((cb[1] + y + dy) * B.rozm.width + cb[0] + x + dx) * 4;
+              let m = 0;
+              for (let c = 0; c < 3; c++) m = Math.max(m, Math.abs(A.bmp[ia + c] - B.bmp[ib + c]));
+              suma += m; if (m > 32) duze++; n++;
+            }
+            if (!najlepszy || suma / n < najlepszy.srednia) najlepszy = { srednia: suma / n, duze: duze / n * 100, n, dx, dy };
+          }
+          return { ...najlepszy, srednia: Math.round(najlepszy.srednia * 100) / 100, duze: Math.round(najlepszy.duze * 100) / 100 };
+        };
+        spadTest.piksele = { wypelnij: porownaj(r1), rozciagnij: porownaj(r2), progi: 'srednia < 6/255, > 32 w < 5 % pikseli, przesuniecie <= 3 px' };
+        for (const nazwa of ['wypelnij', 'rozciagnij']) {
+          const r = spadTest.piksele[nazwa];
+          if (!(r.n > 1000 && r.srednia < 6 && r.duze < 5)) bledy.push(`piksele: ${nazwa} ${JSON.stringify(r)}`);
+        }
+        if (process.env.KARKA_TEST_SPAD_ZRZUT) for (const x of [A, B]) fs.copyFileSync(x.png, path.join(process.env.KARKA_TEST_SPAD_ZRZUT, path.basename(x.png)));
+      }
+
+      // c) raport drukarni: ramka 1 (lewa, górna, prawa) – zgłaszane są krawędzie, przy których obraz wystaje poza ramkę o mniej
+      //    niż spad (3 mm); ramka 2 (rozciągnij) – dolna krawędź, nic nie wystaje
+      const rap = await js('raportDrukarni()');
+      spadTest.raport = (rap.spad || []).filter((x) => /spad-test/.test(x.plik)).map((x) => ({ karta: x.karta, brak: x.brak }));
+      const zaokr = (v) => Math.round(Math.max(0, v) * 100) / 100;
+      const nadX = (400 * sk1 - kw) / 2, nadY = (200 * sk1 - 30) / 2;
+      const oczekiwane = [['lewa', nadX], ['prawa', nadX], ['górna', nadY]].filter(([, v]) => v < 3 - 0.01).map(([n, v]) => n + ':' + zaokr(v)).sort().join();
+      const pierwsza1 = spadTest.raport.find((x) => !x.brak.some((b) => b.krawedz === 'dolna'));
+      const rozciagnij = spadTest.raport.find((x) => x.brak.some((b) => b.krawedz === 'dolna'));
+      const dostalem = pierwsza1 ? pierwsza1.brak.map((b) => b.krawedz + ':' + b.wystaje).sort().join() : '';
+      spadTest.raportOczekiwane = oczekiwane;
+      if (dostalem !== oczekiwane || !rozciagnij || rozciagnij.brak.length !== 1 || rozciagnij.brak[0].wystaje !== 0) bledy.push('raport: ' + dostalem + ' ≠ ' + oczekiwane + ' / ' + JSON.stringify(spadTest.raport.slice(0, 2)));
+      const sekcje = await js(`(async () => (await raportJson({ drukarnia: true })).filter((x) => /nie sięga do końca spadu/.test(x.tytul)).length)()`);
+      if (sekcje !== 1) bledy.push('raport: sekcja spadu ×' + sekcje);
+    } catch (e) { bledy.push('wyjątek: ' + e.message); }
+    finally {
+      try { await wpisz(oryginal); await czekaj(3500); if (!edytorByl) await js('przelaczEdytor(false)'); } catch (e) { /* koniec testu */ }
+      try { fs.rmSync(obrazek, { force: true }); } catch (e) { /* brak */ }
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+    spadTest.bledy = bledy;
+    spadTest.ok = !bledy.length;
   }
   // CMYK (issue #66, etap 2; --test-edytor, każdy projekt, pliki w katalogu tymczasowym): a) okno Druk i PDF (pole cmyk, profil),
   // b) PDF drukarni przez pdfDoPliku z profilem testowym (Ghostscript): kontrola każdego pliku, ramki z planu, pdfimages (jeśli jest).
@@ -1650,8 +1780,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       dr.bokiem.ok = !!(d3 && d3.ok === false && /strony/i.test(d3.blad || '') && !dr.bokiem.plik);
       const r1 = await zlec('raport', 'drukarnia = tak\n');
       dr.raportTak = r1 && { ok: r1.ok, sekcje: (r1.raport || []).map((x) => x.tytul).filter((t) => t.startsWith('Drukarnia:')).length,
-        pola: r1.drukarnia ? ['odstep', 'czern', 'krawedz'].map((k) => Array.isArray(r1.drukarnia[k])) : null };
-      dr.raportTak.ok = !!(r1 && r1.ok && dr.raportTak.sekcje === 3 && dr.raportTak.pola && dr.raportTak.pola.every(Boolean));
+        pola: r1.drukarnia ? ['odstep', 'czern', 'krawedz', 'spad'].map((k) => Array.isArray(r1.drukarnia[k])) : null };
+      dr.raportTak.ok = !!(r1 && r1.ok && dr.raportTak.sekcje === 4 && dr.raportTak.pola && dr.raportTak.pola.every(Boolean));
       const r2 = await zlec('raport');
       dr.raportBez = r2 && { ok: r2.ok, sekcje: (r2.raport || []).map((x) => x.tytul).filter((t) => t.startsWith('Drukarnia:')).length, wynikDrukarnia: 'drukarnia' in r2 };
       dr.raportBez.ok = !!(r2 && r2.ok && dr.raportBez.sekcje === 0 && !dr.raportBez.wynikDrukarnia);
@@ -2058,9 +2188,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     && Menu.getApplicationMenu().items[0].submenu.items.some((i) => i.label === 'Sprawdź aktualizacje…');
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
-    && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
+    && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
