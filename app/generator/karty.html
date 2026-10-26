@@ -120,6 +120,7 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 #druk.szkic .el.ksztalt { background: none !important; border: 0.2mm solid #999 !important; }
 #druk.szkic .el.obrazek { border: 0.2mm dashed #bbb; }
 #druk.szkic .el.obrazek img { display: none; }
+#druk.szkic .el.obrazek.tlo { display: none; }
 #druk.szkic .el.tekst, #druk.szkic .el.tekst * { color: #000 !important; }
 #druk.szkic img { filter: grayscale(1); }
 #druk { display: none; }
@@ -634,9 +635,15 @@ function parseTemplate(text, plik) {
       case 'pcio': out.bledy.push(`${where}: komenda PCIO nie jest już potrzebna – eksport do playingcards.io tworzy nowy pokój ze wszystkimi taliami. Możesz usunąć ten wiersz.`); break;
       case 'karta': {
         const w = num(args[0]), h = num(args[1]);
-        if (cel === t.rewers) { t.kartaRewers = opt; break; }        // rewers: własne zaokrąglenie/obwódka, rozmiar jak awers
+        // spad= (#84): spad deklaruje szablon – TŁO i obrazki przy krawędzi to pliki karty ze spadem.
+        const zlySpad = opt.spad !== undefined && !(num(String(opt.spad).replace(',', '.')) >= 0 && num(String(opt.spad).replace(',', '.')) <= 10);
+        if (cel === t.rewers) {                                        // rewers: własne zaokrąglenie/obwódka, rozmiar i spad jak awers
+          if (opt.spad !== undefined) { out.bledy.push(`${where}: spad= wpisz w KARTA awersu – rewers ma ten sam spad`); delete opt.spad; }
+          t.kartaRewers = opt; break;
+        }
         if (Number.isNaN(w) || Number.isNaN(h)) out.bledy.push(`${where}: KARTA potrzebuje szerokości i wysokości w mm`);
         else { t.w = w; t.h = h; }
+        if (zlySpad) { out.bledy.push(`${where}: spad= to liczba mm od 0 do 10, np. KARTA = 63, 88, spad=3`); delete opt.spad; }
         t.karta = opt; break;
       }
       case 'czcionka':
@@ -675,6 +682,8 @@ function parseTemplate(text, plik) {
   });
   const wartosci = (c) => [...c.args, ...Object.values(c.opt)];
   for (const t of out.talie) {
+    // Spad z szablonu w mm (0 = brak deklaracji – PDF dla drukarni dorabia spad i ostrzega).
+    t.spad = t.karta.spad !== undefined ? Math.max(0, num(String(t.karta.spad).replace(',', '.')) || 0) : 0;
     t.rewersZalezny = t.rewers.some((c) => wartosci(c).some(odKarty)) || Object.values(t.kartaRewers || {}).some(odKarty);
     t.rewersPerKopia = t.rewersZalezny && t.rewers.some((c) => wartosci(c).some((v) => /\[\s*_(numer|kopia)\s*\]/i.test(String(v ?? ''))));
   }
@@ -1007,7 +1016,10 @@ function renderCard(tpl, cmds, row, ctx) {
   };
   const mm = (v) => (String(v).trim().endsWith('%') ? String(v).trim() : num(v) + 'mm');
 
-  let bg = '', html = '';
+  let bg = '', html = '', tlo = '';
+  // Spad z szablonu (#84): TŁO z pliku i obrazki przy krawędzi to pliki karty ze spadem – ramka sięga spadu,
+  // karta (overflow: hidden) przycina je do linii cięcia, a PDF dla drukarni rysuje je bez skalowania.
+  const sp = tpl.spad || 0;
   for (const c of cmds) {
     if (c.opt.jesli !== undefined && !warunek(c.opt.jesli, c.where)) continue;
     const o = c.opt, f = c.flags;
@@ -1015,8 +1027,10 @@ function renderCard(tpl, cmds, row, ctx) {
       const v = value(c.args[0]);
       if (PLIK_RE.test(v)) {
         const u = fileUrl(v);
-        if (u) bg = `background:url('${u}') center/cover;`; else ctx.warn.add(`${ctx.label}: brak pliku ${v}`);
-      } else { const k = fillOf(c.args[0], o.kierunek); if (k) bg = `background:${k};`; }
+        if (!u) ctx.warn.add(`${ctx.label}: brak pliku ${v}`);
+        else if (sp) { bg = ''; tlo = `<div class="el obrazek tlo" style="left:${-sp}mm;top:${-sp}mm;width:${tpl.w + 2 * sp}mm;height:${tpl.h + 2 * sp}mm;"><img src="${u}" alt="" style="object-fit:cover;object-position:center center"></div>`; }
+        else bg = `background:url('${u}') center/cover;`;
+      } else { const k = fillOf(c.args[0], o.kierunek); if (k) { bg = `background:${k};`; tlo = ''; } }
       continue;
     }
     if (c.kom === 'linia') { html += liniaSvg(c, tpl, ctx, colorOf); continue; }
@@ -1071,7 +1085,17 @@ function renderCard(tpl, cmds, row, ctx) {
       const fit = { zmiesc: 'contain', wypelnij: 'cover', rozciagnij: 'fill' }[plain(o.dopasuj || (o.kadr !== undefined ? 'wypelnij' : 'zmiesc'))] || 'contain';
       const przeksz = [kadr ? `translate(${kadr.dx}mm,${kadr.dy}mm) scale(${kadr.s})` : '', odbicieOf(o.odbicie, c.where)].filter(Boolean).join(' ');
       const kr = krycieOf(o.krycie, c.where);
-      const st = box + (kadr ? 'overflow:hidden;' : '') + (kr !== null ? `opacity:${kr};` : '');
+      // Spad z szablonu: obrazek wypełnij / rozciągnij przy krawędzi karty (bez kadr= i obrotu) sięga spadu
+      // po stronach, których dotyka – plik ma spad. Bez deklaracji spadu – ramka jak dotąd.
+      let ramka = box;
+      if (sp && !kadr && !obrot && fit !== 'contain') {
+        const E = 0.05, l = x <= E, g = y <= E, pr = x + w >= tpl.w - E, d = y + h >= tpl.h - E;
+        if (l || g || pr || d) {
+          const nx = l ? -sp : x, ny = g ? -sp : y, nw = (pr ? tpl.w + sp : x + w) - nx, nh = (d ? tpl.h + sp : y + h) - ny;
+          ramka = `left:${nx}mm;top:${ny}mm;width:${nw}mm;height:${nh}mm;`;
+        }
+      }
+      const st = ramka + (kadr ? 'overflow:hidden;' : '') + (kr !== null ? `opacity:${kr};` : '');
       html += `<div class="el obrazek" style="${st}"><img src="${u}" alt="" style="object-fit:${fit};object-position:${POS_H[ph] || 'center'} ${POS_V[pv] || 'center'}${przeksz ? ';transform:' + przeksz : ''}"></div>`;
     } else if (c.kom === 'ikona') {
       const tr = field(c.args[4]);
@@ -1084,7 +1108,7 @@ function renderCard(tpl, cmds, row, ctx) {
   const k = (cmds === tpl.rewers && tpl.kartaRewers) || tpl.karta;
   const r = k.zaokraglenie ? `border-radius:${mm(k.zaokraglenie)};` : '';
   if (k.obwodka) html += `<div class="el" style="left:0;top:0;width:100%;height:100%;${r}border:${num(k.obwodka)}mm solid ${colorOf(k.kolor_obwodki || '#000000') || '#000'}"></div>`;
-  return { html, style: `width:${tpl.w}mm;height:${tpl.h}mm;${bg}${r}` };
+  return { html: tlo + html, style: `width:${tpl.w}mm;height:${tpl.h}mm;${bg}${r}` };
 }
 
 // ── Dopasowanie tekstu ───────────────────────────────────────────────────────
@@ -1600,6 +1624,8 @@ function ocenPas(piks, zewn) {
 // obraz jest większy od ramki, wg object-position; rozciągnij: nie wystaje wcale). kadr= i obrócone – pomijane.
 function obrazkiBezSpadu(k, spad = SPAD_DRUKARNI) {
   const [w, h] = cardMm(k), wynik = [];
+  if (spadTalii(k.dataset.talia)) return wynik;                    // spad z szablonu – sprawdza plikiZeSpadem
+
   for (const el of k.querySelectorAll(':scope > .el.obrazek')) {
     const img = el.querySelector('img');
     if (!img || !/cover|fill/.test(img.style.objectFit) || /translate/.test(img.style.transform)) continue;
@@ -1615,12 +1641,35 @@ function obrazkiBezSpadu(k, spad = SPAD_DRUKARNI) {
   return wynik;
 }
 
+// Spad z szablonu (#84): TŁO z pliku i obrazki przy krawędzi mają ramkę karty ze spadem – plik powinien mieć jej
+// proporcje. Inne proporcje: cover przycina obraz (plik bez spadu – proporcje samej karty – traci spad z obrazu,
+// a powiększenie przesuwa rysunek), rozciągnij go zniekształca. Tolerancja 1 %.
+function plikiZeSpadem(k) {
+  const sp = spadTalii(k.dataset.talia), wynik = [];
+  if (!sp) return wynik;
+  const [w, h] = cardMm(k);
+  for (const el of k.querySelectorAll(':scope > .el.obrazek')) {
+    const img = el.querySelector('img'), x = parseFloat(el.style.left), y = parseFloat(el.style.top);
+    const fw = parseFloat(el.style.width), fh = parseFloat(el.style.height);
+    if (!img || !img.naturalWidth || !img.naturalHeight || !/cover|fill/.test(img.style.objectFit) || /translate/.test(img.style.transform)) continue;
+    if (!(x < -0.01 || y < -0.01 || x + fw > w + 0.01 || y + fh > h + 0.01)) continue;   // nie sięga spadu
+    const r = (img.naturalWidth / img.naturalHeight) / (fw / fh);
+    if (Math.abs(r - 1) <= 0.01) continue;
+    // Ramka bez spadu (część w obrębie karty) – proporcje pliku bez spadu.
+    const bw = Math.min(w, x + fw) - Math.max(0, x), bh = Math.min(h, y + fh) - Math.max(0, y);
+    const bezSpadu = Math.abs((img.naturalWidth / img.naturalHeight) / (bw / bh) - 1) <= 0.01;
+    wynik.push({ plik: (URL_PLIK.get(img.src) || '').replace(/@[^@]*$/, ''), tlo: el.classList.contains('tlo'), ramka: [fw, fh].map((v) => Math.round(v * 100) / 100),
+      obraz: [img.naturalWidth, img.naturalHeight], dopasowanie: img.style.objectFit === 'fill' ? 'rozciągnij' : 'wypełnij', bezSpadu });
+  }
+  return wynik;
+}
+
 async function raportDrukarni() {
   const praca = async () => {
     const filtr = $('filtr').value; $('filtr').value = ''; applyFilter();      // odfiltrowane talie też
     try {
       const karty = [...$('podglad').querySelectorAll('.talia .karta')];
-      const odstep = [], czern = new Map(), pasy = new Map(), spad = [], widziane = new Set();
+      const odstep = [], czern = new Map(), pasy = new Map(), spad = [], pliki = [], widziane = new Set();
       for (const k of karty) {
         const rewers = k.classList.contains('rewers');
         const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' + nrRewersu(k) : k.dataset.row);
@@ -1640,6 +1689,7 @@ async function raportDrukarni() {
           czern.set(kk, x);
         }
         for (const x of obrazkiBezSpadu(k)) spad.push({ karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...x });
+        for (const x of plikiZeSpadem(k)) pliki.push({ karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...x });
         const p = await pasKarty(k);
         if (p && !p.blad && ['czarny', 'ryzykowny'].includes(p.rodzaj)) {
           const kk = k.dataset.talia + '|' + (rewers ? 'r' : 'a') + '|' + p.rodzaj + '|' + (p.odcien || '') + '|' + p.kolor;
@@ -1649,7 +1699,10 @@ async function raportDrukarni() {
       }
       odstep.sort((a, b) => a.odstep - b.odstep);
       odstep.forEach((x) => delete x.klucz);
-      return { margines: MARGINES_DRUKARNI, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad };
+      // Spad w szablonie (#84): talie bez deklaracji i pliki o proporcjach innych niż karta ze spadem.
+      const talie = [...$('podglad').querySelectorAll('.talia')].map((t) => t.dataset.talia);
+      const spadSzablonu = { talie: Object.fromEntries(talie.map((t) => [t, spadTalii(t)])), bez: talie.filter((t) => !spadTalii(t)), pliki };
+      return { margines: MARGINES_DRUKARNI, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad, spadSzablonu };
     } finally { $('filtr').value = filtr; applyFilter(); }
   };
   // Obrazki kart (html-to-image) czytają podgląd – na wyłączność, chyba że eksport już trwa.
@@ -1662,6 +1715,14 @@ async function sekcjeDrukarni(lista) {
   const mm = (v) => String(v.toFixed(1)).replace('.', ',') + ' mm';
   const ileKart = (a) => a.length > 6 ? a.slice(0, 6).map(esc).join(', ') + ` … (+${a.length - 6})` : a.map(esc).join(', ');
   const POKAZ = 25;
+  // Spad deklaruje szablon (#84) – w fazie druku w drukarni każda talia potrzebuje spad= i plików ze spadem.
+  const ss = r.spadSzablonu, wsz = ss.bez.length === Object.keys(ss.talie).length;
+  lista('Drukarnia: spad w szablonie', (ss.bez.length ? [(wsz ? 'Projekt nie deklaruje spadu' : `Talie bez spadu: ${ileKart(ss.bez)}`)
+    + ` – w PDF dla drukarni spad jest dorabiany (tło powiększone, obrazki przy krawędzi przedłużone). Do druku w drukarni dopisz spad w szablonie (np. <code>KARTA = 63, 88, spad=3</code>) i przygotuj tło i obrazki przy krawędzi ze spadem`] : [])
+    .concat(ss.pliki.slice(0, POKAZ).map((x) => `${esc(x.karta)}: ${esc(x.plik)}${x.tlo ? ' (tło)' : ''} – ${x.obraz[0]}×${x.obraz[1]} px, a ramka ze spadem ma ${mm(x.ramka[0])} × ${mm(x.ramka[1])}`
+      + (x.bezSpadu ? ': plik ma proporcje karty bez spadu – przygotuj go ze spadem' : ': inne proporcje') + (x.dopasowanie === 'rozciągnij' ? ' (obraz zostanie zniekształcony)' : ' (część obrazu zostanie przycięta)')))
+    .concat(ss.pliki.length > POKAZ ? [`… i ${ss.pliki.length - POKAZ} plików więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
+    'wszystkie talie deklarują spad, a tło i obrazki przy krawędzi mają proporcje karty ze spadem');
   lista(`Drukarnia: tekst bliżej niż ${MARGINES_DRUKARNI} mm od linii cięcia`, r.odstep.slice(0, POKAZ).map((x) =>
     `<b>${mm(x.odstep)}</b> – ${esc(x.karta)}: ${x.element === 'IKONA' ? 'ikona' : '„' + esc(x.tekst) + '”'}, ${x.krawedz} krawędź`)
     .concat(r.odstep.length > POKAZ ? [`… i ${r.odstep.length - POKAZ} kart więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
@@ -2202,6 +2263,22 @@ function kartaZeSpadem(k, w, h, s) {
 // { szer, wys, spad (mm), pliki: [''] | ['awersy', 'rewersy'], strony: [{ plik, ciecie: [x, y, w, h] }] }.
 const SPAD_DRUKARNI = 3;              // domyślny spad (mm) – wymóg drukarni (#66)
 let PLAN_DRUKU = null;
+const mmTxt = (v) => String(Math.round(v * 100) / 100).replace('.', ',') + ' mm';
+// Spad zadeklarowany w szablonie talii (#84: KARTA = 63, 88, spad=3) w mm; 0 = brak deklaracji.
+const spadTalii = (nazwa) => { const t = (typeof TALIE !== 'undefined' ? TALIE : []).find((x) => x.nazwa === nazwa); return (t && t.spad) || 0; };
+// Spad PDF dla drukarni: z szablonu (największy zadeklarowany), a gdy żadna talia go nie deklaruje – z okna albo
+// zlecenia (dawne zachowanie: spad dorabiany – tło powiększone, obrazki przy krawędzi przedłużone, #74).
+// Talie bez deklaracji i z innym spadem → ostrzeżenia (decyzja właściciela 26.10.2026: PDF powstaje, z ostrzeżeniem).
+function spadDruku(karty, spadOkna) {
+  const talie = [...new Set(karty.map((k) => k.dataset.talia))].map((t) => [t, spadTalii(t)]);
+  const zadeklarowane = talie.map(([, x]) => x).filter(Boolean);
+  const s = zadeklarowane.length ? Math.max(...zadeklarowane) : Math.max(0, num(spadOkna ?? SPAD_DRUKARNI) || 0);
+  const bez = talie.filter(([, x]) => !x).map(([t]) => t), ostrzezenia = [];
+  if (bez.length && s) ostrzezenia.push((bez.length === talie.length ? 'projekt nie deklaruje spadu w szablonie' : 'talie bez spadu w szablonie: ' + bez.join(', '))
+    + ` – spad ${mmTxt(s)} jest w PDF dorabiany (tło powiększone, obrazki przy krawędzi przedłużone). Do druku w drukarni dopisz spad w szablonie (np. KARTA = 63, 88, spad=3) i przygotuj tło i obrazki przy krawędzi ze spadem`);
+  for (const [t, x] of talie) if (x && x !== s) ostrzezenia.push(`talia ${t}: spad w szablonie ${mmTxt(x)}, w PDF ${mmTxt(s)} – brakujące ${mmTxt(s - x)} dorobione`);
+  return { s, bez, ostrzezenia, zSzablonu: zadeklarowane.length > 0 };
+}
 // Odcisk rewersu do porównania kart: ten sam wygląd i rozmiar = ten sam rewers (bez data-talia i title).
 const wygladRewersu = (el, w, h) => w + 'x' + h + '|' + el.style.cssText + '|' + el.innerHTML;
 function buildPrint(o = {}) {
@@ -2229,11 +2306,14 @@ function buildPrint(o = {}) {
     // strony: 'osobno' (domyślnie, wymóg drukarni) – najpierw wszystkie awersy; jeden wspólny rewers →
     // ostatnia strona tego samego pliku, różne rewersy → drugi plik, w którym strona N to rewers awersu N
     // (karta talii bez rewersu → pusta strona); 'naprzemian' – awers, rewers, awers… (jak do 0.5.8).
-    const s = tryb === 'drukarnia' ? Math.max(0, num(o.spad ?? SPAD_DRUKARNI) || 0) : 0;
+    // Spad: z szablonu (#84), bez deklaracji – z okna / zlecenia (dorabiany, z ostrzeżeniem).
+    const sd = tryb === 'drukarnia' ? spadDruku([...groups.values()].flatMap((g) => g.karty.map((a) => a.k)), o.spad) : null;
+    const s = sd ? sd.s : 0;
     // Jeden format strony dla całego wydruku: największa karta (pionowo); mniejsze karty na środku.
     const pw = Math.max(...[...groups.values()].map((g) => g.cw)) + 2 * s;
     const ph = Math.max(...[...groups.values()].map((g) => g.ch)) + 2 * s;
     const plan = { uklad: tryb, szer: pw, wys: ph, spad: s, pliki: [''], strony: [] };
+    if (sd) Object.assign(plan, { spadZSzablonu: sd.zSzablonu, bezSpadu: sd.bez, ostrzezenia: sd.ostrzezenia });
     // Zapas spadu: Chromium zaokrągla stronę PDF (np. 94 → 93,8 mm), więc strona jest o 2 × ZAPAS większa,
     // a karta ma spad + ZAPAS (wystaje poza arkusz). main.js przycina stronę do pw × ph (MediaBox) –
     // bez białej kreski przy dolnej i prawej krawędzi spadu.
@@ -2714,6 +2794,10 @@ const ZADANIA_ZLECEN = {
       wynik.stronyPlikow = plan.pliki.map((_, n) => plan.strony.filter((x) => x.plik === n).length).filter(Boolean);
       wynik.strona = [plan.szer, plan.wys].map((x) => Math.round(x * 100) / 100);
       wynik.spad = plan.spad;
+      // Spad z szablonu (#84): false = żadna talia go nie deklaruje (spad dorabiany); ostrzeżenia jak w oknie.
+      wynik.spadZSzablonu = !!plan.spadZSzablonu;
+      if (plan.bezSpadu && plan.bezSpadu.length) wynik.bezSpadu = plan.bezSpadu;
+      if (plan.ostrzezenia && plan.ostrzezenia.length) wynik.ostrzezenia = [...(wynik.ostrzezenia || []), ...plan.ostrzezenia];
     }
     return wynik;
   },
@@ -3050,7 +3134,8 @@ async function zapiszPdf(o = {}) {
     // CMYK: { pliki, cmyk } – kontrola z main.js; inaczej ścieżka albo lista ścieżek.
     OSTATNI_CMYK = (w && w.cmyk) || null;
     const pliki = w ? [].concat(w.pliki || w) : null;
-    status(pliki ? `Zapisano PDF${OSTATNI_CMYK ? ' w CMYK (' + OSTATNI_CMYK.profil + ')' : ''}: ` + pliki.join(', ') : 'Zapis PDF anulowany.');
+    const uwagi = pliki && plan.ostrzezenia && plan.ostrzezenia.length ? ' · Uwaga: ' + plan.ostrzezenia.join('; ') : '';
+    status(pliki ? `Zapisano PDF${OSTATNI_CMYK ? ' w CMYK (' + OSTATNI_CMYK.profil + ')' : ''}: ` + pliki.join(', ') + uwagi : 'Zapis PDF anulowany.');
     if (pliki) { await zapamietajDruk(karty); punktHistorii(({ pojedyncze: 'PDF – osobne strony', drukarnia: OSTATNI_CMYK ? 'PDF – drukarnia CMYK' : 'PDF – drukarnia' }[o.uklad] || 'PDF A4') + (o.zlecenie ? ' (zlecenie)' : '')); }
     return pliki;
   } catch (e) {
@@ -3110,7 +3195,17 @@ function poleOkna(nazwa, rodzaj, u) {
       // 2 albo 3 mm; inna wartość (zapamiętana dawniej albo ze zlecenia) zostaje jako trzecia pozycja.
       const opcje = [[3, '3 mm <span class="opis">– wymóg większości drukarni gier</span>'], [2, '2 mm']];
       if (u.spad != null && ![2, 3].includes(+u.spad)) opcje.push([+u.spad, `${String(u.spad).replace('.', ',')} mm <span class="opis">– zapamiętane</span>`]);
-      return radio('Spad <span class="opis">(układ Drukarnia) – tło i elementy przy krawędzi wychodzą poza linię cięcia</span>', 'spad', opcje);
+      // Spad z szablonu (#84) ma pierwszeństwo – wybór dotyczy tylko talii bez deklaracji; bez deklaracji – ostrzeżenie.
+      const talie = [...$('podglad').querySelectorAll('.talia')].map((t) => t.dataset.talia);
+      const bez = talie.filter((t) => !spadTalii(t)), zad = talie.map(spadTalii).filter(Boolean);
+      const wszystkie = talie.length && !bez.length;
+      let pole = radio('Spad <span class="opis">(układ Drukarnia) – tło i elementy przy krawędzi wychodzą poza linię cięcia</span>', 'spad',
+        opcje.map(([v, t]) => [v, t, wszystkie]));
+      const info = wszystkie ? `<div class="opis">Spad z szablonu: ${mmTxt(Math.max(...zad))} – tło i obrazki przy krawędzi to pliki ze spadem.</div>`
+        : bez.length ? `<div class="opis ostrzezenie-spadu">⚠ ${bez.length === talie.length ? 'Projekt nie deklaruje spadu w szablonie' : 'Talie bez spadu w szablonie: ' + esc(bez.join(', '))}` +
+          ` – w PDF dla drukarni spad będzie dorabiany (tło powiększone, obrazki przy krawędzi przedłużone). Do druku w drukarni dopisz np. <code>KARTA = 63, 88, spad=3</code> i przygotuj tło i obrazki ze spadem.` +
+          (zad.length ? ` Talie ze spadem w szablonie mają ${mmTxt(Math.max(...zad))} i ten spad ma cały PDF.` : '') + '</div>' : '';
+      return pole.replace(/<\/fieldset>$/, info + '</fieldset>');
     }
     case 'strony': return radio('Strony <span class="opis">(układ Drukarnia)</span>', 'strony', [
       ['osobno', 'Awersy i rewersy osobno <span class="opis">– plik awersów (karta na stronę), wspólny rewers na ostatniej stronie; różne rewersy → drugi plik: strona N = rewers awersu N</span>'],

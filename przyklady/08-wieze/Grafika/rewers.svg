@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="690" height="940" viewBox="0 0 69 94">
+  <!-- Rewers 63×88 mm ze spadem 3 mm (plik 69×94 mm). -->
+  <defs><pattern id="p" width="6" height="6" patternUnits="userSpaceOnUse"><rect width="6" height="6" fill="#2f4a3a"/><path d="M0 6 L3 0 L6 6" fill="none" stroke="#3f6450" stroke-width="0.6"/></pattern></defs>
+  <rect width="69" height="94" fill="url(#p)"/>
+  <circle cx="34.5" cy="47" r="15" fill="#f4ead2"/>
+  <path d="M28 57 V40 h2 v-3 h2 v3 h5 v-3 h2 v3 h2 V57 Z" fill="#2f4a3a"/>
+</svg>

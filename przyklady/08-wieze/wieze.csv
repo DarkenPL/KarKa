@@ -1,0 +1,5 @@
+ID;Ilość;Nazwa;Tło;Wieża;Opis
+1;2;Strażnica;Grafika/tlo-swit.svg;Grafika/wieza-straznicza.svg;Odkryj jedną kartę z wierzchu talii przeciwnika.
+2;1;Wieża magów;Grafika/tlo-noc.svg;Grafika/wieza-magow.svg;Dobierz dwie karty, jedną odrzuć.
+3;1;Latarnia;Grafika/tlo-burza.svg;Grafika/latarnia.svg;Statki w zasięgu dwóch pól płyną o jedno pole dalej.
+4;2;Ruina;Grafika/tlo-burza.svg;Grafika/ruina.svg;Gdy ktoś zagra tę kartę, każdy gracz odrzuca jedną kartę.

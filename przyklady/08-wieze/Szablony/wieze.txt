@@ -1,0 +1,24 @@
+; ═══════════════════════════════════════════════════════════════════
+;  PRZYKŁAD 8 – karty ze spadem do druku w drukarni
+;  spad=3 w KARTA: tło (TŁO z pliku) i obrazki przy krawędzi to pliki
+;  karty ze spadem – 63×88 mm + 3 mm z każdej strony = 69×94 mm.
+;  Podgląd, A4 i obrazki przycinają je do linii cięcia, PDF dla drukarni
+;  rysuje je w całości, bez skalowania.
+; ═══════════════════════════════════════════════════════════════════
+
+PROJEKT = Wieże
+NAZWA = Wieże
+DANE  = wieze.csv
+KARTA = 63, 88, spad=3, zaokrąglenie=3
+
+CZCIONKA = "EB Garamond, Georgia, serif", 11, kolor=#000000
+
+TŁO     = [Tło]                   ; plik 69×94 mm (karta + spad)
+OBRAZEK = 0, 0, 63, 88, Grafika/rama.svg, dopasuj=rozciągnij   ; nakładka na całą kartę – też ze spadem
+TEKST   = 6, 4, 51, 12, [Nazwa], czcionka="Patrick Hand, cursive", rozmiar=16, wyrównanie=środek, pion=środek
+OBRAZEK = 14, 21, 35, 40, [Wieża]
+PROSTOKĄT = 8, 62, 47, 22, kolor=#f4ead2, zaokrąglenie=2
+TEKST   = 9, 63, 45, 20, [Opis], wyrównanie=środek, pion=środek
+
+[REWERS]
+TŁO = Grafika/rewers.svg

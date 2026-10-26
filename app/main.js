@@ -1341,9 +1341,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const rewersy = karty.filter((k) => backOf(k.dataset.talia)).length;
       buildPrint({ uklad: 'drukarnia', spad: 2, strony: 'naprzemian', karty });
       const strony = document.querySelectorAll('#druk .arkusz');
-      const [w, h] = cardMm(karty[0]);
+      const [w, h] = cardMm(karty[0]), s = spadDruku(karty, 2).s;      // spad z szablonu (#84) ma pierwszeństwo
       return { strony: strony.length, oczekiwane: karty.length + rewersy, rozmiar: strony[0].style.width + ' ' + strony[0].style.height,
-        karta: Math.min(w, h) + 4 + 'mm ' + (Math.max(w, h) + 4) + 'mm', znaczniki: document.querySelectorAll('#druk .znacznik').length,
+        karta: Math.min(w, h) + 2 * s + 'mm ' + (Math.max(w, h) + 2 * s) + 'mm', znaczniki: document.querySelectorAll('#druk .znacznik').length,
         raport: /Obrazki poniżej 300 dpi/.test(document.getElementById('raport').innerHTML) };
     })()`);
     drukarnia.raport = /Obrazki poniżej 300 dpi/.test(await wc.executeJavaScript('raportProjektu()'));
@@ -1378,9 +1378,11 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const kom = karty.map((k) => { const [w, h] = cardMm(k); const b = backOf(k.dataset.talia);
         if (b) { zRewersem++; wyglady.add(w + 'x' + h + '|' + b.style.cssText + '|' + b.innerHTML); }
         return [Math.min(w, h), Math.max(w, h)]; });
-      return { karty: karty.length, zRewersem, wyglady: wyglady.size, szer: Math.max(...kom.map((c) => c[0])), wys: Math.max(...kom.map((c) => c[1])) };
+      return { karty: karty.length, zRewersem, wyglady: wyglady.size, szer: Math.max(...kom.map((c) => c[0])), wys: Math.max(...kom.map((c) => c[1])),
+        zad: Math.max(0, ...karty.map((k) => spadTalii(k.dataset.talia))) };
     })()`);
     const bledy = [];
+    const sp = (x) => o.zad || x;                       // spad z szablonu (#84) wygrywa ze spadem z okna
     // Plan → zapis przez pdfDoPliku (jak IPC) → kontrola każdego pliku pdf-lib-em.
     const przebieg = async (nazwa, opcje, spad, strony, szerMm, wysMm) => {
       const b = [];
@@ -1415,9 +1417,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     };
     const osobnoStrony = !o.zRewersem ? [o.karty] : (o.wyglady === 1 && o.zRewersem === o.karty ? [o.karty + 1] : [o.karty, o.karty]);
     drukarniaPdf = { oczekiwanie: o };
-    drukarniaPdf.osobno = await przebieg('osobno', { spad: 3, strony: 'osobno' }, 3, osobnoStrony, o.szer + 6, o.wys + 6);
-    drukarniaPdf.naprzemian = await przebieg('naprzemian', { spad: 2, strony: 'naprzemian' }, 2, [o.karty + o.zRewersem], o.szer + 4, o.wys + 4);
-    drukarniaPdf.bezRewersow = await przebieg('bez-rewersow', { spad: 3, strony: 'osobno', rewersy: false }, 3, [o.karty], o.szer + 6, o.wys + 6);
+    drukarniaPdf.osobno = await przebieg('osobno', { spad: 3, strony: 'osobno' }, sp(3), osobnoStrony, o.szer + 2 * sp(3), o.wys + 2 * sp(3));
+    drukarniaPdf.naprzemian = await przebieg('naprzemian', { spad: 2, strony: 'naprzemian' }, sp(2), [o.karty + o.zRewersem], o.szer + 2 * sp(2), o.wys + 2 * sp(2));
+    drukarniaPdf.bezRewersow = await przebieg('bez-rewersow', { spad: 3, strony: 'osobno', rewersy: false }, sp(3), [o.karty], o.szer + 2 * sp(3), o.wys + 2 * sp(3));
     // d) okno Druk i PDF: domyślnie spad 3 i strony „osobno”; zapamiętany spad 2,5 jako trzecia pozycja.
     drukarniaPdf.okno = await js(`(async () => {
       const przed = USTAWIENIA_OKIEN.druk, f = () => document.getElementById('oknoForm');
@@ -1438,8 +1440,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     if (!ow.ok) bledy.push('okno: ' + JSON.stringify(ow));
     // e) raport drukarni: sekcje tylko z drukarnia: true.
     const sekcje = await js(`(async () => ({ z: (await raportJson({ drukarnia: true })).map((x) => x.tytul), bez: (await raportJson({})).map((x) => x.tytul) }))()`);
-    drukarniaPdf.raport = { z: sekcje.z.filter((t) => t.startsWith('Drukarnia:')).length, pierwsze: sekcje.z.slice(0, 4).every((t) => t.startsWith('Drukarnia:')), bez: sekcje.bez.filter((t) => t.startsWith('Drukarnia:')).length };
-    drukarniaPdf.raport.ok = drukarniaPdf.raport.z === 4 && drukarniaPdf.raport.pierwsze && drukarniaPdf.raport.bez === 0;
+    drukarniaPdf.raport = { z: sekcje.z.filter((t) => t.startsWith('Drukarnia:')).length, pierwsze: sekcje.z.slice(0, 5).every((t) => t.startsWith('Drukarnia:')), bez: sekcje.bez.filter((t) => t.startsWith('Drukarnia:')).length };
+    drukarniaPdf.raport.ok = drukarniaPdf.raport.z === 5 && drukarniaPdf.raport.pierwsze && drukarniaPdf.raport.bez === 0;
     if (!drukarniaPdf.raport.ok) bledy.push('raport: ' + JSON.stringify(drukarniaPdf.raport));
     // Zmiana szablonu (tylko testowa kopia): tekst 1 mm od krawędzi, kolor „prawie czerń” – w pierwszej talii, przed jej [REWERS].
     if (!jestPrzykladem(szablon)) {
@@ -1496,6 +1498,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       }
       fs.writeFileSync(obrazek, require('electron').nativeImage.createFromBitmap(bmp, { width: NW, height: NH }).toPNG());
       const talia = await js("document.querySelector('#podglad .talia').dataset.talia");
+      // Talia ze spadem w szablonie (#84) ma obrazki przy krawędzi z plikiem ze spadem – dorabianie spadu (#74) jej nie dotyczy.
+      if (await js(`spadTalii(${JSON.stringify(talia)})`)) throw Object.assign(new Error('pominięty'), { pominiety: true });
       const pierwsza = `document.querySelector('#podglad .talia[data-talia=' + JSON.stringify(${JSON.stringify(talia)}) + '] .karta:not(.rewers)')`;
       const [kw, kh] = await js(`cardMm(${pierwsza})`);
       const start = Math.max(0, oryginal.search(/^\[TALIA\b/mi));
@@ -1592,7 +1596,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       if (dostalem !== oczekiwane || !rozciagnij || rozciagnij.brak.length !== 1 || rozciagnij.brak[0].wystaje !== 0) bledy.push('raport: ' + dostalem + ' ≠ ' + oczekiwane + ' / ' + JSON.stringify(spadTest.raport.slice(0, 2)));
       const sekcje = await js(`(async () => (await raportJson({ drukarnia: true })).filter((x) => /nie sięga do końca spadu/.test(x.tytul)).length)()`);
       if (sekcje !== 1) bledy.push('raport: sekcja spadu ×' + sekcje);
-    } catch (e) { bledy.push('wyjątek: ' + e.message); }
+    } catch (e) { if (e.pominiety) spadTest.pominiety = 'talia ze spadem w szablonie (#84)'; else bledy.push('wyjątek: ' + e.message); }
     finally {
       try { await wpisz(oryginal); await czekaj(3500); if (!edytorByl) await js('przelaczEdytor(false)'); } catch (e) { /* koniec testu */ }
       try { fs.rmSync(obrazek, { force: true }); } catch (e) { /* brak */ }
@@ -1600,6 +1604,85 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     }
     spadTest.bledy = bledy;
     spadTest.ok = !bledy.length;
+  }
+  // Spad z szablonu (#84; --test-edytor, każdy projekt): KARTA = w, h, spad=N. a) parser (spad=, błędy); b) talie z deklaracją:
+  // TŁO z pliku jako element na kartę + spad, obrazki przy krawędzi sięgają spadu, w karcie ze spadem (PDF drukarni) tło i
+  // nakładka rysują się w pierwotnej skali i miejscu (krawędzie się pokrywają), plan.spad = spad szablonu mimo spadu z okna,
+  // raport bez uwag o spadzie, plik bez spadu (proporcje karty) zgłoszony; c) talie bez deklaracji: HTML bez nowych elementów,
+  // plan ze spadem z okna, ostrzeżenie w planie, raporcie i oknie.
+  let spadSzablonu = null;
+  if (process.argv.includes('--test-edytor')) {
+    const js = (k) => wc.executeJavaScript(k);
+    try {
+      spadSzablonu = await js(`(async () => {
+        const b = [], r = {};
+        const p = (t) => parseTemplate(t, 'test.txt');
+        const a = p('KARTA = 63, 88, spad=3\\n[TALIA X]\\n[TALIA Y]\\nKARTA = 44, 68\\n');
+        r.parser = { x: a.talie[0].spad, y: a.talie[1].spad, zly: p('KARTA = 63, 88, spad=abc').bledy.length, zlyRewers: p('KARTA = 63, 88\\n[REWERS]\\nKARTA = 63, 88, spad=3').bledy.length,
+          bez: p('KARTA = 63, 88').talie[0].spad, dziesietny: p('KARTA = 63, 88, spad=2.5').talie[0].spad };
+        // Talia bez KARTA we własnej sekcji dziedziczy spad z części wspólnej; własna KARTA bez spad= – bez spadu.
+        if (r.parser.x !== 3 || r.parser.y !== 0 || r.parser.zly !== 1 || r.parser.zlyRewers !== 1 || r.parser.bez !== 0 || r.parser.dziesietny !== 2.5) b.push('parser ' + JSON.stringify(r.parser));
+        const PX = 96 / 25.4, bl = (x, y) => Math.abs(x - y) < 0.06;
+        const talie = [...document.querySelectorAll('#podglad .talia')].map((t) => t.dataset.talia);
+        r.talie = Object.fromEntries(talie.map((t) => [t, spadTalii(t)]));
+        const zSpadem = talie.filter((t) => spadTalii(t)), bez = talie.filter((t) => !spadTalii(t));
+        const karty = kartyEksportu({});
+        // c) bez deklaracji
+        for (const t of bez) {
+          const k = document.querySelector('#podglad .talia[data-talia=' + JSON.stringify(t) + '] .karta');
+          if (k.querySelector('.el.obrazek.tlo')) b.push(t + ': element tła bez deklaracji spadu');
+        }
+        const plan = buildPrint({ uklad: 'drukarnia', spad: 2, strony: 'osobno', karty });
+        r.plan = { spad: plan.spad, zSzablonu: plan.spadZSzablonu, bezSpadu: plan.bezSpadu, ostrzezenia: plan.ostrzezenia };
+        if (!zSpadem.length && (plan.spad !== 2 || plan.spadZSzablonu || plan.bezSpadu.length !== talie.length || plan.ostrzezenia.length !== 1 || !/nie deklaruje spadu/.test(plan.ostrzezenia[0]))) b.push('plan bez deklaracji ' + JSON.stringify(r.plan));
+        if (zSpadem.length && (plan.spad !== Math.max(...zSpadem.map(spadTalii)) || !plan.spadZSzablonu || plan.bezSpadu.length !== bez.length)) b.push('plan z deklaracją ' + JSON.stringify(r.plan));
+        buildPrint({ uklad: 'a4', karty });
+        // okno Druk i PDF: ostrzeżenie przy braku deklaracji, przy pełnej deklaracji pole spadu nieaktywne
+        const pOkno = otworzOkno('druk'), f = document.getElementById('oknoForm');
+        r.okno = { ostrzezenie: !!f.querySelector('.ostrzezenie-spadu'), wylaczone: [...f.querySelectorAll('[name=spad]')].every((x) => x.disabled), zSzablonu: /Spad z szablonu/.test(f.innerHTML) };
+        document.getElementById('okno').dispatchEvent(new Event('cancel')); await pOkno;
+        if (bez.length && !r.okno.ostrzezenie) b.push('okno: brak ostrzeżenia');
+        if (!bez.length && (r.okno.ostrzezenie || !r.okno.wylaczone || !r.okno.zSzablonu)) b.push('okno: ' + JSON.stringify(r.okno));
+        // raport drukarni
+        const rap = await raportDrukarni(), ss = rap.spadSzablonu;
+        r.raport = { bez: ss.bez, pliki: ss.pliki.length };
+        if (ss.bez.join() !== bez.join() || ss.pliki.length) b.push('raport ' + JSON.stringify(r.raport));
+        // b) z deklaracją: geometria tła i nakładki
+        for (const t of zSpadem) {
+          const s = spadTalii(t), k = document.querySelector('#podglad .talia[data-talia=' + JSON.stringify(t) + '] .karta:not(.rewers)');
+          const [w, h] = cardMm(k);
+          const tlo = k.querySelector(':scope > .el.obrazek.tlo');
+          if (!tlo) { b.push(t + ': brak elementu tła'); continue; }
+          if (/url\\(/.test(k.style.background || '')) b.push(t + ': tło nadal w background karty');
+          const ramki = [...k.querySelectorAll(':scope > .el.obrazek')].map((el) => ['left', 'top', 'width', 'height'].map((x) => parseFloat(el.style[x])));
+          r[t] = { ramki };
+          if (ramki[0].join() !== [-s, -s, w + 2 * s, h + 2 * s].join()) b.push(t + ': ramka tła ' + ramki[0]);
+          // karta ze spadem (jak w PDF drukarni: spad + zapas 0,5 mm): obrazy na pełną kartę w miejscu i skali
+          const z = s + 0.5, c = kartaZeSpadem(k, w, h, z);
+          const ukr = document.createElement('div'); ukr.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden'; ukr.appendChild(c); document.body.appendChild(ukr);
+          try {
+            const cr = c.getBoundingClientRect();
+            const obrazy = [...c.querySelectorAll('.el.obrazek img')].map((i) => { const q = i.getBoundingClientRect();
+              return [(q.left - cr.left) / PX - z, (q.top - cr.top) / PX - z, q.width / PX, q.height / PX].map((v) => Math.round(v * 100) / 100); });
+            r[t].wKarcieZeSpadem = obrazy;
+            const pelne = obrazy.filter((o) => bl(o[2], w + 2 * s) && bl(o[3], h + 2 * s));
+            if (pelne.length < 2 || !pelne.every((o) => bl(o[0], -s) && bl(o[1], -s))) b.push(t + ': tło / nakładka w karcie ze spadem ' + JSON.stringify(obrazy));
+          } finally { ukr.remove(); }
+          // plik bez spadu (proporcje karty) → zgłoszony w raporcie
+          const kl = k.cloneNode(true), img = kl.querySelector('.el.obrazek.tlo img');
+          const ukr2 = document.createElement('div'); ukr2.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden'; ukr2.appendChild(kl); document.body.appendChild(ukr2);
+          try {
+            img.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="' + w * 10 + '" height="' + h * 10 + '"><rect width="100%" height="100%" fill="red"/></svg>');
+            await img.decode();
+            const zle = plikiZeSpadem(kl);
+            r[t].bezSpaduWykryty = zle.map((x) => ({ tlo: x.tlo, bezSpadu: x.bezSpadu }));
+            if (!zle.some((x) => x.tlo && x.bezSpadu)) b.push(t + ': plik tła bez spadu niezgłoszony ' + JSON.stringify(zle));
+          } finally { ukr2.remove(); }
+        }
+        r.bledy = b; r.ok = !b.length;
+        return r;
+      })()`);
+    } catch (e) { spadSzablonu = { ok: false, blad: e.message }; }
   }
   // CMYK (issue #66, etap 2; --test-edytor, każdy projekt, pliki w katalogu tymczasowym): a) okno Druk i PDF (pole cmyk, profil),
   // b) PDF drukarni przez pdfDoPliku z profilem testowym (Ghostscript): kontrola każdego pliku, ramki z planu, pdfimages (jeśli jest).
@@ -1764,16 +1847,21 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const { PDFDocument } = require(path.join(ZASOBY, 'vendor', 'pdf-lib.min.js'));
       const stronyPliku = async (pliki) => { const a = []; for (const p of pliki || []) a.push((await PDFDocument.load(fs.readFileSync(path.join(projekt, p)))).getPageCount()); return a; };
       const dr = {};
+      // Spad z szablonu (#84): bez deklaracji – spad z klucza / domyślny i ostrzeżenie, z deklaracją – spad szablonu.
+      const zad = await wc.executeJavaScript("Math.max(0, ...kartyEksportu({}).map((k) => spadTalii(k.dataset.talia)))");
       const d1 = await zlec('pdf', 'uklad = drukarnia\nplik = Export/drukarnia.pdf\n');
-      dr.osobno = d1 && { ok: d1.ok, pliki: d1.pliki, stronyPlikow: d1.stronyPlikow, spad: d1.spad, strona: d1.strona, blad: d1.blad };
+      dr.osobno = d1 && { ok: d1.ok, pliki: d1.pliki, stronyPlikow: d1.stronyPlikow, spad: d1.spad, strona: d1.strona, blad: d1.blad,
+        spadZSzablonu: d1.spadZSzablonu, bezSpadu: d1.bezSpadu, ostrzezenia: d1.ostrzezenia };
       if (dr.osobno && d1.ok) dr.osobno.naDysku = await stronyPliku(d1.pliki);
       dr.osobno.ok = !!(d1 && d1.ok && [1, 2].includes(d1.pliki.length) && d1.pliki.every((p) => fs.existsSync(path.join(projekt, p)))
         && (d1.pliki.length === 1 || (d1.pliki[0].endsWith(' – awersy.pdf') && d1.pliki[1].endsWith(' – rewersy.pdf')))
-        && Array.isArray(d1.stronyPlikow) && d1.stronyPlikow.join() === dr.osobno.naDysku.join() && d1.spad === 3 && d1.strona && d1.strona.length === 2);
+        && Array.isArray(d1.stronyPlikow) && d1.stronyPlikow.join() === dr.osobno.naDysku.join() && d1.spad === (zad || 3) && d1.strona && d1.strona.length === 2
+        && d1.spadZSzablonu === !!zad && (zad ? !d1.bezSpadu && !(d1.ostrzezenia || []).some((x) => /spad/.test(x))
+          : Array.isArray(d1.bezSpadu) && d1.bezSpadu.length > 0 && (d1.ostrzezenia || []).some((x) => /nie deklaruje spadu|bez spadu w szablonie/.test(x))));
       const d2 = await zlec('pdf', 'uklad = drukarnia\nstrony = na przemian\nspad = 2\nplik = Export/przemian.pdf\n');
       dr.naprzemian = d2 && { ok: d2.ok, pliki: d2.pliki, stronyPlikow: d2.stronyPlikow, spad: d2.spad, blad: d2.blad };
       if (d2 && d2.ok) dr.naprzemian.naDysku = await stronyPliku(d2.pliki);
-      dr.naprzemian.ok = !!(d2 && d2.ok && d2.pliki.length === 1 && fs.existsSync(path.join(projekt, d2.pliki[0])) && d2.spad === 2
+      dr.naprzemian.ok = !!(d2 && d2.ok && d2.pliki.length === 1 && fs.existsSync(path.join(projekt, d2.pliki[0])) && d2.spad === (zad || 2)
         && Array.isArray(d2.stronyPlikow) && d2.stronyPlikow.join() === dr.naprzemian.naDysku.join());
       const d3 = await zlec('pdf', 'uklad = drukarnia\nstrony = bokiem\nplik = Export/bokiem.pdf\n');
       dr.bokiem = d3 && { ok: d3.ok, blad: d3.blad, plik: fs.existsSync(path.join(projekt, 'Export', 'bokiem.pdf')) };
@@ -1781,7 +1869,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const r1 = await zlec('raport', 'drukarnia = tak\n');
       dr.raportTak = r1 && { ok: r1.ok, sekcje: (r1.raport || []).map((x) => x.tytul).filter((t) => t.startsWith('Drukarnia:')).length,
         pola: r1.drukarnia ? ['odstep', 'czern', 'krawedz', 'spad'].map((k) => Array.isArray(r1.drukarnia[k])) : null };
-      dr.raportTak.ok = !!(r1 && r1.ok && dr.raportTak.sekcje === 4 && dr.raportTak.pola && dr.raportTak.pola.every(Boolean));
+      dr.raportTak.ok = !!(r1 && r1.ok && dr.raportTak.sekcje === 5 && dr.raportTak.pola && dr.raportTak.pola.every(Boolean));
       const r2 = await zlec('raport');
       dr.raportBez = r2 && { ok: r2.ok, sekcje: (r2.raport || []).map((x) => x.tytul).filter((t) => t.startsWith('Drukarnia:')).length, wynikDrukarnia: 'drukarnia' in r2 };
       dr.raportBez.ok = !!(r2 && r2.ok && dr.raportBez.sekcje === 0 && !dr.raportBez.wynikDrukarnia);
@@ -2562,9 +2650,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     && Menu.getApplicationMenu().items[0].submenu.items.some((i) => i.label === 'Sprawdź aktualizacje…');
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
-    && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
+    && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

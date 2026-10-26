@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="690" height="940" viewBox="0 0 69 94">
+  <!-- Tło karty 63×88 mm ze spadem 3 mm: plik 69×94 mm, linia cięcia 3 mm od krawędzi. -->
+  <defs><linearGradient id="n" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#59606b"/><stop offset="1" stop-color="#a3a8ae"/></linearGradient></defs>
+  <rect width="69" height="94" fill="url(#n)"/>
+  <path d="M0 70 Q14 60 28 67 T58 62 T69 64 V94 H0 Z" fill="#4d5745"/>
+  <path d="M0 80 Q20 72 40 79 T69 76 V94 H0 Z" fill="#4d5745" opacity="0.7"/>
+  <!-- pas tytułowy: od 4 do 16 mm od górnej linii cięcia (7–19 mm w pliku) -->
+  <rect x="0" y="7" width="69" height="12" fill="#f4ead2"/>
+</svg>
