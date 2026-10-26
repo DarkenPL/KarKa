@@ -1731,6 +1731,11 @@ async function sekcjeDrukarni(lista) {
   lista('Drukarnia: „prawie czerń” zamiast #000', r.czern.map((x) =>
     `<b>${esc(x.kolor)}</b> (jasność ${x.jasnosc}) – ${esc(x.rodzaj)}: ${ileKart(x.karty)}. Po konwersji do CMYK wyjdzie czerń czterokolorowa – drukarnie chcą tekstu i małych ikon w czystej czerni (K100): wpisz #000`),
     'czarne teksty, obrysy i ikony są w #000');
+  // Nadruk czerni K100 (#92) – ustawienie z okna Druk i PDF (dotyczy PDF CMYK; zlecenie pdf: klucz nadrukczerni).
+  const ud = USTAWIENIA_OKIEN.druk || {};
+  r.nadrukCzerni = ud.nadrukCzerni !== false;
+  lista('Drukarnia: nadruk czarnego tekstu (K100)', r.nadrukCzerni ? [] : ['Nadruk czerni wyłączony – w PDF CMYK czarny tekst #000 wycina tło do bieli papieru (na kolorowym tle litery wyjdą jaśniejsze, a przy niedopasowaniu pasowania wokół liter pokaże się biały papier). Włącz „Nadruk czarnego tekstu” w oknie Druk i PDF albo poproś drukarnię o nadruk czerni w RIP-ie'],
+    'włączony – w PDF CMYK czarny tekst #000 (K100) jest nadrukowany na tło (prostokąty, linie i obrazki – bez nadruku)');
   const RADA = {
     czarny: 'czarna ramka – drukarnia zaleca „border black” C40 M0 Y0 K100',
     ryzykowny: 'słaba powtarzalność między arkuszami – rozważ białą obwódkę',
@@ -2648,11 +2653,11 @@ const KLUCZE_ZLECEN = {
   katalog: ['talie', 'id'],
   stan: [],
   raport: ['drukarnia'],
-  pdf: ['uklad', 'ciecie', 'rewersy', 'wspolnearkusze', 'strony', 'szkic', 'spad', 'przesunieciex', 'przesunieciey', 'talie', 'id', 'tylkozmienione', 'profil', 'plik'],
+  pdf: ['uklad', 'ciecie', 'rewersy', 'wspolnearkusze', 'strony', 'szkic', 'spad', 'przesunieciex', 'przesunieciey', 'talie', 'id', 'tylkozmienione', 'profil', 'nadrukczerni', 'plik'],
   obrazki: ['dpi', 'format', 'talie', 'id', 'rewersy'],
   pcio: ['dpi', 'talie', 'id'],
 };
-const ALIASY_ZLECEN = { talia: 'talie', rewers: 'rewersy', zmienione: 'tylkozmienione', rozdzielczosc: 'dpi', wspolne: 'wspolnearkusze' };
+const ALIASY_ZLECEN = { talia: 'talie', rewers: 'rewersy', zmienione: 'tylkozmienione', rozdzielczosc: 'dpi', wspolne: 'wspolnearkusze', nadruk: 'nadrukczerni' };
 const OKNO_ZLECENIA = { pdf: 'druk', obrazki: 'obrazki', pcio: 'pcio' };
 const nazwyTalii = () => [...$('podglad').querySelectorAll('.talia')].map((s) => s.dataset.talia);
 
@@ -2716,6 +2721,11 @@ function opcjeZlecenia(polecenie, surowe = {}) {
       o.profil = znany ? k : v.profil;
       if (!znany && !/\.ic[cm]$/i.test(v.profil)) bledy.push(`profil: „${v.profil}” – możliwe: fogra39, fogra51, rgb albo ścieżka do pliku .icc`);
       if (o.uklad !== 'drukarnia') bledy.push('profil: CMYK działa tylko w układzie drukarnia (dopisz uklad = drukarnia)');
+    }
+    // Nadruk czerni K100 (#92): bez klucza – ustawienie z okna (domyślnie tak); bez CMYK klucz nic nie zmienia.
+    if (v.nadrukczerni !== undefined) {
+      o.nadrukCzerni = tak('nadrukczerni');
+      if (!o.cmyk) ostrzezenia.push('nadrukczerni: działa tylko w PDF CMYK (z kluczem profil) – pominięty');
     }
   }
   if (polecenie === 'obrazki') o.ktore = 'wszystkie';
@@ -3124,7 +3134,8 @@ async function zapiszPdf(o = {}) {
   // Drukarnia: plan idzie do main.js – dokładny rozmiar stron, TrimBox, podział na awersy i rewersy.
   const druk = o.uklad === 'drukarnia' ? { szer: plan.szer, wys: plan.wys, spad: plan.spad, pliki: plan.pliki, strony: plan.strony } : null;
   // CMYK (etap 2 z #66): okno – tylko gdy jest Ghostscript (inaczej opcja wyszarzona); zlecenie – z kluczem profil.
-  if (druk && o.cmyk && (o.zlecenie || (CMYK_STAN && CMYK_STAN.gs.ok))) druk.cmyk = { profil: o.profil || 'fogra39' };
+  // nadruk (#92): czarny tekst K100 nadrukowany na tło (/OP) – domyślnie tak, jak w InDesignie.
+  if (druk && o.cmyk && (o.zlecenie || (CMYK_STAN && CMYK_STAN.gs.ok))) druk.cmyk = { profil: o.profil || 'fogra39', nadruk: o.nadrukCzerni !== false };
   const info = await APP.info();
   const nazwa = (PROJEKT || info.nazwa || 'karty') + ({ pojedyncze: ' – karty pojedynczo', drukarnia: ' – drukarnia' }[o.uklad] || ' – karty A4')
     + (o.ktore === 'zaznaczone' ? ' – wybrane' : '') + (o.ktore === 'zmienione' ? ' – zmienione' : '') + (o.szkic ? ' – szkic' : '');
@@ -3165,7 +3176,7 @@ const OKNA = {
     przyciski: [['ok', 'Eksportuj']],
     opis: 'Każda karta jako osobny plik w folderze Export projektu.' },
   druk: { tytul: 'Druk i PDF', pola: ['uklad', 'ciecie', 'spad', 'strony', 'cmyk', 'rewersy', 'wspolne', 'przesuniecie', 'szkic', 'ktore', 'talie'],
-    domyslne: { uklad: 'a4', ciecie: 'znaczniki', spad: SPAD_DRUKARNI, strony: 'osobno', cmyk: true, profil: 'fogra39', rewersy: true, wspolne: true, przesuniecieX: 0, przesuniecieY: 0, szkic: false, ktore: 'wszystkie', pominTalie: [] },
+    domyslne: { uklad: 'a4', ciecie: 'znaczniki', spad: SPAD_DRUKARNI, strony: 'osobno', cmyk: true, profil: 'fogra39', nadrukCzerni: true, rewersy: true, wspolne: true, przesuniecieX: 0, przesuniecieY: 0, szkic: false, ktore: 'wszystkie', pominTalie: [] },
     przyciski: [['drukuj', 'Drukuj…'], ['pdf', 'Zapisz PDF']] },
   katalog: { tytul: 'Katalog talii', pola: ['talie'], domyslne: { pominTalie: [] },
     przyciski: [['ok', 'Zapisz katalog']],
@@ -3227,7 +3238,9 @@ function poleOkna(nazwa, rodzaj, u) {
         `<span class="opis">– konwersja Ghostscriptem; czarny tekst i ikony jako czysta czerń K100</span></label>` +
         (jest ? '' : `<div class="opis">${esc((gs && gs.powod) || 'Brak Ghostscripta. Zainstaluj: brew install ghostscript')}</div>`) +
         `<label>Profil <select name="profil"${jest ? '' : ' disabled'}>${zEci('fogra39', 'ISO Coated v2 (ECI) – Fogra39 (domyślny)')}${zEci('fogra51', 'PSO Coated v3 – Fogra51')}${wlasny}` +
-        `<option value="__inny">inny plik .icc…</option></select></label></fieldset>`;
+        `<option value="__inny">inny plik .icc…</option></select></label>` +
+        `<label><input type="checkbox" name="nadrukCzerni"${u.nadrukCzerni !== false ? ' checked' : ''}${jest ? '' : ' disabled'}> Nadruk czarnego tekstu (K100) ` +
+        `<span class="opis">– litery w #000 nadrukowane na tło, bez wycinania (jak w InDesignie); prostokąty, linie i obrazki bez zmian</span></label></fieldset>`;
     }
     case 'rewersy': return pole('rewersy', rodzaj === 'druk' ? 'Rewersy <span class="opis">– po każdym arkuszu kart arkusz rewersów (druk dwustronny)</span>' : 'Rewersy talii <span class="opis">– osobne pliki</span>');
     case 'wspolne': return pole('wspolne', 'Talie na wspólnych arkuszach <span class="opis">(układ A4) – karty wszystkich talii ciągiem, bez pustych miejsc między taliami; arkusz rewersów składany miejsce po miejscu (lustro do druku dwustronnego, odwracanie wzdłuż dłuższej krawędzi)</span>');
@@ -3277,6 +3290,8 @@ function otworzOkno(rodzaj, domyslna) {
           const pole = form.querySelector('[name=cmyk]'), wybor = form.querySelector('[name=profil]');
           o.cmyk = !pole || pole.disabled ? u.cmyk : pole.checked;     // bez Ghostscripta – zapamiętany wybór zostaje
           o.profil = !wybor || wybor.disabled || wybor.value === '__inny' ? u.profil : wybor.value;
+          const nadruk = form.querySelector('[name=nadrukCzerni]');
+          o.nadrukCzerni = !nadruk || nadruk.disabled ? u.nadrukCzerni !== false : nadruk.checked;
         }
         else if (p === 'spad') { const x = form.querySelector('[name=spad]:checked'); const v = x && !x.disabled ? parseFloat(x.value) : NaN; /* nieaktywne (spad z szablonu) – zapamiętany zostaje */ o.spad = Number.isNaN(v) ? u.spad : Math.min(10, Math.max(0, v)); }
         else { const x = form.querySelector(`[name=${p}]:checked`); o[p] = x ? (p === 'dpi' ? +x.value : x.value) : u[p]; }

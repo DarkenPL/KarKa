@@ -346,6 +346,67 @@ const plan = (pliki, plikiStron) => ({ uklad: 'drukarnia', szer: 69, wys: 94, sp
       }
       return opis.join(' · ');
     });
+    // Nadruk czerni K100 (#92): czarny tekst na pełnym kolorowym tle, biały tekst, czarny prostokąt.
+    await krok('nadruk czerni: tekst K100 nadrukowany, reszta bez zmian (render z symulacją nadruku)', async () => {
+      const doc = await PDFDocument.create();
+      const font = await doc.embedFont(StandardFonts.HelveticaBold);
+      const s = doc.addPage([196.08, 265.92]);
+      s.drawRectangle({ x: 0, y: 0, width: 196.08, height: 265.92, color: rgb(0.9, 0.4, 0.1) });
+      s.drawText('NADRUK', { x: 10, y: 200, size: 40, font, color: rgb(0, 0, 0) });
+      s.drawText('BIALY', { x: 10, y: 140, size: 40, font, color: rgb(1, 1, 1) });
+      s.drawRectangle({ x: 10, y: 20, width: 80, height: 40, color: rgb(0, 0, 0) });
+      const we = Buffer.from(await doc.save({ useObjectStreams: false }));
+      const z = await cmyk.konwertujBufor(we, { gs, profil: iccCmyk, PDFLib });
+      const bez = await cmyk.konwertujBufor(we, { gs, profil: iccCmyk, PDFLib, nadruk: false });
+      assert.strictEqual(z.kontrola.nadruk, 1, 'jeden obiekt tekstu z nadrukiem: ' + z.kontrola.nadruk);
+      assert.strictEqual(bez.kontrola.nadruk, null);
+      assert.ok(z.kontrola.rgb === 0 && bez.kontrola.rgb === 0 && z.kontrola.czern > 0, 'kontrola CMYK (bez TrimBox – bez planu)');
+      // W pliku: stan z /op true, /OPM 1; bez opcji – żadnych stanów nadruku.
+      const q = (b) => { const f = path.join(T, 'n.pdf'); fs.writeFileSync(f, b); const r = spawnSync('qpdf', ['--qdf', '--object-streams=disable', f, '-'], { encoding: 'latin1' }); return r.status === 0 || r.status === 3 ? r.stdout : null; };
+      const tz = q(z.bufor), tb = q(bez.bufor);
+      if (tz !== null) {
+        assert.ok(/\/KarkaNadruk1 gs\s*\[?[(<]/.test(tz), 'stan nadruku tuż przed tekstem');
+        assert.ok(/\/op true/.test(tz) && /\/OPM 1/.test(tz), '/op true i /OPM 1');
+        assert.ok(!/Karka/.test(tb), 'bez opcji – bez stanów nadruku');
+        // Jedno włączenie (czarny tekst w q…Q); po Q nadruk jest znów wyłączony, więc biały tekst i prostokąt bez wstawek.
+        assert.strictEqual((tz.match(/\/KarkaNadruk1 gs/g) || []).length, 1, 'jedno włączenie nadruku');
+        assert.strictEqual((tz.match(/\/KarkaNadruk[023] gs/g) || []).length, 0, 'bez innych stanów');
+      }
+      // Pokrycie farb (inkcov) z symulacją nadruku: z nadrukiem pod literami zostaje tło → więcej C, M, Y; K bez zmian.
+      const pokrycie = (b) => {
+        const f = path.join(T, 'ink.pdf'); fs.writeFileSync(f, b);
+        const r = spawnSync(gs.sciezka, ['-q', '-dSAFER', '-dBATCH', '-dNOPAUSE', '-sDEVICE=inkcov', '-dOverprint=/simulate', '-r72', '-o', '-', f], { encoding: 'utf8' });
+        const m = /([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+CMYK OK/.exec(r.stdout);
+        assert.ok(m, 'inkcov: ' + r.stdout + r.stderr);
+        return m.slice(1).map(Number);
+      };
+      const [pz, pb] = [pokrycie(z.bufor), pokrycie(bez.bufor)];
+      assert.ok(pz[0] > pb[0] && pz[1] > pb[1] && pz[2] > pb[2], `C, M, Y z nadrukiem większe: ${pz} vs ${pb}`);
+      assert.ok(Math.abs(pz[3] - pb[3]) < 0.002, `K bez zmian: ${pz[3]} vs ${pb[3]}`);
+      return `inkcov z nadrukiem ${pz.map((x) => x.toFixed(3)).join('/')}, bez ${pb.map((x) => x.toFixed(3)).join('/')}`;
+    });
+    await krok('nadruk czerni: parser strumienia treści', () => {
+      const t = (s, zm = () => false) => cmyk.nadrukWStrumieniu(s, zm);
+      let w = t('0 0 0 1 k BT [(a) 10 (b)] TJ ET 0 0 10 10 re f');
+      assert.strictEqual(w.tekst, '0 0 0 1 k BT /KarkaNadruk1 gs [(a) 10 (b)] TJ ET 0 0 10 10 re /KarkaNadruk0 gs f');
+      assert.strictEqual(w.obiekty, 1);
+      // Biały tekst po czarnym – nadruk wyłączony; q/Q przywraca stan; napis z „) Tj” i komentarz nie mylą parsera.
+      w = t('0 0 0 1 k BT (x\\) Tj) Tj 1 g (y) Tj ET q 0 0 0 1 k BT % (z) Tj\n(z) Tj ET Q BT (w) Tj ET');
+      assert.strictEqual(w.tekst, '0 0 0 1 k BT /KarkaNadruk1 gs (x\\) Tj) Tj 1 g /KarkaNadruk0 gs (y) Tj ET q 0 0 0 1 k BT % (z) Tj\n/KarkaNadruk1 gs (z) Tj ET Q BT (w) Tj ET');
+      assert.strictEqual(w.obiekty, 2);
+      // Obrys liter (Tr 1, 2) w „0 0 0 1 K” → /OP; obrys przy Tr 0 bez znaczenia; tekst niewidoczny (Tr 3) bez nadruku.
+      w = t('0 0 0 1 K 1 0 0 0 k BT (a) Tj 2 Tr (b) Tj 3 Tr (c) Tj ET');
+      assert.strictEqual(w.tekst, '0 0 0 1 K 1 0 0 0 k BT (a) Tj 2 Tr /KarkaNadruk2 gs (b) Tj 3 Tr /KarkaNadruk0 gs (c) Tj ET');
+      // Kolory inne niż czysta czerń (także cs/scn i prawie czerń) – bez nadruku; obrazek w treści i Do – wyłączenie.
+      w = t('/CS0 cs 0 0 0 1 scn BT (a) Tj ET 0.1 0 0 1 k BT (b) Tj ET');
+      assert.strictEqual(w.uzyte.size, 0);
+      w = t('0 0 0 1 k BT (a) Tj ET BI /W 1 /H 1 /CS /G /BPC 8 ID \x00 EI /Fm1 Do');
+      assert.strictEqual(w.tekst, '0 0 0 1 k BT /KarkaNadruk1 gs (a) Tj ET /KarkaNadruk0 gs BI /W 1 /H 1 /CS /G /BPC 8 ID \x00 EI /Fm1 Do');
+      assert.deepStrictEqual(w.formy, ['Fm1']);
+      // ExtGState z własnym /OP – stan nieznany, więc przy następnym tekście/rysowaniu ustawiany jawnie.
+      w = t('/G1 gs 0 0 10 10 re f', (n) => n === 'G1');
+      assert.strictEqual(w.tekst, '/G1 gs 0 0 10 10 re /KarkaNadruk0 gs f');
+    });
     await krok('konwersja: jeden plik (bez podziału, indeksy null)', async () => {
       const p = plan([''], [0, 0]);
       const [c] = await drukarnia.przygotujDruk(await pdfRgb(2), p, path.join(T, 'Jedna.pdf'));
