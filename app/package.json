@@ -1,7 +1,7 @@
 {
   "name": "karka",
   "productName": "KarKa",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "nazwaWydania": "Lustro weneckie",
   "description": "KarKa (Kawia Karciana) – generator kart do gier: karty z arkusza CSV/XLSX i szablonu tekstowego",
   "main": "start.js",
