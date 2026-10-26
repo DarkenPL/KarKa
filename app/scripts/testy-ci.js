@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Testy przykładów w CI (#88): plan uruchomień zależny od trybu, kilka procesów naraz, czasy w podsumowaniu przebiegu.
-//   node scripts/testy-ci.js <tryb> --bin "<polecenie aplikacji>" --tmp <katalog> [--razem 3]
+//   node scripts/testy-ci.js <tryb> --bin "<polecenie aplikacji>" --tmp <katalog> [--razem 3] [--limit 600]
 // tryb: pr    – 07-gildie w dwóch procesach (lista ciężkich bloków i jej dopełnienie = pełny --test-edytor),
 //               08-wieze – blok spadSzablonu, pozostałe przykłady --test-pdf (renderowanie, PDF, eksport);
 //       pelny – --test-edytor na każdym przykładzie (jak do 0.6.2).
@@ -19,7 +19,8 @@ const bin = (arg('--bin') || '').split(' ').filter(Boolean);
 const tmp = path.resolve(arg('--tmp', path.join(require('os').tmpdir(), 'karka-ci')));
 const razem = Math.max(1, +arg('--razem', 3) || 3);
 const PRZYKLADY = path.join(__dirname, '..', '..', 'przyklady');
-const PROG_S = 180;
+const PROG_S = 180;                                     // ostrzeżenie
+const LIMIT_S = +arg('--limit', 600) || 600;            // przerwanie uruchomienia (s)
 if (!['pr', 'pelny'].includes(tryb) || !bin.length) {
   console.error('Użycie: node scripts/testy-ci.js pr|pelny --bin "<polecenie>" --tmp <katalog> [--razem 3]');
   process.exit(2);
@@ -52,18 +53,31 @@ function uruchom(u) {
     const argi = [...bin.slice(1), `--user-data-dir=${path.join(tmp, 'ud-' + u.nazwa)}`, ...u.opcje,
       '--test-pdf', kopia, path.join(wyniki, u.nazwa + '.pdf')];
     const start = Date.now();
-    const p = spawn(bin[0], argi, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '';
+    // Własna grupa procesów (detached): przy limicie ginie cała – także procesy pomocnicze Electrona i xvfb-run,
+    // które trzymają stdout (bez tego 'close' nie przychodzi i krok wisi).
+    const p = spawn(bin[0], argi, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    let out = '', przekroczony = false, gotowe = false;
     p.stdout.on('data', (d) => { out += d; });
     p.stderr.on('data', () => {});
-    p.on('close', (kod) => {
+    const zakoncz = (kod) => {
+      if (gotowe) return;
+      gotowe = true;
+      clearTimeout(limit);
       const s = Math.round((Date.now() - start) / 1000);
       fs.writeFileSync(path.join(wyniki, u.nazwa + '.json'), out);
       let d = null;
       for (const w of out.split('\n').reverse()) if (w.startsWith('{')) { try { d = JSON.parse(w); break; } catch (e) { /* dalej */ } }
       const nieudane = d ? Object.entries(d).filter(([, v]) => v && typeof v === 'object' && v.ok === false).map(([k]) => k) : [];
-      koniec({ ...u, s, kod, ok: !!(d && d.ok === true), blad: d ? d.blad : 'brak wyniku JSON', nieudane, czasy: d && d.czasyBlokow });
-    });
+      koniec({ ...u, s, kod, ok: !przekroczony && !!(d && d.ok === true), nieudane, czasy: d && d.czasyBlokow,
+        blad: przekroczony ? `przerwany po ${LIMIT_S} s (zawieszony?)` : d ? d.blad : 'brak wyniku JSON' });
+    };
+    // Limit na uruchomienie: zawieszony test kończy krok po kilku minutach, a nie po 30 min limitu zadania.
+    const limit = setTimeout(() => {
+      przekroczony = true;
+      try { process.kill(-p.pid, 'SIGKILL'); } catch (e) { try { p.kill('SIGKILL'); } catch (e2) { /* już nie żyje */ } }
+      zakoncz(null);
+    }, LIMIT_S * 1000);
+    p.on('close', zakoncz);
   });
 }
 
