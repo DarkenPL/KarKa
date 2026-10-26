@@ -213,10 +213,15 @@ npm run dist       # budowanie .app (na macOS)
 - `app/main.js`: okno, menu, ostatnie projekty, zapis PDF, eksport do `Export/`, podmiana adresów CDN na zasoby lokalne.
 - `app/serwer.js`: lokalny serwer HTTP, który podaje pliki projektu.
 - `app/scripts/zasoby.js`: kopiuje generator, przykłady, biblioteki i czcionki do `app/zasoby/`.
-- Tryb testowy: `KarKa [--test-nowy <nowy folder>] [--test-edytor] --test-pdf <szablon.txt|folder|-> <wynik.pdf>` otwiera projekt, sprawdza eksport JPG (poza przykładami także do `Export/`), zapisuje PDF i zrzut ekranu, a potem kończy z kodem 0 albo 1. `-` oznacza ekran powitalny.
+- Tryb testowy: `KarKa [--test-nowy <nowy folder>] [--test-edytor] --test-pdf <szablon.txt|folder|-> <wynik.pdf>` otwiera projekt, sprawdza eksport JPG (poza przykładami także do `Export/`), zapisuje PDF i zrzut ekranu, a potem kończy z kodem 0 albo 1. `-` oznacza ekran powitalny. `--test-edytor` uruchamia wszystkie bloki sprawdzeń; `--test-bloki a,b` (od 0.6.3) – tylko wymienione (nazwy jak klucze w wyniku JSON, np. `spadSzablonu`, `arkusze`, `rewersy`; nieznana nazwa = błąd testu). Wynik ma pole `bloki`.
 - Aktualizacje: `app/start.js` (rozrusznik – wybiera kod z paczki albo nakładkę), `app/nakladka.js`, `app/aktualizacje.js`; pliki do wydania robi `app/scripts/paczka-kodu.js` (`kod.zip`, `aktualizacja.json`), a workflow dokłada `KarKa.zip` (`ditto` z `.app`). Test: `node app/scripts/test-aktualizacje.js [--electron]`. `--bez-nakladki` uruchamia kod z paczki.
 - `app/scripts/testuj.sh [przykład… | szablon.txt]`: na Linuksie z Xvfb przebudowuje zasoby i uruchamia tryb testowy na kopiach przykładów (domyślnie wszystkich, równolegle); wypisuje wiersz na projekt i kończy z kodem 0 albo 1.
-- `.github/workflows/aplikacja-mac.yml`: budowanie i testy na macOS. Po każdej zmianie w `main` tworzy wydanie `v<wersja>` z DMG (wersja z `app/package.json`).
+- `.github/workflows/aplikacja-mac.yml`: budowanie i testy na macOS. Po każdej zmianie w `main` tworzy wydanie `v<wersja>` z DMG (wersja z `app/package.json`). Testy przykładów (od 0.6.3) zależą od zdarzenia:
+  - **pull request** – pełny `--test-edytor` na `07-gildie`, na `08-wieze` blok `spadSzablonu`, pozostałe przykłady `--test-pdf` (renderowanie, PDF, eksport);
+  - **push do `main`** (po scaleniu przetestowanego PR-a) – bez testów przykładów: start, nowy projekt, nakładka, DMG i wydanie;
+  - **pełny zestaw** (`--test-edytor` na wszystkich przykładach) – ręcznie (Actions → „Aplikacja macOS” → Run workflow), przy tagu `v*` i wydaniu opublikowanym na GitHubie.
+
+  Czasy przykładów są w podsumowaniu przebiegu (Summary); ostrzeżenie, gdy przykład trwa ponad 3 min albo przebieg PR ponad 10 min.
 
 ### Wydania
 

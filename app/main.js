@@ -1019,9 +1019,28 @@ function szerokoscJpg(b) {
 }
 // ── Tryb testowy (CI): --test-pdf <szablon.txt|folder|-> <plik.pdf> ──────────
 // Otwiera projekt, czeka na karty, zapisuje PDF i zrzut podglądu, wypisuje stan i kończy.
+// Bloki --test-edytor (#88). --test-bloki a,b uruchamia tylko wymienione bloki (CI w pull requeście: pełny zestaw
+// na jednym projekcie, bloki zależne od treści na przykładach, których dotyczą); bez opcji – wszystkie jak dotąd.
+// Nieznana nazwa w --test-bloki = błąd testu (literówka nie może po cichu wyłączyć bloku).
+// Lista bloków z własnego kodu (każde wywołanie testBloku('nazwa')) – nowy blok nie wymaga dopisywania tutaj.
+const BLOKI_TESTU = () => [...new Set([...fs.readFileSync(__filename, 'utf8').matchAll(/testBloku\('(\w+)'\)/g)].map((m) => m[1]))];
+function wybraneBlokiTestu() {
+  const i = process.argv.indexOf('--test-bloki');
+  if (i < 0) return null;
+  const lista = String(process.argv[i + 1] || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const znane = BLOKI_TESTU(), zle = lista.filter((x) => !znane.includes(x));
+  if (zle.length || !lista.length) throw new Error('--test-bloki: nieznane bloki ' + (zle.join(', ') || '(pusta lista)') + ' – dostępne: ' + znane.join(', '));
+  return lista;
+}
+function testBloku(nazwa) {
+  if (!process.argv.includes('--test-edytor')) return false;
+  const lista = wybraneBlokiTestu();
+  return !lista || lista.includes(nazwa);
+}
 async function trybTestowy(folder, wynik, przywrocone = []) {
   const P = aktywny, wc = P.wc, szablon = P.szablon, projekt = P.folder;   // projekt testowy = aktywna zakładka
   const czekaj = (ms) => new Promise((r) => setTimeout(r, ms));
+  const bloki = wybraneBlokiTestu();                      // sprawdzenie nazw od razu (błąd → { ok: false, blad })
   let stan = '';
   for (let i = 0; folder !== '-' && i < 120; i++) {
     await czekaj(500);
@@ -1051,7 +1070,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // 01-wyprawa obok projektu testowego (poza przyklady/), zlecenia w nieaktywnej zakładce, kropka zmian, przełączanie,
   // zamykanie, limit 8, zapis listy zakładek w ustawieniach. Zrzuty: -zakladki.png (pasek), -zakladka2.png (drugi widok).
   let zakladki = null;
-  if ((process.argv.includes('--test-edytor') || process.argv.includes('--test-zakladki')) && !jestPrzykladem(szablon)) {
+  if ((testBloku('zakladki') || process.argv.includes('--test-zakladki')) && !jestPrzykladem(szablon)) {
     const z = {};
     const js = (w, k) => w.wc.executeJavaScript(k);
     const czekajNaKarty = async (w) => { for (let i = 0; i < 120; i++) { if (/ kart /.test(await js(w, "document.getElementById('status').textContent").catch(() => ''))) return true; await czekaj(500); } return false; };
@@ -1185,7 +1204,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   }
   // Edytor (--test-edytor, tylko poza przykładami): kolorowanie, błąd w wierszu, podgląd na żywo, zapis.
   let edytor = null;
-  if (process.argv.includes('--test-edytor') && !jestPrzykladem(szablon)) {
+  if (testBloku('edytor') && !jestPrzykladem(szablon)) {
     const js = (k) => wc.executeJavaScript(k);
     const oryginal = fs.readFileSync(szablon, 'utf8');
     const wpisz = (t) => js(`(() => { const p = document.getElementById('edPole'); p.value = ${JSON.stringify(t)}; p.dispatchEvent(new Event('input')); })()`);
@@ -1214,7 +1233,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   }
   // Druk wybranych kart i tryb szkicu (--test-edytor): 2 zaznaczone karty → 2 karty w wydruku, białe tło.
   let wybor = null;
-  if (process.argv.includes('--test-edytor')) {
+  if (testBloku('wybor')) {
     wybor = await wc.executeJavaScript(`(() => {
       wybierzKarty(2); buildPrint({ szkic: true, karty: kartyEksportu({ ktore: 'zaznaczone' }) });
       const karty = document.querySelectorAll('#druk .karta:not(.rewers)').length;
@@ -1235,7 +1254,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   }
   // Druk tylko zmienionych (--test-edytor): zapamiętanie odcisków → 0 zmian; zmiana szablonu → zmienione wszystkie.
   let zmienione = null;
-  if (process.argv.includes('--test-edytor') && !jestPrzykladem(szablon)) {
+  if (testBloku('zmienione') && !jestPrzykladem(szablon)) {
     const js = (k) => wc.executeJavaScript(k);
     const oryginal = fs.readFileSync(szablon, 'utf8');
     const wpisz = (t) => js(`(() => { const p = document.getElementById('edPole'); p.value = ${JSON.stringify(t)}; p.dispatchEvent(new Event('input')); })()`);
@@ -1259,7 +1278,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   }
   // Historia wersji (--test-edytor): punkt „otwarcie”, kopia po zmianie z zewnątrz, podgląd i przywrócenie.
   let hist = null;
-  if (process.argv.includes('--test-edytor') && !jestPrzykladem(szablon)) {
+  if (testBloku('hist') && !jestPrzykladem(szablon)) {
     const js = (k) => wc.executeJavaScript(k);
     const oryginal = fs.readFileSync(szablon, 'utf8');
     const lista = () => js('window.generatorApp.historiaLista()');
@@ -1308,7 +1327,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   }
   // Okna eksportu (--test-edytor, poza przykładami): PNG 300 dpi przez okno, zapamiętane ustawienia, okno druku.
   let okna = null;
-  if (process.argv.includes('--test-edytor') && !jestPrzykladem(szablon)) {
+  if (testBloku('okna') && !jestPrzykladem(szablon)) {
     const js = (k) => wc.executeJavaScript(k);
     const exportDir = path.join(projekt, 'Export');
     const przed = new Set(fs.existsSync(exportDir) ? fs.readdirSync(exportDir) : []);
@@ -1335,7 +1354,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   }
   // Drukarnia (--test-edytor): strona na kopię (awers, rewers…), strona = karta + 2 × spad.
   let drukarnia = null;
-  if (process.argv.includes('--test-edytor')) {
+  if (testBloku('drukarnia')) {
     drukarnia = await wc.executeJavaScript(`(() => {
       const karty = kartyEksportu({});
       const rewersy = karty.filter((k) => backOf(k.dataset.talia)).length;
@@ -1367,7 +1386,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // b) naprzemian, spad 2, c) bez rewersów, d) okno Druk i PDF (spad, strony), e) raport drukarni (sekcje, odstęp, czerń).
   // Oczekiwania (liczba plików i stron) liczone z DOM – wygląd rewersu jak w wygladRewersu() w karty.html.
   let drukarniaPdf = null;
-  if (process.argv.includes('--test-edytor')) {
+  if (testBloku('drukarniaPdf')) {
     const js = (k) => wc.executeJavaScript(k);
     const { PDFDocument } = require(path.join(ZASOBY, 'vendor', 'pdf-lib.min.js'));
     const MMpt = 72 / 25.4, bliskie = (a, b) => Math.abs(a - b) <= 0.01;
@@ -1480,7 +1499,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   //    w ramkach obrazków średnia różnica < 2/255 i < 1 % pikseli różnych o > 32 (wygładzanie krawędzi); bez pdftoppm – tylko a);
   // c) Raport drukarni zgłasza obrazek, który w spadzie nie ma czym wypełnić tła (nadmiar cover < 3 mm).
   let spadTest = null;
-  if (process.argv.includes('--test-edytor') && !jestPrzykladem(szablon)) {
+  if (testBloku('spadTest') && !jestPrzykladem(szablon)) {
     const js = (k) => wc.executeJavaScript(k);
     const bledy = [];
     spadTest = {};
@@ -1611,7 +1630,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // raport bez uwag o spadzie, plik bez spadu (proporcje karty) zgłoszony; c) talie bez deklaracji: HTML bez nowych elementów,
   // plan ze spadem z okna, ostrzeżenie w planie, raporcie i oknie.
   let spadSzablonu = null;
-  if (process.argv.includes('--test-edytor')) {
+  if (testBloku('spadSzablonu')) {
     const js = (k) => wc.executeJavaScript(k);
     try {
       spadSzablonu = await js(`(async () => {
@@ -1696,7 +1715,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // b) PDF drukarni przez pdfDoPliku z profilem testowym (Ghostscript): kontrola każdego pliku, ramki z planu, pdfimages (jeśli jest).
   // c) zlecenia z profilem – w bloku zlecenia (cmykTest.profil). Bez Ghostscripta ≥ 10 albo profilu CMYK: { pominiety } (w CI to błąd).
   let cmykTest = null;
-  if (process.argv.includes('--test-edytor')) {
+  if (testBloku('cmykTest')) {
     const js = (k) => wc.executeJavaScript(k);
     const CI = !!process.env.GITHUB_ACTIONS;
     const gs = cmyk.znajdzGs({ odswiez: true });
@@ -1776,7 +1795,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   }
   // Katalog (--test-edytor, poza przykładami): A – Export/katalog; B – zlecenie z pliku → wynik.json.
   let katalog = null;
-  if (process.argv.includes('--test-edytor') && !jestPrzykladem(szablon)) {
+  if (testBloku('katalog') && !jestPrzykladem(szablon)) {
     const js = (k) => wc.executeJavaScript(k);
     const a = await js("zapiszKatalog({}, 'katalog')");
     const kat = path.join(projekt, 'Export', 'katalog');
@@ -1797,7 +1816,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // Zlecenia z pliku dla całej gry (--test-edytor, poza przykładami): stan, raport, pdf, obrazki, pcio,
   // dwa zlecenia naraz, błędne opcje, „tylko zmienione”, niezapisany edytor (karty z dysku), ustawienia okien bez zmian.
   let zlecenia = null;
-  if (process.argv.includes('--test-edytor') && !jestPrzykladem(szablon)) {
+  if (testBloku('zlecenia') && !jestPrzykladem(szablon)) {
     const js = (k) => wc.executeJavaScript(k);
     const zl = path.join(projekt, ...FOLDER_ZLECEN);
     fs.mkdirSync(zl, { recursive: true });
@@ -1989,7 +2008,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // Dane w podfolderze (issue #52, --test-edytor, poza przykładami): jawna ścieżka w DANE → bez Uwagi;
   // plik przeniesiony do podfolderu bez zmiany DANE → Uwaga „Nie znaleziono plików z kartami”.
   let podfolder = null;
-  if (process.argv.includes('--test-edytor') && !jestPrzykladem(szablon)) {
+  if (testBloku('podfolder') && !jestPrzykladem(szablon)) {
     const js = (k) => wc.executeJavaScript(k);
     const tekst = fs.readFileSync(szablon, 'utf8');
     const m = /^\s*DANE\s*=\s*([^;#\n,/]+?\.(?:csv|xlsx))/mi.exec(tekst);
@@ -2015,7 +2034,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // Formatowanie z danych i znaczniki HTML (issue #55, --test-edytor, bez zmian w plikach projektu):
   // karta testowa z <b> <i> <u> <s> **…** ~~…~~ <img> i niedomkniętym <b> – z formatowaniem i z bez_formatowania.
   let formatowanie = null;
-  if (process.argv.includes('--test-edytor')) {
+  if (testBloku('formatowanie')) {
     formatowanie = await wc.executeJavaScript(`(() => {
       const t = parseTemplate('[TALIA Test]\\nKARTA = 63, 44, zaokrąglenie=2\\nTŁO = #f4ecd8\\n'
         + 'TEKST = 3, 3, 57, 18, "<em>Dane:</em> [A]", rozmiar=9\\n'
@@ -2049,7 +2068,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // Układ z danych (issue #70, --test-edytor, bez zmian w plikach projektu): pozycje, obrót, kadr, odbicie i krycie z [Kolumn].
   // Obrazek testowy to tymczasowy plik w `files` (usuwany po teście).
   let uklad = null;
-  if (process.argv.includes('--test-edytor')) {
+  if (testBloku('uklad')) {
     uklad = await wc.executeJavaScript(`(() => {
       files.set('test-obraz.svg', new File(['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#c0504d"/><circle cx="50" cy="50" r="30" fill="#f4d58d"/><path d="M0 0L100 100" stroke="#1d1b19" stroke-width="6"/></svg>'], 'test-obraz.svg', { type: 'image/svg+xml' }));
       const r = (linie, row, naglowek) => {
@@ -2132,7 +2151,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   }
   // Warunki jeśli= (issue #72, --test-edytor, bez zmian w plikach projektu): pusta kolumna, & i |, porównania liczb, Uwagi.
   let jesli = null;
-  if (process.argv.includes('--test-edytor')) {
+  if (testBloku('jesli')) {
     jesli = await wc.executeJavaScript(`(() => {
       const r = (linie, row) => {
         const t = parseTemplate('[TALIA Test]\\nKARTA = 63, 88\\n' + linie + '\\n', 'test.txt').talie[0];
@@ -2202,7 +2221,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // Mieszane rozmiary w polu TEKST (issue #71 a, --test-edytor, bez zmian w plikach projektu):
   // <small> 0,6, <big> 1,4, <rozmiar=N> w pt względem pola; całość skaluje się razem w fitAll (także z grupa=).
   let rozmiary = null;
-  if (process.argv.includes('--test-edytor')) {
+  if (testBloku('rozmiary')) {
     rozmiary = await wc.executeJavaScript(`(() => {
       const wyniki = {};
       const spr = (nazwa, warunek) => { wyniki[nazwa] = !!warunek; };
@@ -2278,7 +2297,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // Akapity w polu TEKST (issue #71 b, --test-edytor, bez zmian w plikach projektu):
   // <lewo>/<środek>/<prawo> na początku wiersza i lista=tak z wcięciem wiszącym.
   let akapity = null;
-  if (process.argv.includes('--test-edytor')) {
+  if (testBloku('akapity')) {
     akapity = await wc.executeJavaScript(`(() => {
       const wyniki = {};
       const spr = (nazwa, warunek) => { wyniki[nazwa] = !!warunek; };
@@ -2399,7 +2418,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // lustro arkusza rewersów (pozycja i geometria względem awersu, z przesunięciem), pełna siatka przy jednym rewersie,
   // puste miejsca przy różnych, obrót rewersu kart poziomych w drugą stronę; zrzut -arkusze.png; zlecenie pdf z kluczem.
   let arkusze = null;
-  if (process.argv.includes('--test-edytor')) {
+  if (testBloku('arkusze')) {
     arkusze = await wc.executeJavaScript(`(() => {
       const wyniki = {}, bledy = [];
       const spr = (nazwa, warunek, opis) => { wyniki[nazwa] = !!warunek; if (!warunek && opis) bledy.push(nazwa + ': ' + opis); };
@@ -2522,7 +2541,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // (stary zapis bez r → nic zmienionego, zmiana kolumny rewersu → ta karta zmieniona); poza przykładami zlecenie pcio
   // (najczęstszy rewers + ostrzeżenie). Zrzuty -rewersy.png (podgląd) i -rewersy-a4.png (arkusz awersów i rewersów).
   let rewersy = null;
-  if (process.argv.includes('--test-edytor')) {
+  if (testBloku('rewersy')) {
     rewersy = await wc.executeJavaScript(`(async () => {
       const wyniki = {}, bledy = [];
       const spr = (nazwa, warunek, opis) => { wyniki[nazwa] = !!warunek; if (!warunek) bledy.push(nazwa + (opis ? ': ' + opis : '')); };
@@ -2660,7 +2679,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
     && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, bloki: bloki || (process.argv.includes('--test-edytor') ? 'wszystkie' : 'bez --test-edytor'), stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

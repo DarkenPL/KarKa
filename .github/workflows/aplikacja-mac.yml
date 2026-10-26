@@ -3,6 +3,11 @@
 #   (link w README: releases/latest/download/KarKa.dmg); wersja już wydana → tylko ostrzeżenie,
 # - tag v* albo wydanie opublikowane ręcznie na GitHubie → plik dołączony do tego wydania,
 # - pull request → tylko budowanie i testy (plik w Artifacts).
+# Testy przykładów (#88) – tryb zależy od zdarzenia (krok „Tryb testów”):
+# - pr (pull request): pełny --test-edytor tylko na 07-gildie, 08-wieze – blok spadSzablonu, pozostałe przykłady --test-pdf;
+# - main (push do main po scaleniu przetestowanego PR-a): bez testów przykładów, tylko start, nowy projekt i nakładka;
+# - pelny (ręcznie – workflow_dispatch, tag v*, wydanie opublikowane na GitHubie): --test-edytor na wszystkich przykładach.
+# Czasy przykładów trafiają do podsumowania przebiegu (Summary); ostrzeżenie przy przykładzie > 3 min i przebiegu PR > 10 min.
 # Do wydania trafiają też pliki aktualizacji (app/aktualizacje.js): aktualizacja.json, kod.zip, KarKa.zip.
 name: Aplikacja macOS
 
@@ -33,6 +38,19 @@ jobs:
         working-directory: app
     steps:
       - uses: actions/checkout@v7
+
+      - name: Tryb testów
+        id: tryb
+        run: |
+          echo "START=$(date +%s)" >> "$GITHUB_ENV"
+          case "$GITHUB_EVENT_NAME:$GITHUB_REF" in
+            pull_request:*) tryb=pr ;;
+            push:refs/tags/v*) tryb=pelny ;;
+            push:*) tryb=main ;;
+            *) tryb=pelny ;;                               # workflow_dispatch, release
+          esac
+          echo "tryb=$tryb" >> "$GITHUB_OUTPUT"
+          echo "Tryb testów przykładów: **$tryb**" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-node@v6
         with:
@@ -73,15 +91,33 @@ jobs:
           codesign --verify --deep --strict "$app"
 
       - name: Test – przykłady
+        env:
+          TRYB: ${{ steps.tryb.outputs.tryb }}
         run: |
           mkdir -p "$RUNNER_TEMP/test"
           bin="dist/mac-arm64/KarKa.app/Contents/MacOS/KarKa"
-          for ex in ../przyklady/*/; do
-            n=$(basename "$ex")
-            cp -R "$ex" "$RUNNER_TEMP/$n"                 # kopia: test zapisuje też folder Export
-            "$bin" --user-data-dir="$RUNNER_TEMP/ud" --test-edytor --test-pdf "$RUNNER_TEMP/$n" "$RUNNER_TEMP/test/$n.pdf" | tee "$RUNNER_TEMP/test/$n.json"
-            grep -q '"ok":true' "$RUNNER_TEMP/test/$n.json"
-          done
+          # Opcje testu przykładu w danym trybie (bash 3.2 na macOS – bez tablic asocjacyjnych).
+          opcje() {
+            case "$TRYB:$1" in
+              pelny:*|pr:07-gildie) echo "--test-edytor" ;;
+              pr:08-wieze) echo "--test-edytor --test-bloki spadSzablonu" ;;
+              *) echo "" ;;
+            esac
+          }
+          { echo; echo "| Przykład | Tryb | Czas [s] |"; echo "|---|---|---:|"; } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$TRYB" != main ]; then
+            for ex in ../przyklady/*/; do
+              n=$(basename "$ex")
+              o=$(opcje "$n")
+              cp -R "$ex" "$RUNNER_TEMP/$n"                 # kopia: test zapisuje też folder Export
+              t0=$(date +%s)
+              "$bin" --user-data-dir="$RUNNER_TEMP/ud" $o --test-pdf "$RUNNER_TEMP/$n" "$RUNNER_TEMP/test/$n.pdf" | tee "$RUNNER_TEMP/test/$n.json"
+              t=$(( $(date +%s) - t0 ))
+              echo "| $n | ${o:---test-pdf} | $t |" >> "$GITHUB_STEP_SUMMARY"
+              [ "$t" -gt 180 ] && echo "::warning::Test przykładu $n trwał $t s (> 3 min)."
+              grep -q '"ok":true' "$RUNNER_TEMP/test/$n.json"
+            done
+          fi
           "$bin" --user-data-dir="$RUNNER_TEMP/ud" --test-pdf - "$RUNNER_TEMP/test/start.pdf"
           # Nowy projekt z szablonu startowego (nazwa z polskimi znakami, przecinkiem i cudzysłowem)
           "$bin" --user-data-dir="$RUNNER_TEMP/ud" --test-nowy "$RUNNER_TEMP/Złota Wyprawa, \"edycja\"" --test-pdf - "$RUNNER_TEMP/test/nowy.pdf" | tee "$RUNNER_TEMP/test/nowy.json"
@@ -139,6 +175,15 @@ jobs:
         with:
           name: wyniki-testow
           path: ${{ runner.temp }}/test
+
+      - name: Czas przebiegu
+        if: always()
+        env:
+          TRYB: ${{ steps.tryb.outputs.tryb }}
+        run: |
+          t=$(( $(date +%s) - START ))
+          echo "| **cały przebieg** (do tego kroku) | $TRYB | $t |" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$TRYB" = pr ] && [ "$t" -gt 600 ]; then echo "::warning::Przebieg PR trwał $t s (> 10 min)."; fi
 
       - name: Wydanie z numerem wersji (zmiana w main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
