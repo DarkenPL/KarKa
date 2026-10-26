@@ -39,6 +39,12 @@
 .el.tekst { --pole: 1em; }
 .karta small { font-size: 0.6em; }
 .karta big { font-size: 1.4em; }
+/* Akapity (#71 b): wiersz z <lewo>/<środek>/<prawo> albo z listy (lista=tak) staje się blokiem .akapit;
+   pola bez tych znaczników mają dawny HTML (wiersze rozdzielone <br>). Lista: punktor/numer w osobnej
+   kolumnie, kolejne linie tekstu równo za nim (wcięcie wiszące). */
+.karta .akapit.lista { display: flex; align-items: baseline; }
+.karta .akapit.lista > .punkt { flex: none; white-space: pre; }
+.karta .akapit.lista > .wiersz { flex: 1 1 0; min-width: 0; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Interfejs (bez wpływu na wydruk)
@@ -738,7 +744,9 @@ function liniaSvg(c, tpl, ctx, colorOf) {
 // <rozmiar=12>…</rozmiar> = 12 pt przy rozmiarze pola bez zmniejszania (liczony względem pola – --pole w CSS).
 const ZNACZNIKI_TEKSTU = ['b', 'strong', 'i', 'em', 'u', 's', 'del', 'strike', 'small', 'big', 'rozmiar'];
 const ZNACZNIK_RE = new RegExp(`&lt;(/?)(${ZNACZNIKI_TEKSTU.join('|')})(?:\\s*=\\s*([^&\\s]*)\\s*)?&gt;`, 'gi');
-const ZNACZNIK_DANYCH_RE = new RegExp(`<(/?)(${ZNACZNIKI_TEKSTU.join('|')})>|<rozmiar\\s*=\\s*[^>\\s]*\\s*>`, 'i');
+// Wyrównanie akapitu (#71 b): <lewo>, <środek> (<srodek>), <prawo> na początku wiersza; </…> na końcu – opcjonalnie.
+const ZNACZNIKI_AKAPITU = ['lewo', 'środek', 'srodek', 'prawo'];
+const ZNACZNIK_DANYCH_RE = new RegExp(`<(/?)(${ZNACZNIKI_TEKSTU.join('|')}|${ZNACZNIKI_AKAPITU.join('|')})>|<rozmiar\\s*=\\s*[^>\\s]*\\s*>`, 'i');
 function maskujDane(v, formatowanie) {
   if (!formatowanie) return v.replace(/\*/g, '\u0001').replace(/~/g, '\u0006').replace(/</g, '\u0007');
   return v.replace(/\*\*([\s\S]+?)\*\*/g, '\u0002$1\u0003').replace(/~~([\s\S]+?)~~/g, '\u0004$1\u0005')
@@ -773,6 +781,91 @@ function znacznikiTekstu(html, pt) {
   });
   const domkniecie = stos.slice().reverse().map((x) => (x.n === 'rozmiar' ? '</span>' : `</${x.n}>`)).join('');
   return { html: out + domkniecie, niedomkniete: stos.map((x) => x.n), nadmiarowe, zle };
+}
+
+// ── Akapity (#71 b) ─────────────────────────────────────────────────────────
+// Działa na HTML-u po renderText (wiersze rozdzielone <br>, znaczniki szablonu jeszcze jako &lt;…&gt;).
+const WYROWNANIA_AKAPITU = { lewo: 'left', srodek: 'center', prawo: 'right' };
+const AKAPIT_RE = new RegExp(`&lt;/?(${ZNACZNIKI_AKAPITU.join('|')})&gt;`, 'gi');
+// Przed znacznikiem akapitu (i za zamknięciem) mogą stać spacje i znaczniki formatowania (np. **…** = <b>).
+const PRZED_AKAPITEM = `(?:\\s|<[^>]*>|&lt;/?(?:${ZNACZNIKI_TEKSTU.join('|')})(?:\\s*=\\s*[^&\\s]*\\s*)?&gt;)*`;
+const AKAPIT_POCZ_RE = new RegExp(`^(${PRZED_AKAPITEM})&lt;(${ZNACZNIKI_AKAPITU.join('|')})&gt;`, 'i');
+const AKAPIT_KON_RE = new RegExp(`&lt;/(${ZNACZNIKI_AKAPITU.join('|')})&gt;(${PRZED_AKAPITEM})$`, 'i');
+// Zdejmuje znaczniki wyrównania z wierszy. Zwraca { html, wyr[] (text-align na wiersz albo ''), zle[] }.
+// Znacznik nie na początku wiersza (albo zamknięcie nie na końcu / bez otwarcia) zostaje tekstem.
+function wyrownaniaAkapitow(html) {
+  const zle = [];
+  const wyr = [];
+  const linie = html.split('<br>').map((l) => {
+    let w = '';
+    const m = AKAPIT_POCZ_RE.exec(l);
+    if (m) {
+      w = WYROWNANIA_AKAPITU[plain(m[2])];
+      l = m[1] + l.slice(m[0].length);
+      const k = AKAPIT_KON_RE.exec(l);
+      if (k && plain(k[1]) === plain(m[2])) l = l.slice(0, k.index) + k[2];
+    }
+    for (const z of l.match(AKAPIT_RE) || []) zle.push(z.replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+    wyr.push(w);
+    return l;
+  });
+  return { html: linie.join('<br>'), wyr, zle };
+}
+// Dzieli zrównoważony HTML w miejscu idx: znaczniki otwarte w tym miejscu są domykane na końcu
+// pierwszej części i otwierane ponownie na początku drugiej (jak w znacznikiTekstu).
+function podzielHtml(html, idx) {
+  const a = html.slice(0, idx), stos = [];
+  for (const [m, zam, nazwa] of a.matchAll(/<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi)) {
+    const n = nazwa.toLowerCase();
+    if (n === 'img' || n === 'br') continue;
+    if (!zam) { stos.push({ n, m }); continue; }
+    const i = stos.map((x) => x.n).lastIndexOf(n);
+    if (i >= 0) stos.splice(i, 1);
+  }
+  // Puste pary na granicy (np. <b></b>, gdy podział wypada tuż przy znaczniku) są usuwane.
+  const PUSTA = /<(b|strong|i|em|u|s|del|strike|small|big)\b[^>]*>(\s*)<\/\1>/;
+  let x = a + stos.slice().reverse().map((z) => `</${z.n}>`).join(''), y = stos.map((z) => z.m).join('') + html.slice(idx);
+  for (let m; (m = new RegExp(PUSTA.source + '((?:</[^>]+>)*)$').exec(x));) x = x.slice(0, m.index) + m[2] + m[3];
+  for (let m; (m = new RegExp('^((?:<[^/][^>]*>)*)' + PUSTA.source.replace('\\1', '\\2')).exec(y));) y = m[1] + m[3] + y.slice(m[0].length);
+  return [x, y];
+}
+const pustyWiersz = (l) => !/<img|ikona-kolor/.test(l) && !l.replace(/<[^>]*>/g, '').trim();
+// Lista (lista=tak): wiersz zaczyna się od „1.”, „12.”, „-” albo „•” i spacji (* nie – to kursywa).
+// Zwraca indeks w HTML-u zaraz za punktorem albo -1.
+function punktListy(l) {
+  let tekst = '';
+  const poz = [];
+  for (let i = 0; i < l.length && tekst.length < 40;) {
+    if (l[i] === '<') { const k = l.indexOf('>', i); if (k < 0) break; i = k + 1; continue; }
+    let n = 1;
+    if (l[i] === '&') { const e = l.indexOf(';', i); if (e > i && e - i < 10) n = e - i + 1; }
+    tekst += l[i]; i += n; poz.push(i);
+  }
+  const m = /^(\s*(?:\d{1,3}\.|[-•]))[ \t\u00a0]+\S/.exec(tekst);
+  return m ? poz[m[1].length - 1] : -1;
+}
+// Wiersze (<br>) → bloki <div class="akapit">; bez wyrównań i bez wierszy listy HTML zostaje bez zmian.
+function naAkapity(html, wyr, lista) {
+  const linie = [];
+  let reszta = html;
+  for (;;) {
+    const i = reszta.indexOf('<br>');
+    if (i < 0) { linie.push(reszta); break; }
+    const [a, b] = podzielHtml(reszta.slice(0, i) + reszta.slice(i + 4), i);
+    linie.push(a); reszta = b;
+  }
+  const punkty = linie.map((l) => (lista ? punktListy(l) : -1));
+  if (!wyr.some(Boolean) && !punkty.some((p) => p > 0)) return html;
+  if (linie.length > 1 && pustyWiersz(linie[linie.length - 1]) && !wyr[linie.length - 1]) linie.pop();   // \n na końcu – jak <br> na końcu
+  return linie.map((l, i) => {
+    const st = wyr[i] ? ` style="text-align:${wyr[i]}"` : '';
+    if (pustyWiersz(l)) return `<div class="akapit"${st}>${l}<br></div>`;     // pusty wiersz zachowuje wysokość
+    if (punkty[i] > 0) {
+      const [a, b] = podzielHtml(l, punkty[i]);
+      return `<div class="akapit lista"${st}><span class="punkt">${a} </span><span class="wiersz">${b}</span></div>`;
+    }
+    return `<div class="akapit"${st}>${l}</div>`;
+  }).join('');
 }
 
 // Liczba z tekstu – przecinek dziesiętny (17,8) jak kropka; przy nieczytelnej wartości NaN.
@@ -874,20 +967,29 @@ function renderCard(tpl, cmds, row, ctx) {
     const same = (a !== '' && b !== '' && !Number.isNaN(+a) && !Number.isNaN(+b)) ? +a === +b : a === b;   // 001 = 1
     return op === '=' ? same : !same;
   }));
-  const rich = (s, kolumny, pt) => {
+  const rich = (s, kolumny, pt, lista = false) => {
     let h = renderText(s, ctx.icons, ctx.warn)
       .replace(/\*\*([\s\S]+?)\*\*/g, '<b>$1</b>').replace(/\*([^*]+?)\*/g, '<i>$1</i>');
     if (h.includes('~~')) h = h.replace(/~~([\s\S]+?)~~/g, '<s>$1</s>');
     h = h.replace(/\u0001/g, '*').replace(/\u0006/g, '~')
       .replace(/\u0002/g, '<b>').replace(/\u0003/g, '</b>').replace(/\u0004/g, '<s>').replace(/\u0005/g, '</s>');
     const lt = (x) => x.replace(/\u0007/g, '&lt;');    // < z danych przy bez_formatowania – zawsze tekst
-    if (!h.includes('&lt;')) return lt(h);
-    const z = znacznikiTekstu(h, pt);
     const gdzie = `${ctx.label}` + (kolumny.length ? ` (kolumna ${kolumny.map((k) => '[' + k + ']').join(', ')})` : '');
+    // Akapity (#71 b): tylko gdy pole ma znacznik wyrównania albo lista=tak – inaczej HTML jak dotąd.
+    let wyr = null;
+    if (lista || h.search(AKAPIT_RE) >= 0) {
+      const a = wyrownaniaAkapitow(h);
+      h = a.html; wyr = a.wyr;
+      const otw = a.zle.filter((z) => z[1] !== '/'), zam = a.zle.filter((z) => z[1] === '/');
+      if (otw.length) ctx.warn.add(`${gdzie}: znacznik ${otw.join(' ')} działa tylko na początku wiersza – zostaje tekstem`);
+      if (zam.length) ctx.warn.add(`${gdzie}: znacznik ${zam.join(' ')} działa tylko na końcu wiersza zaczętego tym samym wyrównaniem – zostaje tekstem`);
+    }
+    if (!h.includes('&lt;')) return wyr ? naAkapity(lt(h), wyr, lista) : lt(h);
+    const z = znacznikiTekstu(h, pt);
     if (z.niedomkniete.length) ctx.warn.add(`${gdzie}: niedomknięty znacznik ${z.niedomkniete.map((x) => '<' + x + '>').join(' ')} – domknięty na końcu pola`);
     if (z.nadmiarowe.length) ctx.warn.add(`${gdzie}: znacznik ${z.nadmiarowe.map((x) => '</' + x + '>').join(' ')} bez otwarcia – zostaje tekstem`);
     if (z.zle.length) ctx.warn.add(`${gdzie}: ${z.zle.join(' ')} – potrzebny rozmiar w pt, np. <rozmiar=12> – zostaje tekstem`);
-    return lt(z.html);
+    return wyr ? naAkapity(lt(z.html), wyr, lista) : lt(z.html);
   };
   const mm = (v) => (String(v).trim().endsWith('%') ? String(v).trim() : num(v) + 'mm');
 
@@ -945,7 +1047,7 @@ function renderCard(tpl, cmds, row, ctx) {
       if (f.has('wersaliki')) st.push('text-transform:uppercase');
       const cls = 'el tekst' + (f.has('jedna_linia') ? ' jedna-linia' : '');
       const data = ` data-pt="${pt}"` + (o.min ? ` data-min="${num(o.min)}"` : '') + (o.grupa ? ` data-grupa="${esc(o.grupa)}"` : '');
-      html += `<div class="${cls}" style="${esc(st.join(';'))}"${data}><div class="tresc">${rich(tr.s, tr.kolumny, pt)}</div></div>`;
+      html += `<div class="${cls}" style="${esc(st.join(';'))}"${data}><div class="tresc">${rich(tr.s, tr.kolumny, pt, o.lista !== undefined && !['nie', 'brak', '0', ''].includes(plain(value(o.lista))))}</div></div>`;
     } else if (c.kom === 'obrazek') {
       const p = value(c.args[4]);
       if (!p) continue;
@@ -982,7 +1084,19 @@ const overflows = (el) => {
 };
 function contentRect(el) {
   const t = el.firstElementChild; if (!t || !t.firstChild) return null;
-  const r = document.createRange(); r.selectNodeContents(t); return r.getBoundingClientRect();
+  const r = document.createRange();
+  if (!t.querySelector('.akapit')) { r.selectNodeContents(t); return r.getBoundingClientRect(); }
+  // Akapity (#71 b) to bloki na całą szerokość pola – zakres liczyłby ich ramki, więc bierzemy tylko tekst i ikony.
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  const dodaj = (q) => { if (q.width < 0.01 && q.height < 0.01) return; x1 = Math.min(x1, q.left); y1 = Math.min(y1, q.top); x2 = Math.max(x2, q.right); y2 = Math.max(y2, q.bottom); };
+  const w = document.createTreeWalker(t, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    if (n.nodeType === 1) { if (n.matches('img.ikona, .ikona-kolor')) dodaj(n.getBoundingClientRect()); continue; }
+    if (!n.nodeValue.trim()) continue;
+    r.selectNodeContents(n);
+    for (const q of r.getClientRects()) dodaj(q);
+  }
+  return x1 === Infinity ? null : { left: x1, top: y1, right: x2, bottom: y2, width: x2 - x1, height: y2 - y1 };
 }
 const ODSTEP_GRUPY = 2 * 96 / 25.4;              // 2 mm między polami jednej grupy
 function collide(list) {
