@@ -666,8 +666,22 @@ function parseTemplate(text, plik) {
   });
   if (!out.talie.length) out.talie.push(wspolne);              // plik bez [TALIA …] = jedna talia
   else if (wspolne.dane.length) out.bledy.push(`${plik}: DANE przed pierwszą [TALIA …] są pomijane – wpisz je w każdej talii.`);
+  // Rewers zależny od karty (#47): w [REWERS] jest [Kolumna] albo pole wbudowane karty ([_id], [_numer], [_kopia]) –
+  // w argumentach, opcjach (też jeśli=) albo w KARTA rewersu. Inaczej rewers jest wspólny dla talii (jak do 0.6.0).
+  const odKarty = (v) => [...String(v ?? '').matchAll(/\[([^\[\]]+)\]/g)].some(([, k]) => {
+    k = k.trim();
+    if (k.startsWith('=')) return false;                            // nieznana stała – Uwaga jest przy wierszu
+    return !k.startsWith('_') || !POLA_TALII.includes(plain(k.slice(1)));
+  });
+  const wartosci = (c) => [...c.args, ...Object.values(c.opt)];
+  for (const t of out.talie) {
+    t.rewersZalezny = t.rewers.some((c) => wartosci(c).some(odKarty)) || Object.values(t.kartaRewers || {}).some(odKarty);
+    t.rewersPerKopia = t.rewersZalezny && t.rewers.some((c) => wartosci(c).some((v) => /\[\s*_(numer|kopia)\s*\]/i.test(String(v ?? ''))));
+  }
   return out;
 }
+// Pola wbudowane wspólne dla całej talii – rewers, który używa tylko ich, zostaje wspólny.
+const POLA_TALII = ['liczba', 'wersja', 'talia', 'projekt', 'data'];
 
 const ALIGN_H = { lewo: 'left', srodek: 'center', prawo: 'right', wyjustuj: 'justify' };
 const FLEX_H = { lewo: 'flex-start', srodek: 'center', prawo: 'flex-end', wyjustuj: 'flex-start' };
@@ -1214,6 +1228,7 @@ async function zbudujTeraz() {
   const view = $('podglad');
   let html = '', total = 0;
   const found = [], missing = [];
+  const noweRewersy = new Map();                 // talia → rewersy zależne od karty (#47)
 
   const tplFiles = files.has(norm(SZABLON)) ? [[norm(SZABLON), files.get(norm(SZABLON))]] : [];
   if (!tplFiles.length) {
@@ -1270,6 +1285,9 @@ async function zbudujTeraz() {
     // Numer albo kopia na karcie → każdą kopię rysujemy osobno; inaczej jedna kopia powielona.
     const kazdaKopia = /\[\s*_(numer|kopia)\s*\]/i.test(tekstSzablonu);
     const base = { warn, icons, plik: `${talia.plik} (${talia.nazwa})`, formatowanie: RAPORT.formatowanie };
+    // Rewers zależny od karty (#47): rysowany dla każdego wiersza (dla każdej kopii przy [_numer]/[_kopia] w [REWERS]),
+    // powtórki usuwane po wyglądzie. przyp: 'wiersz' albo 'wiersz|kopia' → numer rewersu w lista.
+    const zal = talia.rewers.length && talia.rewersZalezny ? { perKopia: !!talia.rewersPerKopia, przyp: new Map(), wzory: new Map(), lista: [], els: [] } : null;
     let cards = '', n = 0;
     rows.forEach((r, i) => {
       const label = `${talia.nazwa} ${pole(r, 'ID') || i + 1}${pole(r, 'Nazwa') ? ' ' + pole(r, 'Nazwa') : ''}`;
@@ -1283,12 +1301,30 @@ async function zbudujTeraz() {
       };
       if (kazdaKopia) for (let c = 1; c <= k; c++) cards += karta(c);
       else cards += karta(1).repeat(k);
+      if (zal) {
+        const rewers = (kopia) => {
+          const card = renderCard(talia, talia.rewers, r, { ...base, label: label + ' – rewers', kolumny: true,
+            wbudowane: { ...wspolneWb, numer: n + kopia, kopia, id } });
+          const klucz = card.style + '\u0000' + card.html;
+          if (!zal.wzory.has(klucz)) { zal.wzory.set(klucz, zal.lista.length); zal.lista.push({ card, ile: 0 }); }
+          return zal.wzory.get(klucz);
+        };
+        if (zal.perKopia) for (let c = 1; c <= k; c++) { const nr = rewers(c); zal.przyp.set(i + '|' + c, nr); zal.lista[nr].ile++; }
+        else { const nr = rewers(1); zal.przyp.set(String(i), nr); zal.lista[nr].ile += k; }
+      }
       n += k;
     });
     total += n;
     found.push(`${talia.nazwa}: ${n}`);
     let back = '';
-    if (talia.rewers.length) {
+    if (zal && zal.lista.length) {
+      // Każdy różny rewers na początku talii (jak dotąd jeden); numer w data-rewers na opakowaniu – nie na karcie,
+      // żeby odcisk rewersu zależał tylko od wyglądu. Przypisanie karta → rewers: REWERSY_KART (bez atrybutów na awersach).
+      const label = `${talia.nazwa} – rewers`, wiele = zal.lista.length > 1;
+      back = zal.lista.map(({ card, ile }, nr) => `<div class="rewers-podglad" data-rewers="${nr}"><div class="karta rewers" style="${esc(card.style)}" data-talia="${esc(talia.nazwa)}" data-id="rewers" title="${esc(label)}">${card.html}</div>`
+        + `<span class="etykieta">${wiele ? `Rewers ${nr + 1} · ×${ile}` : 'Rewers'}</span></div>`).join('');
+      noweRewersy.set(talia.nazwa, zal);
+    } else if (talia.rewers.length && !zal) {
       const label = `${talia.nazwa} – rewers`;
       const card = renderCard(talia, talia.rewers, {}, { ...base, label, kolumny: false, wbudowane: wspolneWb });
       back = `<div class="rewers-podglad"><div class="karta rewers" style="${esc(card.style)}" data-talia="${esc(talia.nazwa)}" data-id="rewers" title="${esc(label)}">${card.html}</div><span class="etykieta">Rewers</span></div>`;
@@ -1300,8 +1336,14 @@ async function zbudujTeraz() {
   if (!found.length) {
     status('Żadna talia nie ma pliku z kartami – sprawdź Uwagi.');
     view.innerHTML = '';
+    REWERSY_KART = new Map();
   } else {
     view.innerHTML = html;
+    for (const s of view.querySelectorAll('.talia')) {
+      const zal = noweRewersy.get(s.dataset.talia);
+      if (zal) zal.els = [...s.querySelectorAll('.rewers-podglad[data-rewers] > .karta.rewers')];
+    }
+    REWERSY_KART = noweRewersy;
     oznaczKopie(view);
     await waitForImages(view);
     for (const l of new Set(fitAll(view))) warn.add(l + ': tekst nie mieści się nawet po zmniejszeniu (czerwona ramka)');
@@ -1409,7 +1451,11 @@ function labZRgb([r, g, b]) {
   return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)];
 }
 const prawieCzarny = (rgb) => !!rgb && rgb[3] > 0 && !(rgb[0] === 0 && rgb[1] === 0 && rgb[2] === 0) && labZRgb(rgb)[0] < PROG_CZERNI;
-const opisKarty = (k) => k.classList.contains('rewers') ? `${k.dataset.talia} – rewers` : (k.title || `${k.dataset.talia} ${k.dataset.id || ''}`).trim();
+// Numer rewersu zależnego od karty (#47; opakowanie .rewers-podglad[data-rewers]) – '' przy rewersie wspólnym.
+const nrRewersu = (k) => (k.parentElement && k.parentElement.dataset.rewers) || '';
+const opisKarty = (k) => k.classList.contains('rewers')
+  ? `${k.dataset.talia} – rewers` + (nrRewersu(k) && k.closest('.siatka').querySelectorAll('[data-rewers]').length > 1 ? ' ' + (+nrRewersu(k) + 1) : '')
+  : (k.title || `${k.dataset.talia} ${k.dataset.id || ''}`).trim();
 
 // Obwiednia glifów elementu (px, układ okna): prostokąty fragmentów tekstu z Range, w pionie
 // zawężone do wysokości znaków (measureText – actualBoundingBox), plus ikony (img, .ikona-kolor).
@@ -1577,7 +1623,7 @@ async function raportDrukarni() {
       const odstep = [], czern = new Map(), pasy = new Map(), spad = [], widziane = new Set();
       for (const k of karty) {
         const rewers = k.classList.contains('rewers');
-        const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' : k.dataset.row);
+        const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' + nrRewersu(k) : k.dataset.row);
         const pierwsza = !widziane.has(klucz); widziane.add(klucz);
         const o = odstepyKarty(k);
         if (o && o.odstep < MARGINES_DRUKARNI - 0.005) {
@@ -1754,12 +1800,19 @@ function skrot(t) {                                     // cyrb53 – szybki skr
 async function oznaczZmiany(view) {
   ODCISKI = APP && APP.odciski ? await APP.odciski().catch(() => null) : null;
   let zm = 0, nowe = 0;
-  for (const k of view.querySelectorAll('.siatka .karta')) {
-    const h = skrot(htmlKarty(k)); k.dataset.odcisk = h;
+  const wszystkie = [...view.querySelectorAll('.siatka .karta')];
+  for (const k of wszystkie) k.dataset.odcisk = skrot(htmlKarty(k));      // najpierw wszystkie – rewersy też
+  for (const k of wszystkie) {
+    const rewers = k.classList.contains('rewers');
+    // Rewersy zależne od karty (#47) nie mają własnych oznaczeń – ich zmiana oznacza karty (pole r).
+    if (rewers && REWERSY_KART.has(k.dataset.talia)) { k.classList.remove('nowa', 'zmieniona'); continue; }
+    const h = k.dataset.odcisk;
     const stary = ODCISKI && ODCISKI.karty[kluczDruku(k)];
-    const jestNowa = !!ODCISKI && !stary, zmieniona = !!stary && stary.h !== h;
+    // r tylko w zapisach kart z rewersem zależnym; brak r w starym zapisie (do 0.6.0) to nie zmiana.
+    const zmienionyRewers = !!stary && !rewers && 'r' in stary && (stary.r ?? null) !== odciskRewersuKarty(k);
+    const jestNowa = !!ODCISKI && !stary, zmieniona = !!stary && (stary.h !== h || zmienionyRewers);
     k.classList.toggle('nowa', jestNowa); k.classList.toggle('zmieniona', zmieniona);
-    if (!k.classList.contains('rewers')) { zm += zmieniona; nowe += jestNowa; }
+    if (!rewers) { zm += zmieniona; nowe += jestNowa; }
   }
   $('zmiany').hidden = !ODCISKI;
   if (ODCISKI) {
@@ -1774,8 +1827,18 @@ async function zapamietajDruk(karty = kartyEksportu()) {
   if (!APP || !APP.zapiszOdciski) return;
   const dane = ODCISKI || { karty: {} };
   dane.data = new Date().toISOString();
-  const rewersy = new Set(karty.map(rewersKarty).filter(Boolean));
-  for (const k of [...karty, ...rewersy]) dane.karty[kluczDruku(k)] = { h: k.dataset.odcisk, html: htmlKarty(k) };
+  // Wspólne rewersy talii – osobny wpis jak dotąd; rewers zależny od karty (#47) – pole r (+ rhtml do „Porównaj”) w wpisie karty.
+  const rewersy = new Set(karty.filter((k) => !REWERSY_KART.has(k.dataset.talia)).map(rewersKarty).filter(Boolean));
+  for (const k of karty) {
+    const wpis = { h: k.dataset.odcisk, html: htmlKarty(k) };
+    if (REWERSY_KART.has(k.dataset.talia)) {
+      const b = rewersKarty(k);
+      wpis.r = odciskRewersuKarty(k);
+      if (b) wpis.rhtml = htmlKarty(b);
+    }
+    dane.karty[kluczDruku(k)] = wpis;
+  }
+  for (const k of rewersy) dane.karty[kluczDruku(k)] = { h: k.dataset.odcisk, html: htmlKarty(k) };
   await APP.zapiszOdciski(dane);
   await oznaczZmiany($('podglad'));
 }
@@ -1791,8 +1854,14 @@ function pokazPorownanie(pokaz = $('porownanie').hidden) {
   p.innerHTML = '<button class="zamknij" id="porownajZamknij">Zamknij</button>' +
     `<h3>Zmienione od ostatniego PDF (${new Date(ODCISKI.data).toLocaleString('pl-PL')}): ${zmienione.length}</h3>` +
     (zmienione.length ? '' : '<div class="ok">✓ brak zmienionych kart</div>') +
-    zmienione.slice(0, MAX).map((k) => `<div class="para"><div>przed<br>${przedHtml(ODCISKI.karty[kluczDruku(k)].html)}</div>` +
-      `<div>teraz – ${esc(k.title)}<br>${htmlKarty(k)}</div></div>`).join('') +
+    zmienione.slice(0, MAX).map((k) => {
+      const st = ODCISKI.karty[kluczDruku(k)], b = REWERSY_KART.has(k.dataset.talia) && rewersKarty(k);
+      // Zmieniony rewers zależny od karty (#47) – para rewersów obok pary awersów.
+      const rew = st && 'r' in st && (st.r ?? null) !== odciskRewersuKarty(k)
+        ? `<div>rewers przed<br>${st.rhtml ? przedHtml(st.rhtml) : '–'}</div><div>rewers teraz<br>${b ? htmlKarty(b) : '–'}</div>` : '';
+      return `<div class="para"><div>przed<br>${przedHtml(st.html)}</div>` +
+        `<div>teraz – ${esc(k.title)}<br>${htmlKarty(k)}</div>${rew}</div>`;
+    }).join('') +
     (zmienione.length > MAX ? `<div>… i ${zmienione.length - MAX} kolejnych</div>` : '');
   $('porownajZamknij').onclick = () => pokazPorownanie(false);
 }
@@ -1954,8 +2023,20 @@ function backOf(talia) {
   return s ? s.querySelector('.karta.rewers') : null;
 }
 // Rewers danej karty (element .karta.rewers z podglądu) albo null – jedyne miejsce, które o tym decyduje (#34).
-// Dziś rewers talii; rewersy zależne od wiersza (#47) podmienią tylko tę funkcję.
-function rewersKarty(k) { return backOf(k.dataset.talia); }
+// Talia z rewersem zależnym od karty (#47) – rewers z REWERSY_KART (wiersz albo wiersz|kopia), inaczej rewers talii.
+let REWERSY_KART = new Map();      // talia → { perKopia, przyp: Map(klucz → nr), lista, els: [.karta.rewers] }
+function rewersKarty(k) {
+  const z = REWERSY_KART.get(k.dataset.talia);
+  if (!z) return backOf(k.dataset.talia);
+  const nr = z.przyp.get(z.perKopia ? k.dataset.row + '|' + k.dataset.kopia : k.dataset.row);
+  return (nr !== undefined && z.els[nr]) || null;
+}
+// Odcisk rewersu zależnego od karty (pole r w odciskach druku) – null dla talii ze wspólnym rewersem.
+function odciskRewersuKarty(k) {
+  if (!REWERSY_KART.has(k.dataset.talia)) return null;
+  const b = rewersKarty(k);
+  return b ? b.dataset.odcisk || skrot(htmlKarty(b)) : null;
+}
 window.rewersKarty = rewersKarty;
 function status(t) { $('status').textContent = t; }
 
@@ -2347,7 +2428,8 @@ async function eksportObrazkow(o = {}) {
         status(`Eksport ${FMT}: ${i + 1}/${els.length}…`);
         const el = els[i];
         const przed = slowo(PROJEKT) + '_' + slowo(el.dataset.talia) + '_';
-        const name = przed + (el.classList.contains('rewers') ? 'rewers' : numer(el.dataset.id) + '_' + (el.dataset.kopia || 1)) + '.' + format;
+        // Rewersy zależne od karty (#47): tymczasowo rewers, rewers_2… (nazwy z ID karty – następny PR, decyzja 3).
+        const name = przed + (el.classList.contains('rewers') ? 'rewers' + (+nrRewersu(el) > 0 ? '_' + (+nrRewersu(el) + 1) : '') : numer(el.dataset.id) + '_' + (el.dataset.kopia || 1)) + '.' + format;
         const blob = await obrazKarty(el, { dpi, format });
         await APP.eksportPlik(name, new Uint8Array(await blob.arrayBuffer()));
         nazwy.push(name);
@@ -2643,7 +2725,7 @@ const ZADANIA_ZLECEN = {
   async pcio(o) {
     const r = await exportPcio({ ...o, zlecenie: true });
     if (!r) throw new Error('brak kart do pokoju playingcards.io – sprawdź talie i id');
-    return { ok: true, pliki: [r.plik], talie: r.talie, holdery: r.holdery, karty: r.karty };
+    return { ok: true, pliki: [r.plik], talie: r.talie, holdery: r.holdery, karty: r.karty, ...(r.ostrzezenia.length ? { ostrzezenia: r.ostrzezenia } : {}) };
   },
 };
 
@@ -2677,7 +2759,7 @@ async function wykonajZlecenie(polecenie, surowe = {}) {
     if (zDysku) { ZLECENIE_Z_DYSKU = false; try { await podgladNaZywo(); } catch (e) { /* podgląd odświeży się sam */ } }
     ZLECENIE_TRWA = false;
   }
-  if (ostrzezenia.length) wynik.ostrzezenia = ostrzezenia;
+  if (ostrzezenia.length) wynik.ostrzezenia = [...ostrzezenia, ...(wynik.ostrzezenia || [])];
   wynik.opcje = { ...o };
   return wynik;
 }
@@ -2704,7 +2786,7 @@ async function eksportujPcio(o = {}) {
   const dpi = +o.dpi || CONFIG.jpgDpi;
   if (!window.htmlToImage) await loadScript('https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js');
   if (!window.JSZip) await loadScript('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js');
-  const widgets = [], assets = new Map(), report = [];
+  const widgets = [], assets = new Map(), report = [], ostrzezenia = [];
   let z = 1, x = PCIO.margines, y = PCIO.margines, wysRzedu = 0;
 
   // Wszystkie talie, także odfiltrowane w podglądzie.
@@ -2744,8 +2826,16 @@ async function eksportujPcio(o = {}) {
           x: x + PCIO.ramka, y: y + PCIO.ramka, z: 0, faceup: false, owner: null, layoutStackParent: null, r: 0 });
       }
 
-      // Rewers z generatora; bez [REWERS] – kolorowy rewers z nazwą talii.
-      const back = section.querySelector('.karta.rewers');
+      // Rewers z generatora; bez [REWERS] – kolorowy rewers z nazwą talii. Rewersy zależne od karty (#47, decyzja 4
+      // z 26.10.2026): stos ma jeden backTemplate – najczęstszy rewers wybranych kart + ostrzeżenie (rewers dynamiczny – później).
+      let back = section.querySelector('.karta.rewers');
+      if (REWERSY_KART.has(nazwa)) {
+        const ile = new Map();
+        for (const k of karty) { const b = rewersKarty(k); if (b) ile.set(b, (ile.get(b) || 0) + 1); }
+        const [naj, n] = [...ile.entries()].sort((a, b) => b[1] - a[1])[0] || [null, 0];
+        back = naj;
+        if (ile.size > 1) ostrzezenia.push(`talia ${nazwa} ma ${ile.size} ${[2, 3, 4].includes(ile.size % 10) && (ile.size % 100 < 10 || ile.size % 100 >= 20) ? 'różne rewersy' : 'różnych rewersów'} – w pokoju użyto najczęstszego (${n} z ${karty.length} kart)`);
+      }
       let tylObiekty;
       if (back) {
         const plik = uuid() + '.jpg';
@@ -2775,9 +2865,10 @@ async function eksportujPcio(o = {}) {
   const zapisany = await APP.zapiszPcio(nazwa, dane);
   if (!zapisany) { status('Eksport do playingcards.io anulowany.'); return; }
   punktHistorii('playingcards.io' + (o.zlecenie ? ' (zlecenie)' : ''));
-  status(`Zapisano ${zapisany} (${(dane.length / 1048576).toFixed(1)} MB) · ${report.join(' · ')} · w playingcards.io: Edit Table → Import room`);
+  status(`Zapisano ${zapisany} (${(dane.length / 1048576).toFixed(1)} MB) · ${report.join(' · ')} · w playingcards.io: Edit Table → Import room`
+    + (ostrzezenia.length ? ' · Uwaga: ' + ostrzezenia.join('; ') : ''));
   return { plik: zapisany, talie: report, holdery: widgets.filter((w) => w.type === 'holder').length,
-           karty: widgets.filter((w) => w.type === 'card').length, obrazki: assets.size };
+           karty: widgets.filter((w) => w.type === 'card').length, obrazki: assets.size, ostrzezenia };
 }
 window.exportPcio = exportPcio;
 

@@ -5,6 +5,8 @@
 ;  • Druk A4: opcja „Talie na wspólnych arkuszach” układa karty wszystkich talii
 ;    ciągiem, a arkusz rewersów składa miejsce po miejscu (w lustrze – do druku
 ;    dwustronnego z odwracaniem wzdłuż dłuższej krawędzi).
+;  • Magowie – rewers zależny od karty: kolumny i jeśli= w [REWERS] (dwie szkoły
+;    i jedna karta dwustronna z tłem i tekstem rewersu z danych).
 ;  Napis „↑ góra” na rewersach pomaga sprawdzić wydruk próbny: po odwróceniu
 ;  karty strzałka ma wskazywać tę samą stronę co góra awersu.
 ; ═══════════════════════════════════════════════════════════════════
@@ -117,12 +119,20 @@ OBRAZEK   = 14, 20, 35, 32, Ikony/ksiega.svg
 TEKST     = 7, 56, 49, 20, [Opis], wyrównanie=środek
 TEKST     = 6, 78, 51, 5, "Magowie [ID]", rozmiar=7, kolor=#6a5a9e, wyrównanie=środek
 
+;  Rewers zależny od karty: kolumny i jeśli= w [REWERS] – każdy wiersz dostaje swój rewers
+;  (szkoła Runy albo Księgi), a Alchemik jest kartą dwustronną (tło i tekst rewersu z danych).
+;  W podglądzie każdy różny rewers stoi na początku talii („Rewers 2 · ×4”).
 [REWERS]
 TŁO       = #45396e
+TŁO       = [TłoRewersu]                           ; karta dwustronna – własne tło (puste = tło wyżej)
 PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=brak, obwódka=0.6, kolor_obwódki=#ffffff80, zaokrąglenie=4
 TEKST     = 0, 6, 63, 8, "↑ góra", rozmiar=10, kolor=#ffffff, wyrównanie=środek, pion=środek
-IKONA     = 0, 22, 63, 22, {ksiega}
-TEKST     = 0, 50, 63, 12, "Magowie", czcionka=[=tytuł], rozmiar=24, kolor=#ffffff, wyrównanie=środek, pion=środek
+IKONA     = 0, 22, 63, 22, {ksiega}, jeśli=[Szkoła]=Księgi
+IKONA     = 0, 22, 63, 22, {runa}, jeśli=[Szkoła]=Runy
+TEKST     = 0, 50, 63, 12, "Magowie", czcionka=[=tytuł], rozmiar=24, kolor=#ffffff, wyrównanie=środek, pion=środek, jeśli=[Rodzaj]!=dwustronna
+TEKST     = 0, 63, 63, 7, "szkoła [Szkoła]", rozmiar=10, kolor=#ffffffcc, wyrównanie=środek, pion=środek
+TEKST     = 6, 18, 51, 14, [RewersNazwa], czcionka=[=tytuł], rozmiar=20, kolor=#2b2410, wyrównanie=środek, pion=środek, jeśli=[Rodzaj]=dwustronna
+TEKST     = 8, 36, 47, 40, [RewersOpis], rozmiar=11, kolor=#2b2410, wyrównanie=środek, jeśli=[Rodzaj]=dwustronna
 
 
 ; ═══════════════════════════════════════════════════════════════════

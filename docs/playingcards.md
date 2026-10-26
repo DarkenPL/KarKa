@@ -8,7 +8,8 @@ Wybierz **Plik → Eksport → Pokój playingcards.io…**. W oknie wybierasz ro
 - tworzy dla każdej talii osobny **stos** z nazwą talii, a stosy ustawia obok siebie w rzędach,
 - kładzie na stosie wszystkie karty talii **zakryte**, z liczbą kopii z kolumny `Ilość`,
 - zamienia każdy wzór karty i rewers na obraz JPG; karty mają proporcje z komendy `KARTA`, karty poziome są poziome,
-- dla talii bez sekcji `[REWERS]` robi prosty ciemny rewers z nazwą talii.
+- dla talii bez sekcji `[REWERS]` robi prosty ciemny rewers z nazwą talii,
+- stos ma jeden rewers – przy rewersach zależnych od karty (od 0.6.1) bierze najczęstszy i ostrzega o tym.
 
 Wynik zapisuje się w folderze projektu jako `NazwaProjektu – playingcards.pcio` (nazwa z komendy `PROJEKT`). Kolejny eksport nadpisuje ten plik. Przy przykładach aplikacja pyta, gdzie zapisać plik.
 

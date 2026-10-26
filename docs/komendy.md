@@ -90,8 +90,29 @@ Numery liczą się w kolejności wierszy pliku danych. Data to dzień wygenerowa
 | Sekcja | Opis |
 |---|---|
 | `[TALIA Nazwa]` | Zaczyna kolejną talię w tym samym pliku. Wszystko przed pierwszą `[TALIA …]` jest **wspólne** dla talii z pliku: `KARTA`, `CZCIONKA` oraz elementy awersu i rewersu, rysowane pod elementami talii. Każda talia potrzebuje własnego `DANE`. Talia może nadpisać wspólne `KARTA` albo `CZCIONKA`. Dwie talie o tej samej nazwie: druga jest pomijana (z uwagą). |
-| `[REWERS]` | Poniżej rysuje się rewers talii, wspólny dla wszystkich jej kart. Bez tej sekcji talia nie ma rewersu. Na rewersie pola `[Kolumna]` są puste. Na wydruku A4 karty kilku talii mogą stać na jednym arkuszu – za każdą kartą drukuje się rewers jej talii (opcja „Talie na wspólnych arkuszach”, [aplikacja](aplikacja.md)). |
+| `[REWERS]` | Poniżej rysuje się rewers talii. Bez tej sekcji talia nie ma rewersu. Rewers bez `[Kolumn]` jest wspólny dla wszystkich kart talii; z `[Kolumnami]` albo warunkami `jeśli=` z kolumn – każda karta ma swój rewers (patrz niżej). Na wydruku A4 karty kilku talii mogą stać na jednym arkuszu – za każdą kartą drukuje się jej rewers (opcja „Talie na wspólnych arkuszach”, [aplikacja](aplikacja.md)). |
 | `[AWERS]` | Powrót do rysowania awersu. |
+
+### Rewers zależny od karty (od 0.6.1)
+
+W `[REWERS]` działają te same `[Kolumny]` z wiersza karty co na awersie, pola wbudowane karty (`[_id]`, `[_numer]`, `[_kopia]`), warunki `jeśli=` z kolumnami i `TŁO = [Kolumna]` (kolor albo plik obrazka). Tak zrobisz np. dwa wzory rewersu w jednej talii albo kartę dwustronną:
+
+```
+[REWERS]
+TŁO   = #45396e
+TŁO   = [TłoRewersu]                                  ; karta dwustronna – własne tło (puste = tło wyżej)
+IKONA = 0, 22, 63, 22, {ksiega}, jeśli=[Szkoła]=Księgi
+IKONA = 0, 22, 63, 22, {runa}, jeśli=[Szkoła]=Runy
+TEKST = 0, 50, 63, 12, "Magowie", rozmiar=24, wyrównanie=środek, jeśli=[Rodzaj]!=dwustronna
+TEKST = 8, 36, 47, 40, [RewersOpis], wyrównanie=środek, jeśli=[Rodzaj]=dwustronna
+```
+
+- Rewers, który nie używa żadnej kolumny (ani `[_id]`, `[_numer]`, `[_kopia]`), jest wspólny dla talii – dokładnie jak wcześniej. Pola wspólne dla całej talii (`[_liczba]`, `[_wersja]`, `[_talia]`, `[_projekt]`, `[_data]`) i stałe `[=nazwa]` nie robią z rewersu zależnego.
+- Karty o takim samym rewersie dzielą go: w podglądzie każdy **różny** rewers stoi na początku talii z podpisem „Rewers 2 · ×4” (wzór i liczba kart).
+- Brakująca kolumna daje Uwagę tak jak na awersie.
+- Gradientu (`#fff > #000`) nie da się wpisać w komórkę danych – z kolumny działa jeden kolor albo plik.
+- Druk: na arkuszu A4 i w układzie Drukarnia za każdą kartą idzie jej rewers. playingcards.io – jeden rewers na stos: użyty jest najczęstszy rewers talii, a wynik eksportu zawiera ostrzeżenie.
+- Przykład: talia Magowie w `przyklady/07-gildie`.
 
 ## Elementy
 
