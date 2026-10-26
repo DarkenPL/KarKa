@@ -2343,8 +2343,10 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const srodek = (el, ark) => { const a = ark.getBoundingClientRect(), r = el.getBoundingClientRect(), s = 210 / a.width;
         return [((r.left + r.right) / 2 - a.left) * s, ((r.top + r.bottom) / 2 - a.top) * s]; };
       const blisko = (a, b) => Math.abs(a - b) <= 0.05;
+      const wKomorce = (k, c, ark) => { const s = 210 / ark.getBoundingClientRect().width, a = c.getBoundingClientRect(), b = k.getBoundingClientRect();
+        return k !== c && [b.left - a.left, b.top - a.top, a.right - b.right, a.bottom - b.bottom].every((d) => blisko(d * s, 0)); };
       const ark = [...document.querySelectorAll('#druk .arkusz')];
-      const st = { pary: 0, pozycje: 0, lustro: 0, geometria: 0, puste: 0, pelne: 0, rozne: 0, poziome: 0, obrot: 0 };
+      const st = { pary: 0, pozycje: 0, lustro: 0, geometria: 0, puste: 0, pelne: 0, rozne: 0, poziome: 0, obrot: 0, wKomorce: 0 };
       for (let i = 0; i < ark.length; i++) {
         const fu = ark[i].querySelector('.uklad');
         if (!fu.querySelector('[data-karta]')) { bledy.push('arkusz ' + i + ' bez awersów'); continue; }
@@ -2373,7 +2375,10 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
           else bledy.push('arkusz ' + i + ' poz. ' + j + ': środek rewersu ' + bx.toFixed(2) + ',' + by.toFixed(2) + ' zamiast ' + (210 - fx + PX).toFixed(2) + ',' + (fy + PY).toFixed(2));
           if (w > h) { st.poziome++;
             if (/rotate\\(90deg\\)/.test(kartaW(el).style.transform) && /rotate\\(-90deg\\)/.test(kb.style.transform)) st.obrot++;
-            else bledy.push('arkusz ' + i + ' poz. ' + j + ': obrót rewersu karty poziomej'); }
+            else bledy.push('arkusz ' + i + ' poz. ' + j + ': obrót rewersu karty poziomej');
+            // Obrócona karta (awers i rewers) leży dokładnie w komórce – komórka ma overflow:hidden, zły translate by ją obciął.
+            if (wKomorce(kartaW(el), el, ark[i - 1]) && wKomorce(kb, be, ark[i])) st.wKomorce++;
+            else bledy.push('arkusz ' + i + ' poz. ' + j + ': obrócona karta wystaje poza komórkę'); }
         });
         // Różne rewersy: miejsca bez karty (niepełny ostatni rząd) puste.
         if (!jeden) rewersy.forEach((be, j) => { const r = Math.floor(j / uc), c = j % uc;
@@ -2383,6 +2388,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       spr('lustro', st.lustro + st.puste === st.pozycje, '');
       spr('geometria', st.geometria === st.lustro, '');
       spr('obrot', st.obrot === st.poziome, '');
+      spr('wKomorce', st.wKomorce === st.poziome, '');
       spr('bezBledow', !bledy.length, '');
       if (PROJEKT === 'Gildie') spr('gildieArkusze', st.pelne >= 2 && st.rozne >= 2 && st.puste >= 2 && st.poziome >= 4, JSON.stringify(st));
       // Zrzut: pierwsze 4 arkusze (awersy + rewersy dwóch arkuszy).
@@ -2415,6 +2421,138 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       arkusze.ok = arkusze.ok && arkusze.zlecenie.ok;
     }
   }
+  // Rewersy zależne od karty (issue #47, --test-edytor, każdy projekt): talie bez kolumn w [REWERS] – rewers wspólny jak dotąd;
+  // 07-gildie (Magowie): warianty rewersu w podglądzie, A4 (lustro), drukarnia osobno / na przemian, pojedyncze, odciski z polem r
+  // (stary zapis bez r → nic zmienionego, zmiana kolumny rewersu → ta karta zmieniona); poza przykładami zlecenie pcio
+  // (najczęstszy rewers + ostrzeżenie). Zrzuty -rewersy.png (podgląd) i -rewersy-a4.png (arkusz awersów i rewersów).
+  let rewersy = null;
+  if (process.argv.includes('--test-edytor')) {
+    rewersy = await wc.executeJavaScript(`(async () => {
+      const wyniki = {}, bledy = [];
+      const spr = (nazwa, warunek, opis) => { wyniki[nazwa] = !!warunek; if (!warunek) bledy.push(nazwa + (opis ? ': ' + opis : '')); };
+      const podglad = document.getElementById('podglad');
+      const karty = kartyEksportu({});
+      const zalezne = [...REWERSY_KART.keys()];
+      // Zgodność: talie bez kolumn w [REWERS] – najwyżej jeden rewers, bez data-rewers, rewersKarty = rewers talii.
+      const wspolne = [...podglad.querySelectorAll('.talia')].filter((s) => !REWERSY_KART.has(s.dataset.talia));
+      spr('wspolne', wspolne.every((s) => s.querySelectorAll('.karta.rewers').length <= 1 && !s.querySelector('[data-rewers]'))
+        && karty.filter((k) => !REWERSY_KART.has(k.dataset.talia)).every((k) => rewersKarty(k) === backOf(k.dataset.talia)));
+      spr('flaga', TALIE.every((t) => !REWERSY_KART.has(t.nazwa) || t.rewersZalezny));
+      const wynik = { zalezne, wspolneTalie: wspolne.length };
+      if (PROJEKT === 'Gildie') {
+        const sek = podglad.querySelector('.talia[data-talia="Magowie"]');
+        const mag = karty.filter((k) => k.dataset.talia === 'Magowie');
+        const id = (n) => mag.find((k) => k.dataset.id === String(n));
+        const ety = [...sek.querySelectorAll('.rewers-podglad .etykieta')].map((e) => e.textContent);
+        wynik.magowie = { rewersy: sek.querySelectorAll('.karta.rewers').length, etykiety: ety };
+        spr('magowie', zalezne.join() === 'Magowie' && wynik.magowie.rewersy === 3 && mag.length === 7 && mag.every((k) => rewersKarty(k)), JSON.stringify(wynik.magowie));
+        // Uczeń i Astrolog (Runy) – ten sam rewers; Iluzjonista (Księgi) – inny; Alchemik – dwustronny.
+        const r = (n) => rewersKarty(id(n));
+        spr('warianty', r(1) === r(3) && r(1) !== r(4) && r(2) !== r(1) && r(2) !== r(4) && r(1).dataset.odcisk !== r(4).dataset.odcisk);
+        spr('etykiety', JSON.stringify(ety) === JSON.stringify(['Rewers 1 · ×2', 'Rewers 2 · ×1', 'Rewers 3 · ×4']), JSON.stringify(ety));
+        spr('dwustronna', /Kamień filozoficzny/.test(r(2).textContent) && /#c9a227/i.test(r(2).getAttribute('style')) && !/Magowie/.test(r(2).textContent)
+          && /szkoła Runy/.test(r(1).textContent) && /szkoła Księgi/.test(r(4).textContent));
+        // Karty awersów bez nowych atrybutów (odciski!).
+        spr('awersBezZmian', mag.every((k) => !k.hasAttribute('data-rewers')));
+        // A4 (sama talia – 7 kart, 3 kolumny): rewers z lustrzanej pozycji = rewers tej karty.
+        const kartaW = (el) => el && (el.classList.contains('karta') ? el : el.querySelector('.karta'));
+        buildPrint({ uklad: 'a4', karty: mag });
+        const ark = [...document.querySelectorAll('#druk .arkusz')];
+        let a4 = 0, puste = 0;
+        for (const el of ark[1] ? ark[1].querySelectorAll('.uklad > *') : []) {
+          if (!el.dataset.dla) { puste += !kartaW(el); continue; }
+          const k = mag.find((x) => kluczKarty(x) === el.dataset.dla);
+          if (k && kartaW(el).innerHTML === rewersKarty(k).innerHTML) a4++;
+        }
+        spr('a4', ark.length === 2 && a4 === 7 && puste === 2, ark.length + ' arkuszy, ' + a4 + '/7, puste ' + puste);
+        // Drukarnia (spad 0 – strona = klon karty): osobno – plik rewersów, strona N = rewers awersu N; na przemian; pojedyncze.
+        const strony = () => [...document.querySelectorAll('#druk .arkusz')].map((a) => a.querySelector('.karta'));
+        const ten = (el, k) => !!el && el.innerHTML === rewersKarty(k).innerHTML;
+        const plan = buildPrint({ uklad: 'drukarnia', spad: 0, karty: mag });
+        let s = strony();
+        spr('osobno', plan.pliki.length === 2 && s.length === 14 && mag.every((k, n) => ten(s[7 + n], k)) && plan.strony.slice(7).every((x) => x.plik === 1), JSON.stringify(plan.pliki) + ' ' + s.length);
+        buildPrint({ uklad: 'drukarnia', spad: 0, strony: 'naprzemian', karty: mag }); s = strony();
+        spr('naprzemian', s.length === 14 && mag.every((k, n) => ten(s[2 * n + 1], k)));
+        buildPrint({ uklad: 'pojedyncze', karty: mag }); s = strony();
+        spr('pojedyncze', s.length === 14 && mag.every((k, n) => ten(s[2 * n + 1], k)));
+        // Odciski: a) zapis sprzed 0.6.1 (bez pola r) – nic nie jest zmienione.
+        const przed = ODCISKI ? JSON.parse(JSON.stringify(ODCISKI)) : null;
+        const liczby = () => ({ zm: podglad.querySelectorAll('.karta.zmieniona:not(.rewers)').length, nowe: podglad.querySelectorAll('.karta.nowa:not(.rewers)').length });
+        const stary = { data: new Date().toISOString(), karty: {} };
+        for (const k of podglad.querySelectorAll('.siatka .karta')) stary.karty[kluczDruku(k)] = { h: k.dataset.odcisk, html: '' };
+        await APP.zapiszOdciski(stary); await oznaczZmiany(podglad);
+        wynik.bezR = liczby();
+        spr('bezR', wynik.bezR.zm === 0 && wynik.bezR.nowe === 0, JSON.stringify(wynik.bezR));
+        // b) zapis z PDF: pole r tylko u kart z rewersem zależnym.
+        await zapamietajDruk(karty);
+        const zap = await APP.odciski();
+        const zR = Object.entries(zap.karty).filter(([, v]) => 'r' in v);
+        spr('poleR', zR.length === 7 && zR.every(([kl, v]) => kl.startsWith('Magowie|') && v.r && v.rhtml) && liczby().zm === 0, String(zR.length));
+        // c) zmiana kolumny rewersu w jednym wierszu (Astrolog: Runy → Księgi) → tylko ta karta zmieniona, awers ten sam.
+        const tal = RAPORT.talie.find((t) => t.nazwa === 'Magowie'), nazwaPliku = tal.plik.replace(/#.*$/, ''), plik = files.get(nazwaPliku);
+        const tekst = await plik.text();
+        files.set(nazwaPliku, new File([tekst.replace(/^(3;Astrolog;[^;]*;)Runy/m, '$1Księgi')], plik.name, { lastModified: plik.lastModified }));
+        await build();
+        const zm = [...podglad.querySelectorAll('.karta.zmieniona:not(.rewers)')];
+        spr('zmianaRewersu', zm.length === 1 && zm[0].dataset.talia === 'Magowie' && zm[0].dataset.id === '3' && zm[0].dataset.odcisk === zap.karty[kluczDruku(zm[0])].h
+          && podglad.querySelectorAll('.talia[data-talia="Magowie"] .karta.rewers').length === 3, zm.map(kluczDruku).join());
+        pokazPorownanie(true);
+        spr('porownanie', document.querySelectorAll('#porownanie .para').length === 1 && /rewers przed/.test(document.getElementById('porownanie').textContent));
+        pokazPorownanie(false);
+        files.set(nazwaPliku, plik); await build();
+        spr('powrot', liczby().zm === 0);
+        await APP.zapiszOdciski(przed || { data: new Date().toISOString(), karty: {} }); await oznaczZmiany(podglad);
+        buildPrint();
+        const sek2 = podglad.querySelector('.talia[data-talia="Magowie"]');
+        sek2.scrollIntoView();
+        const rr = sek2.getBoundingClientRect();
+        wynik.rect = { x: 0, y: Math.max(0, Math.floor(rr.top)), width: Math.ceil(Math.min(rr.width, window.innerWidth)), height: Math.ceil(Math.min(rr.height, window.innerHeight - Math.max(0, rr.top))) };
+      }
+      return { ok: Object.values(wyniki).every(Boolean), wyniki, ...wynik, bledy };
+    })()`);
+    if (rewersy.rect) {
+      await wc.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 300))))');
+      fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-rewersy.png', (await wc.capturePage(rewersy.rect)).toPNG());
+      // Arkusz A4 talii Magowie: awersy i rewersy obok siebie (pod Alchemikiem – rewers dwustronny, w lustrze).
+      const rect = await wc.executeJavaScript(`(() => {
+        buildPrint({ uklad: 'a4', karty: kartyEksportu({ talie: ['Magowie'] }) });
+        const styl = document.createElement('style'); styl.id = 'test-rewersy-styl';
+        styl.textContent = '#druk{display:block;position:fixed;left:0;top:0;z-index:99999;background:#777;zoom:0.4;white-space:nowrap;padding:8px}'
+          + '#druk .arkusz{position:relative;overflow:hidden;background:#fff;display:inline-block;margin:0 12px 0 0;vertical-align:top;white-space:normal}'
+          + '#druk .uklad{display:grid}#druk .znacznik{position:absolute;background:#000}';
+        document.head.appendChild(styl);
+        const r = document.getElementById('druk').getBoundingClientRect();
+        return { x: 0, y: 0, width: Math.ceil(Math.min(r.width, window.innerWidth)), height: Math.ceil(Math.min(r.height, window.innerHeight)) };
+      })()`);
+      await wc.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 300))))');
+      fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-rewersy-a4.png', (await wc.capturePage(rect)).toPNG());
+      await wc.executeJavaScript("document.getElementById('test-rewersy-styl').remove(); buildPrint(); true");
+      delete rewersy.rect;
+    }
+    // Zlecenie pcio (poza przykładami, 07-gildie): talia z 3 rewersami → najczęstszy w backTemplate + ostrzeżenie w wyniku.
+    if (!jestPrzykladem(szablon) && rewersy.zalezne.includes('Magowie')) {
+      const zl = path.join(projekt, ...FOLDER_ZLECEN), w = path.join(zl, 'wynik-pcio.json');
+      fs.mkdirSync(zl, { recursive: true }); fs.rmSync(w, { force: true });
+      fs.writeFileSync(path.join(zl, 'pcio'), 'talie = Magowie\n');
+      let r = null;
+      for (let i = 0; i < 240 && !r; i++) { await czekaj(500); try { r = JSON.parse(fs.readFileSync(w, 'utf8')); } catch (e) { /* jeszcze nie */ } }
+      let widgets = null;
+      try {
+        const b = fs.readFileSync(path.join(projekt, r.pliki[0]));
+        for (let i = 0; i + 30 <= b.length && b.readUInt32LE(i) === 0x04034b50;) {
+          const rozm = b.readUInt32LE(i + 18), dl = b.readUInt16LE(i + 26), ex = b.readUInt16LE(i + 28);
+          const nazwa = b.slice(i + 30, i + 30 + dl).toString(), start = i + 30 + dl + ex;
+          if (nazwa === 'widgets.json') { widgets = JSON.parse(b.slice(start, start + rozm).toString('utf8')); break; }
+          i = start + rozm;
+        }
+      } catch (e) { /* brak pliku – ok = false niżej */ }
+      const deck = widgets && widgets.find((x) => x.type === 'cardDeck');
+      const tyl = deck && deck.backTemplate.objects[0];
+      rewersy.pcio = { ok: !!(r && r.ok && r.holdery === 1 && r.karty === 7 && (r.ostrzezenia || []).some((o) => /Magowie ma 3 różne rewersy.*najczęstszego \(4 z 7 kart\)/.test(o))
+        && tyl && tyl.valueType === 'static' && /^package:\/\/userassets\//.test(tyl.value)), ostrzezenia: r && r.ostrzezenia, blad: r && r.blad };
+      rewersy.ok = rewersy.ok && rewersy.pcio.ok;
+    }
+  }
   await wc.executeJavaScript('buildPrint()');
   await pdfDoPliku(wc, wynik);
   // Menu aplikacji: własne (polskie), a nie domyślne Electrona.
@@ -2425,8 +2563,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
     && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
+  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

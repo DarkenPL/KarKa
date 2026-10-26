@@ -1,8 +1,8 @@
-ID;Nazwa;Opis
-1;Uczeń;Podejrzyj wierzchnią kartę talii.
-2;Alchemik;Zamień 1 monetę na 1 kartę.
-3;Astrolog;Ułóż 3 wierzchnie karty w dowolnej kolejności.
-4;Iluzjonista;Ta karta liczy się jako karta dowolnej gildii.
-5;Czarodziej;Dobierz 1 Zwój.
-6;Wieszczka;Przeciwnik pokazuje Ci swoje karty.
-7;Arcymag;Zagraj jeszcze jedną kartę Magów.
+ID;Nazwa;Opis;Szkoła;Rodzaj;TłoRewersu;RewersNazwa;RewersOpis
+1;Uczeń;Podejrzyj wierzchnią kartę talii.;Runy;;;;
+2;Alchemik;Zamień 1 monetę na 1 kartę.;;dwustronna;#c9a227;Kamień filozoficzny;Gdy zamienisz 3 monety, odwróć tę kartę: każda Twoja moneta liczy się podwójnie.
+3;Astrolog;Ułóż 3 wierzchnie karty w dowolnej kolejności.;Runy;;;;
+4;Iluzjonista;Ta karta liczy się jako karta dowolnej gildii.;Księgi;;;;
+5;Czarodziej;Dobierz 1 Zwój.;Księgi;;;;
+6;Wieszczka;Przeciwnik pokazuje Ci swoje karty.;Księgi;;;;
+7;Arcymag;Zagraj jeszcze jedną kartę Magów.;Księgi;;;;
