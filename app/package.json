@@ -1,8 +1,8 @@
 {
   "name": "karka",
   "productName": "KarKa",
-  "version": "0.5.17",
-  "nazwaWydania": "Gołąb pocztowy",
+  "version": "0.6.0",
+  "nazwaWydania": "Lustro weneckie",
   "description": "KarKa (Kawia Karciana) – generator kart do gier: karty z arkusza CSV/XLSX i szablonu tekstowego",
   "main": "start.js",
   "private": true,

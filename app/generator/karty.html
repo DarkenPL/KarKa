@@ -1774,8 +1774,7 @@ async function zapamietajDruk(karty = kartyEksportu()) {
   if (!APP || !APP.zapiszOdciski) return;
   const dane = ODCISKI || { karty: {} };
   dane.data = new Date().toISOString();
-  const talie = new Set(karty.map((k) => k.dataset.talia));
-  const rewersy = [...$('podglad').querySelectorAll('.siatka .karta.rewers')].filter((k) => talie.has(k.dataset.talia));
+  const rewersy = new Set(karty.map(rewersKarty).filter(Boolean));
   for (const k of [...karty, ...rewersy]) dane.karty[kluczDruku(k)] = { h: k.dataset.odcisk, html: htmlKarty(k) };
   await APP.zapiszOdciski(dane);
   await oznaczZmiany($('podglad'));
@@ -1954,6 +1953,10 @@ function backOf(talia) {
   const s = [...$('podglad').querySelectorAll('.talia')].find((x) => x.dataset.talia === talia);
   return s ? s.querySelector('.karta.rewers') : null;
 }
+// Rewers danej karty (element .karta.rewers z podglądu) albo null – jedyne miejsce, które o tym decyduje (#34).
+// Dziś rewers talii; rewersy zależne od wiersza (#47) podmienią tylko tę funkcję.
+function rewersKarty(k) { return backOf(k.dataset.talia); }
+window.rewersKarty = rewersKarty;
 function status(t) { $('status').textContent = t; }
 
 // ── Zaznaczanie kart do druku ────────────────────────────────────────────────
@@ -2025,7 +2028,10 @@ function cardMm(k) {
 // Karta do druku. Karty poziome obracamy o 90°, żeby wszystkie arkusze
 // miały ten sam format strony – przeglądarki (zwłaszcza Safari) przy mieszanych formatach
 // zmniejszają cały wydruk i przyklejają go do rogu.
-function printCard(k, w, h) {
+// rewers = true (arkusz rewersów A4): karta pozioma obrócona w drugą stronę (−90°) – po odwróceniu kartki
+// wzdłuż dłuższej krawędzi arkusza i obróceniu karty na bok rewers jest „do góry” tak jak awers
+// (decyzja właściciela 26.10.2026 w #47; przy obrocie o +90° jak awers wychodził do góry nogami).
+function printCard(k, w, h, rewers = false) {
   const c = k.cloneNode(true);
   c.classList.remove('za-dlugi');
   c.style.boxShadow = 'none'; c.style.outline = 'none'; c.style.margin = '0';
@@ -2036,7 +2042,7 @@ function printCard(k, w, h) {
   // i zmniejsza cały wydruk.
   c.style.position = 'absolute'; c.style.left = (h - w) + 'mm'; c.style.top = '0';
   c.style.transformOrigin = '0 0';
-  c.style.transform = `translateX(${w}mm) rotate(90deg)`;
+  c.style.transform = rewers ? `translate(${w - h}mm, ${w}mm) rotate(-90deg)` : `translateX(${w}mm) rotate(90deg)`;
   cell.appendChild(c);
   return cell;
 }
@@ -2109,14 +2115,14 @@ function kartaZeSpadem(k, w, h, s) {
   return c;
 }
 
-// o: { uklad: 'a4' | 'pojedyncze' | 'drukarnia', ciecie, spad, strony, rewersy, szkic, karty } – z okna Druk / PDF
+// o: { uklad: 'a4' | 'pojedyncze' | 'drukarnia', ciecie, spad, strony, rewersy, wspolne, szkic, karty } – z okna Druk / PDF
 // (domyślnie wszystkie karty, A4, z rewersami). Zwraca plan druku (PLAN_DRUKU) – dla układu Drukarnia
 // main.js ustawia według niego dokładny rozmiar stron, TrimBox i dzieli PDF na pliki (drukarnia.js):
 // { szer, wys, spad (mm), pliki: [''] | ['awersy', 'rewersy'], strony: [{ plik, ciecie: [x, y, w, h] }] }.
 const SPAD_DRUKARNI = 3;              // domyślny spad (mm) – wymóg drukarni (#66)
 let PLAN_DRUKU = null;
-// Odcisk rewersu do porównania talii: ten sam wygląd i rozmiar = ten sam rewers (bez data-talia i title).
-const wygladRewersu = (g) => g.w + 'x' + g.h + '|' + g.back.style.cssText + '|' + g.back.innerHTML;
+// Odcisk rewersu do porównania kart: ten sam wygląd i rozmiar = ten sam rewers (bez data-talia i title).
+const wygladRewersu = (el, w, h) => w + 'x' + h + '|' + el.style.cssText + '|' + el.innerHTML;
 function buildPrint(o = {}) {
   const tryb = o.uklad || 'a4';
   const ciecie = o.ciecie || 'znaczniki';      // znaczniki | nozyczki | oba
@@ -2124,15 +2130,18 @@ function buildPrint(o = {}) {
   const druk = $('druk');
   druk.innerHTML = '';
   druk.classList.toggle('szkic', !!o.szkic);
-  const groups = new Map();                       // talia + rozmiar karty → karty
-  for (const k of (o.karty || kartyEksportu())) {
-    const [w, h] = cardMm(k);
-    const key = k.dataset.talia + '|' + w + 'x' + h;     // każda talia na osobnych arkuszach
-    if (!groups.has(key)) groups.set(key, { w, h, cards: [], back: backOf(k.dataset.talia) });
-    groups.get(key).cards.push(k);
-  }
+  // Talie na wspólnych arkuszach (#34, tylko A4, domyślnie): grupa = rozmiar komórki (63×88 i 88×63 razem),
+  // karty wszystkich talii ciągiem. Inaczej (i w układach strona-na-kartę) grupa = talia + rozmiar karty jak do 0.5.x.
+  const wspolne = tryb === 'a4' && o.wspolne !== false;
   // Wymiary komórki na arkuszu: zawsze pionowo (krótszy bok = szerokość).
   const cellOf = (g) => [Math.min(g.w, g.h), Math.max(g.w, g.h)];
+  const groups = new Map();                       // klucz → { cw, ch, karty: [{ k, w, h, back }] }
+  for (const k of (o.karty || kartyEksportu())) {
+    const [w, h] = cardMm(k), [cw, ch] = cellOf({ w, h });
+    const key = wspolne ? cw + 'x' + ch : k.dataset.talia + '|' + w + 'x' + h;
+    if (!groups.has(key)) groups.set(key, { cw, ch, karty: [] });
+    groups.get(key).karty.push({ k, w, h, back: rewersKarty(k) });
+  }
 
   if (tryb === 'pojedyncze' || tryb === 'drukarnia') {
     // Drukarnia: strona = karta + spad z każdej strony, bez znaczników, strona na kopię.
@@ -2141,8 +2150,8 @@ function buildPrint(o = {}) {
     // (karta talii bez rewersu → pusta strona); 'naprzemian' – awers, rewers, awers… (jak do 0.5.8).
     const s = tryb === 'drukarnia' ? Math.max(0, num(o.spad ?? SPAD_DRUKARNI) || 0) : 0;
     // Jeden format strony dla całego wydruku: największa karta (pionowo); mniejsze karty na środku.
-    const pw = Math.max(...[...groups.values()].map((g) => cellOf(g)[0])) + 2 * s;
-    const ph = Math.max(...[...groups.values()].map((g) => cellOf(g)[1])) + 2 * s;
+    const pw = Math.max(...[...groups.values()].map((g) => g.cw)) + 2 * s;
+    const ph = Math.max(...[...groups.values()].map((g) => g.ch)) + 2 * s;
     const plan = { uklad: tryb, szer: pw, wys: ph, spad: s, pliki: [''], strony: [] };
     // Zapas spadu: Chromium zaokrągla stronę PDF (np. 94 → 93,8 mm), więc strona jest o 2 × ZAPAS większa,
     // a karta ma spad + ZAPAS (wystaje poza arkusz). main.js przycina stronę do pw × ph (MediaBox) –
@@ -2163,20 +2172,20 @@ function buildPrint(o = {}) {
       a.appendChild(box);
     };
     if (tryb === 'drukarnia' && o.strony !== 'naprzemian') {
-      const awersy = [...groups.values()].flatMap((g) => g.cards.map((k) => ({ k, g })));
-      for (const { k, g } of awersy) page(k, g.w, g.h);
-      const zRewersem = awersy.filter(({ g }) => g.back);
+      const awersy = [...groups.values()].flatMap((g) => g.karty);
+      for (const { k, w, h } of awersy) page(k, w, h);
+      const zRewersem = awersy.filter((a) => a.back);
       if (zRewersami && zRewersem.length) {
-        const wyglady = new Set(zRewersem.map(({ g }) => wygladRewersu(g)));
-        if (wyglady.size === 1 && zRewersem.length === awersy.length) { const { g } = awersy[0]; page(g.back, g.w, g.h); }
+        const wyglady = new Set(zRewersem.map((a) => wygladRewersu(a.back, a.w, a.h)));
+        if (wyglady.size === 1 && zRewersem.length === awersy.length) { const a = awersy[0]; page(a.back, a.w, a.h); }
         else {
           plan.pliki = ['awersy', 'rewersy'];
-          for (const { g } of awersy) page(g.back || null, g.w, g.h, 1);
+          for (const a of awersy) page(a.back || null, a.w, a.h, 1);
         }
       }
     } else {
-      for (const { w, h, cards, back } of groups.values())
-        for (const k of cards) { page(k, w, h); if (zRewersami && back) page(back, w, h); }
+      for (const g of groups.values())
+        for (const { k, w, h, back } of g.karty) { page(k, w, h); if (zRewersami && back) page(back, w, h); }
     }
     $('styl-strony').textContent = `@page { size: ${pw + 2 * ZAPAS}mm ${ph + 2 * ZAPAS}mm; margin: 0; }`;
     return (PLAN_DRUKU = plan);
@@ -2184,13 +2193,12 @@ function buildPrint(o = {}) {
 
   // A4 pionowo; siatka kart wyśrodkowana na arkuszu, znaczniki cięcia na marginesach.
   const PW = 210, PH = 297;
-  for (const g of groups.values()) {
-    const { w, h, cards, back } = g;
-    const [cw, ch] = cellOf(g);
+  let arkuszeAwersow = 0, arkuszeRewersow = 0;
+  for (const { cw, ch, karty } of groups.values()) {
     const cols = Math.max(1, Math.floor((PW - 16) / cw)), rows = Math.max(1, Math.floor((PH - 16) / ch));
     const per = cols * rows, dl = 4, odst = 1.5;
-    for (let i = 0; i < cards.length; i += per) {
-      const n = Math.min(per, cards.length - i);
+    for (let i = 0; i < karty.length; i += per) {
+      const arkusz = karty.slice(i, i + per), n = arkusz.length;
       const used = Math.ceil(n / cols);
       const usedCols = Math.min(cols, n);
       // Wyśrodkowanie według faktycznie zajętej siatki (niepełny ostatni arkusz też na środku).
@@ -2199,7 +2207,8 @@ function buildPrint(o = {}) {
       sheet.style.cssText = `width:${PW}mm;height:${PH}mm;`;
       const u = document.createElement('div'); u.className = 'uklad';
       u.style.cssText = `position:absolute;left:${mm(x0)};top:${mm(y0)};grid-template-columns:repeat(${usedCols},${cw}mm);grid-auto-rows:${ch}mm;`;
-      cards.slice(i, i + per).forEach((k) => u.appendChild(printCard(k, w, h)));
+      // data-poz / data-karta tylko na klonach w #druk (do testu lustra) – karty podglądu bez zmian.
+      arkusz.forEach((a, j) => { const el = printCard(a.k, a.w, a.h); el.dataset.poz = j; el.dataset.karta = kluczKarty(a.k); u.appendChild(el); });
       sheet.appendChild(u);
       const line = (css) => { const z = document.createElement('div'); z.className = 'znacznik'; z.style.cssText = css; sheet.appendChild(z); };
       // Przerywane linie do cięcia nożyczkami: wzdłuż wszystkich krawędzi kart, przez całą siatkę.
@@ -2220,21 +2229,37 @@ function buildPrint(o = {}) {
         line(`top:${mm(y - 0.1)};left:${mm(x0 - odst - dl)};height:0.2mm;width:${mm(dl)}`);
         line(`top:${mm(y - 0.1)};left:${mm(x0 + usedCols * cw + odst)};height:0.2mm;width:${mm(dl)}`);
       }
-      druk.appendChild(sheet);
-      if (zRewersami && back) {
-        // Arkusz rewersów: ta sama siatka co awersy, zapełniona w całości – pasuje przy każdym obracaniu kartki.
+      druk.appendChild(sheet); arkuszeAwersow++;
+      const zRewersem = arkusz.filter((a) => a.back);
+      if (zRewersami && zRewersem.length) {
+        // Arkusz rewersów: ta sama siatka co awersy, składana miejsce po miejscu w lustrze wzdłuż dłuższej
+        // (pionowej) krawędzi arkusza – komórka (wiersz r, kolumna c) awersów ↔ (r, usedCols − 1 − c) rewersów.
+        // Siatka jest wyśrodkowana, więc po odwróceniu kartki komórki trafiają dokładnie na siebie.
+        // Wszystkie karty arkusza z tym samym rewersem → siatka zapełniona w całości jak do 0.5.x (pasuje przy
+        // każdym obracaniu kartki); różne rewersy → miejsca bez karty i karty bez rewersu zostają puste.
         const bs = document.createElement('div'); bs.className = 'arkusz'; bs.style.cssText = sheet.style.cssText;
         const bu = u.cloneNode(false);
         // Korekta przesunięcia drukarki przy druku dwustronnym (pkt 5): cała siatka rewersów o X/Y mm.
         const px = Math.min(10, Math.max(-10, num(o.przesuniecieX) || 0)), py = Math.min(10, Math.max(-10, num(o.przesuniecieY) || 0));
         if (px || py) { bu.style.left = mm(x0 + px); bu.style.top = mm(y0 + py); }
-        for (let j = 0; j < used * usedCols; j++) bu.appendChild(printCard(back, w, h));
-        bs.appendChild(bu); druk.appendChild(bs);
+        const jeden = zRewersem.length === n && new Set(zRewersem.map((a) => wygladRewersu(a.back, a.w, a.h))).size === 1;
+        for (let j = 0; j < used * usedCols; j++) {
+          const r = Math.floor(j / usedCols), c = j % usedCols;
+          const a = arkusz[r * usedCols + (usedCols - 1 - c)];          // karta z lustrzanej pozycji awersów
+          const b = jeden ? arkusz[0] : a;
+          let el;
+          if (b && b.back) { el = printCard(b.back, b.w, b.h, true); el.dataset.dla = a ? kluczKarty(a.k) : ''; }
+          else el = document.createElement('div');
+          el.dataset.poz = j;
+          bu.appendChild(el);
+        }
+        bs.appendChild(bu); druk.appendChild(bs); arkuszeRewersow++;
       }
     }
   }
   $('styl-strony').textContent = `@page { size: ${PW}mm ${PH}mm; margin: 0; }`;
-  return (PLAN_DRUKU = { uklad: 'a4', szer: PW, wys: PH, spad: 0, pliki: [''], strony: null });
+  return (PLAN_DRUKU = { uklad: 'a4', szer: PW, wys: PH, spad: 0, pliki: [''], strony: null,
+    arkusze: { awersy: arkuszeAwersow, rewersy: arkuszeRewersow } });
 }
 
 function drukuj(o = {}) {
@@ -2459,11 +2484,11 @@ const KLUCZE_ZLECEN = {
   katalog: ['talie', 'id'],
   stan: [],
   raport: ['drukarnia'],
-  pdf: ['uklad', 'ciecie', 'rewersy', 'strony', 'szkic', 'spad', 'przesunieciex', 'przesunieciey', 'talie', 'id', 'tylkozmienione', 'profil', 'plik'],
+  pdf: ['uklad', 'ciecie', 'rewersy', 'wspolnearkusze', 'strony', 'szkic', 'spad', 'przesunieciex', 'przesunieciey', 'talie', 'id', 'tylkozmienione', 'profil', 'plik'],
   obrazki: ['dpi', 'format', 'talie', 'id', 'rewersy'],
   pcio: ['dpi', 'talie', 'id'],
 };
-const ALIASY_ZLECEN = { talia: 'talie', rewers: 'rewersy', zmienione: 'tylkozmienione', rozdzielczosc: 'dpi' };
+const ALIASY_ZLECEN = { talia: 'talie', rewers: 'rewersy', zmienione: 'tylkozmienione', rozdzielczosc: 'dpi', wspolne: 'wspolnearkusze' };
 const OKNO_ZLECENIA = { pdf: 'druk', obrazki: 'obrazki', pcio: 'pcio' };
 const nazwyTalii = () => [...$('podglad').querySelectorAll('.talia')].map((s) => s.dataset.talia);
 
@@ -2506,6 +2531,7 @@ function opcjeZlecenia(polecenie, surowe = {}) {
   if (v.uklad !== undefined) o.uklad = wybor('uklad', ['a4', 'pojedyncze', 'drukarnia'], { osobne: 'pojedyncze' });
   if (v.ciecie !== undefined) o.ciecie = wybor('ciecie', ['znaczniki', 'nozyczki', 'oba'], { linie: 'nozyczki' });
   if (v.rewersy !== undefined) o.rewersy = tak('rewersy');
+  if (v.wspolnearkusze !== undefined) o.wspolne = tak('wspolnearkusze');
   if (v.strony !== undefined) o.strony = wybor('strony', ['osobno', 'naprzemian'], { przemian: 'naprzemian', na_przemian: 'naprzemian', osobne: 'osobno' });
   if (v.drukarnia !== undefined) o.drukarnia = tak('drukarnia');
   if (v.szkic !== undefined) o.szkic = tak('szkic');
@@ -2596,6 +2622,8 @@ const ZADANIA_ZLECEN = {
     const pliki = await zapiszPdf({ ...o, zlecenie: true });
     if (!pliki) throw new Error('PDF nie został zapisany');
     const wynik = { ok: true, pliki, karty: karty.length, strony: $('druk').querySelectorAll('.arkusz').length || null };
+    // A4: liczba arkuszy awersów i rewersów (talie na wspólnych arkuszach – #34).
+    if (PLAN_DRUKU && PLAN_DRUKU.arkusze) wynik.arkusze = { ...PLAN_DRUKU.arkusze, wspolne: o.wspolne !== false };
     // CMYK: profil, wersja Ghostscripta i kontrola każdego pliku (rgb = 0, czern = liczba „0 0 0 1 k”, obrazki, TrimBox).
     if (o.cmyk) wynik.cmyk = OSTATNI_CMYK;
     const plan = PLAN_DRUKU;
@@ -2958,8 +2986,8 @@ const OKNA = {
     domyslne: { dpi: 150, format: 'jpg', ktore: 'wszystkie', rewersy: true, pominTalie: [] },
     przyciski: [['ok', 'Eksportuj']],
     opis: 'Każda karta jako osobny plik w folderze Export projektu.' },
-  druk: { tytul: 'Druk i PDF', pola: ['uklad', 'ciecie', 'spad', 'strony', 'cmyk', 'rewersy', 'przesuniecie', 'szkic', 'ktore', 'talie'],
-    domyslne: { uklad: 'a4', ciecie: 'znaczniki', spad: SPAD_DRUKARNI, strony: 'osobno', cmyk: true, profil: 'fogra39', rewersy: true, przesuniecieX: 0, przesuniecieY: 0, szkic: false, ktore: 'wszystkie', pominTalie: [] },
+  druk: { tytul: 'Druk i PDF', pola: ['uklad', 'ciecie', 'spad', 'strony', 'cmyk', 'rewersy', 'wspolne', 'przesuniecie', 'szkic', 'ktore', 'talie'],
+    domyslne: { uklad: 'a4', ciecie: 'znaczniki', spad: SPAD_DRUKARNI, strony: 'osobno', cmyk: true, profil: 'fogra39', rewersy: true, wspolne: true, przesuniecieX: 0, przesuniecieY: 0, szkic: false, ktore: 'wszystkie', pominTalie: [] },
     przyciski: [['drukuj', 'Drukuj…'], ['pdf', 'Zapisz PDF']] },
   katalog: { tytul: 'Katalog talii', pola: ['talie'], domyslne: { pominTalie: [] },
     przyciski: [['ok', 'Zapisz katalog']],
@@ -3010,6 +3038,7 @@ function poleOkna(nazwa, rodzaj, u) {
         `<option value="__inny">inny plik .icc…</option></select></label></fieldset>`;
     }
     case 'rewersy': return pole('rewersy', rodzaj === 'druk' ? 'Rewersy <span class="opis">– po każdym arkuszu kart arkusz rewersów (druk dwustronny)</span>' : 'Rewersy talii <span class="opis">– osobne pliki</span>');
+    case 'wspolne': return pole('wspolne', 'Talie na wspólnych arkuszach <span class="opis">(układ A4) – karty wszystkich talii ciągiem, bez pustych miejsc między taliami; arkusz rewersów składany miejsce po miejscu (lustro do druku dwustronnego, odwracanie wzdłuż dłuższej krawędzi)</span>');
     case 'szkic': return pole('szkic', 'Szkic <span class="opis">– bez teł i obrazków, tekst czarny (oszczędza tusz)</span>');
     case 'ktore': {
       const z = ile('wybrana'), zm = ODCISKI ? ile('zmieniona') + ile('nowa') : 0;
@@ -3047,7 +3076,7 @@ function otworzOkno(rodzaj, domyslna) {
         if (p === 'talie') {
           const pola = [...form.querySelectorAll('[name=talia]')];
           o.pominTalie = pola.filter((x) => !x.checked).map((x) => x.value);
-        } else if (['rewersy', 'szkic'].includes(p)) o[p] = !!form.querySelector(`[name=${p}]`)?.checked;
+        } else if (['rewersy', 'szkic', 'wspolne'].includes(p)) o[p] = !!form.querySelector(`[name=${p}]`)?.checked;
         else if (p === 'przesuniecie') for (const n of ['przesuniecieX', 'przesuniecieY']) {
           const v = parseFloat(String(form.querySelector(`[name=${n}]`)?.value ?? '').replace(',', '.'));
           o[n] = Number.isNaN(v) ? (u[n] || 0) : Math.round(Math.min(10, Math.max(-10, v)) * 10) / 10;

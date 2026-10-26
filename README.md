@@ -69,6 +69,7 @@ Są wbudowane w aplikację (menu **Plik → Przykłady**), a ich pliki leżą w 
 | [`04-karawana`](przyklady/04-karawana) | dane z pliku XLSX (dwa arkusze, dwie talie), `STAŁA`, gradient tła, `ELIPSA` z `krycie`, obrócony tekst, `LINIA` ze strzałką, przerywane obwódki, `WERSJA` i numer karty w stopce, karta pominięta (`Ilość = 0`) |
 | [`05-zaklecia`](przyklady/05-zaklecia) | małe karty 44×68, CSV z przecinkami, tytuł z obrysem i cieniem, `wersaliki`, `jedna_linia`, `kursywa`, `podkreślenie`, kolorowe znaczniki `{kolor-…}`, formatowanie z danych, rozmiary w jednym polu (`<small>`, `<big>`, `<rozmiar=…>`), wyrównanie akapitów (`<środek>`, `<prawo>`) i `lista=tak` z wcięciem wiszącym, `jeśli=` z `!=`, rewers z własnymi rogami i obwódką, `[AWERS]` po rewersie |
 | [`06-targ`](przyklady/06-targ) | układ z danych: pozycje żetonów z kolumn (`[Z1x]`, `[Z1y]`), rozmiar ze `STAŁA`, `kadr=` (ilustracja w ramce), `krycie`, `obrót` i `odbicie` z kolumn, puste pozycje = brak elementu |
+| [`07-gildie`](przyklady/07-gildie) | siedem małych talii po 1–7 kart z różnymi rewersami (jedna bez rewersu, jedna pozioma, jedna 44×68) – druk A4 „Talie na wspólnych arkuszach” i arkusz rewersów w lustrze; napis „↑ góra” do wydruku próbnego |
 
 ## Dokumentacja
 
