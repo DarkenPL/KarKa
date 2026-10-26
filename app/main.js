@@ -1032,10 +1032,18 @@ function wybraneBlokiTestu() {
   if (zle.length || !lista.length) throw new Error('--test-bloki: nieznane bloki ' + (zle.join(', ') || '(pusta lista)') + ' – dostępne: ' + znane.join(', '));
   return lista;
 }
+// Czas bloku = od jego testBloku() do następnego (albo do końca testu) – pole czasyBlokow w wyniku (obserwacja CI, #88).
+const CZASY_TESTU = [];
 function testBloku(nazwa) {
-  if (!process.argv.includes('--test-edytor')) return false;
-  const lista = wybraneBlokiTestu();
-  return !lista || lista.includes(nazwa);
+  const lista = process.argv.includes('--test-edytor') ? wybraneBlokiTestu() : [];
+  const tak = !lista || lista.includes(nazwa);
+  CZASY_TESTU.push([tak ? nazwa : null, Date.now()]);
+  return tak;
+}
+function czasyBlokow() {
+  const t = [...CZASY_TESTU, [null, Date.now()]], wynik = {};
+  for (let i = 0; i + 1 < t.length; i++) if (t[i][0]) wynik[t[i][0]] = Math.round((t[i + 1][1] - t[i][1]) / 100) / 10;
+  return wynik;
 }
 async function trybTestowy(folder, wynik, przywrocone = []) {
   const P = aktywny, wc = P.wc, szablon = P.szablon, projekt = P.folder;   // projekt testowy = aktywna zakładka
@@ -2668,6 +2676,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       rewersy.ok = rewersy.ok && rewersy.pcio.ok;
     }
   }
+  CZASY_TESTU.push([null, Date.now()]);                  // koniec ostatniego bloku
   await wc.executeJavaScript('buildPrint()');
   await pdfDoPliku(wc, wynik);
   // Menu aplikacji: własne (polskie), a nie domyślne Electrona.
@@ -2679,7 +2688,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
     && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: bloki || (process.argv.includes('--test-edytor') ? 'wszystkie' : 'bez --test-edytor'), stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, bloki: bloki || (process.argv.includes('--test-edytor') ? 'wszystkie' : 'bez --test-edytor'), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
