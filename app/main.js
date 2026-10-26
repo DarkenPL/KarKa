@@ -2299,6 +2299,122 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-akapity.png', (await wc.capturePage(akapity.rect)).toPNG());
     await wc.executeJavaScript("document.getElementById('test-akapity').remove()");
   }
+  // Talie na wspólnych arkuszach (issue #34, --test-edytor, każdy projekt): liczba arkuszy z opcją i bez,
+  // lustro arkusza rewersów (pozycja i geometria względem awersu, z przesunięciem), pełna siatka przy jednym rewersie,
+  // puste miejsca przy różnych, obrót rewersu kart poziomych w drugą stronę; zrzut -arkusze.png; zlecenie pdf z kluczem.
+  let arkusze = null;
+  if (process.argv.includes('--test-edytor')) {
+    arkusze = await wc.executeJavaScript(`(() => {
+      const wyniki = {}, bledy = [];
+      const spr = (nazwa, warunek, opis) => { wyniki[nazwa] = !!warunek; if (!warunek && opis) bledy.push(nazwa + ': ' + opis); };
+      const karty = kartyEksportu({});
+      // Oczekiwana liczba arkuszy z liczby kart i siatki (A4: margines 8 mm z każdej strony).
+      const oczekiwane = (wspolne) => {
+        const grupy = new Map();
+        for (const k of karty) {
+          const [w, h] = cardMm(k), cw = Math.min(w, h), ch = Math.max(w, h);
+          const klucz = wspolne ? cw + 'x' + ch : k.dataset.talia + '|' + w + 'x' + h;
+          if (!grupy.has(klucz)) grupy.set(klucz, { cw, ch, karty: [] });
+          grupy.get(klucz).karty.push(k);
+        }
+        let awersy = 0, rewersy = 0;
+        for (const g of grupy.values()) {
+          const per = Math.max(1, Math.floor(194 / g.cw)) * Math.max(1, Math.floor(281 / g.ch));
+          for (let i = 0; i < g.karty.length; i += per) { awersy++; if (g.karty.slice(i, i + per).some((k) => rewersKarty(k))) rewersy++; }
+        }
+        return { awersy, rewersy };
+      };
+      const liczba = { bez: buildPrint({ uklad: 'a4', wspolne: false }).arkusze, z: buildPrint({ uklad: 'a4' }).arkusze };
+      liczba.arkuszeZ = document.querySelectorAll('#druk .arkusz').length;
+      const ocz = { bez: oczekiwane(false), z: oczekiwane(true) };
+      spr('liczbaBez', JSON.stringify(liczba.bez) === JSON.stringify(ocz.bez), JSON.stringify([liczba.bez, ocz.bez]));
+      spr('liczbaZ', JSON.stringify(liczba.z) === JSON.stringify(ocz.z) && liczba.arkuszeZ === ocz.z.awersy + ocz.z.rewersy, JSON.stringify([liczba.z, ocz.z]));
+      // Przykład 07-gildie: 22 karty 63×88 / 88×63 z 6 talii + 6 kart 44×68 – 13 arkuszy bez opcji, 8 z opcją.
+      if (PROJEKT === 'Gildie') spr('gildie', liczba.bez.awersy + liczba.bez.rewersy === 13 && liczba.z.awersy + liczba.z.rewersy === 8, JSON.stringify(liczba));
+      // Geometria: arkusze widoczne na ekranie (na co dzień #druk jest tylko w druku), pomiar w mm względem arkusza.
+      const PX = 1.5, PY = -2;
+      buildPrint({ uklad: 'a4', przesuniecieX: PX, przesuniecieY: PY });
+      const styl = document.createElement('style'); styl.id = 'test-arkusze-styl';
+      styl.textContent = '#druk{display:block;position:fixed;left:0;top:0;z-index:99999;background:#777;zoom:0.33;white-space:nowrap;padding:8px}'
+        + '#druk .arkusz{position:relative;overflow:hidden;background:#fff;display:inline-block;margin:0 12px 0 0;vertical-align:top;white-space:normal}'
+        + '#druk .uklad{display:grid}#druk .znacznik{position:absolute;background:#000}#druk .linia-ciecia{position:absolute;z-index:2}';
+      document.head.appendChild(styl);
+      const kartaW = (el) => el && (el.classList.contains('karta') ? el : el.querySelector('.karta'));
+      const srodek = (el, ark) => { const a = ark.getBoundingClientRect(), r = el.getBoundingClientRect(), s = 210 / a.width;
+        return [((r.left + r.right) / 2 - a.left) * s, ((r.top + r.bottom) / 2 - a.top) * s]; };
+      const blisko = (a, b) => Math.abs(a - b) <= 0.05;
+      const ark = [...document.querySelectorAll('#druk .arkusz')];
+      const st = { pary: 0, pozycje: 0, lustro: 0, geometria: 0, puste: 0, pelne: 0, rozne: 0, poziome: 0, obrot: 0 };
+      for (let i = 0; i < ark.length; i++) {
+        const fu = ark[i].querySelector('.uklad');
+        if (!fu.querySelector('[data-karta]')) { bledy.push('arkusz ' + i + ' bez awersów'); continue; }
+        const nast = ark[i + 1], bu = nast && !nast.querySelector('[data-karta]') ? nast.querySelector('.uklad') : null;
+        const awersy = [...fu.children];
+        const zRewersem = awersy.map((el) => rewersKarty(karty.find((k) => kluczKarty(k) === el.dataset.karta)));
+        if (!bu) { if (zRewersem.some(Boolean)) bledy.push('arkusz ' + i + ': brak arkusza rewersów'); continue; }
+        i++; st.pary++;
+        const uc = getComputedStyle(fu).gridTemplateColumns.split(' ').length, rewersy = [...bu.children];
+        const jeden = zRewersem.every(Boolean) && new Set(zRewersem.map((b, j) => { const k = karty.find((x) => kluczKarty(x) === awersy[j].dataset.karta);
+          const [w, h] = cardMm(k); return wygladRewersu(b, w, h); })).size === 1;
+        const wiersze = Math.ceil(awersy.length / uc);
+        if (rewersy.length !== wiersze * uc) bledy.push('arkusz ' + i + ': ' + rewersy.length + ' komórek rewersów zamiast ' + wiersze * uc);
+        if (jeden) { st.pelne++; if (rewersy.some((el) => !kartaW(el))) bledy.push('arkusz ' + i + ': jeden rewers, a siatka niepełna'); }
+        else st.rozne++;
+        awersy.forEach((el, j) => {
+          const r = Math.floor(j / uc), c = j % uc, be = rewersy[r * uc + (uc - 1 - c)], b = zRewersem[j];
+          st.pozycje++;
+          const k = karty.find((x) => kluczKarty(x) === el.dataset.karta), [w, h] = cardMm(k);
+          if (!b) { if (!jeden && !kartaW(be)) st.puste++; else bledy.push('arkusz ' + i + ' poz. ' + j + ': rewers u karty bez rewersu'); return; }
+          const kb = kartaW(be);
+          if (kb && be.dataset.dla === el.dataset.karta && kb.dataset.talia === b.dataset.talia && kb.innerHTML === b.innerHTML) st.lustro++;
+          else bledy.push('arkusz ' + i + ' poz. ' + j + ': rewers nie tej karty (' + (be && be.dataset.dla) + ')');
+          const [fx, fy] = srodek(el, ark[i - 1]), [bx, by] = srodek(be, ark[i]);
+          if (blisko(bx, 210 - fx + PX) && blisko(by, fy + PY)) st.geometria++;
+          else bledy.push('arkusz ' + i + ' poz. ' + j + ': środek rewersu ' + bx.toFixed(2) + ',' + by.toFixed(2) + ' zamiast ' + (210 - fx + PX).toFixed(2) + ',' + (fy + PY).toFixed(2));
+          if (w > h) { st.poziome++;
+            if (/rotate\\(90deg\\)/.test(kartaW(el).style.transform) && /rotate\\(-90deg\\)/.test(kb.style.transform)) st.obrot++;
+            else bledy.push('arkusz ' + i + ' poz. ' + j + ': obrót rewersu karty poziomej'); }
+        });
+        // Różne rewersy: miejsca bez karty (niepełny ostatni rząd) puste.
+        if (!jeden) rewersy.forEach((be, j) => { const r = Math.floor(j / uc), c = j % uc;
+          if (r * uc + (uc - 1 - c) >= awersy.length && kartaW(be)) bledy.push('arkusz ' + i + ' poz. ' + j + ': rewers na pustym miejscu'); });
+      }
+      spr('pary', st.pary === liczba.z.rewersy, st.pary + ' par');
+      spr('lustro', st.lustro + st.puste === st.pozycje, '');
+      spr('geometria', st.geometria === st.lustro, '');
+      spr('obrot', st.obrot === st.poziome, '');
+      spr('bezBledow', !bledy.length, '');
+      if (PROJEKT === 'Gildie') spr('gildieArkusze', st.pelne >= 2 && st.rozne >= 2 && st.puste >= 2 && st.poziome >= 4, JSON.stringify(st));
+      // Zrzut: pierwsze 4 arkusze (awersy + rewersy dwóch arkuszy).
+      ark.slice(4).forEach((a) => { a.style.display = 'none'; });
+      const r = document.getElementById('druk').getBoundingClientRect();
+      return { ok: Object.values(wyniki).every(Boolean), wyniki, liczba, oczekiwane: ocz, st, bledy: bledy.slice(0, 10),
+        rect: { x: 0, y: 0, width: Math.ceil(Math.min(r.width, window.innerWidth)), height: Math.ceil(Math.min(r.height, window.innerHeight)) } };
+    })()`);
+    await wc.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 300))))');
+    fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-arkusze.png', (await wc.capturePage(arkusze.rect)).toPNG());
+    await wc.executeJavaScript("document.getElementById('test-arkusze-styl').remove(); buildPrint(); true");
+    // Zlecenie pdf (poza przykładami): wspolnearkusze = nie → arkusze jak bez opcji; alias wspolne; zła wartość → błąd.
+    if (!jestPrzykladem(szablon)) {
+      const zl = path.join(projekt, ...FOLDER_ZLECEN);
+      fs.mkdirSync(zl, { recursive: true });
+      const zlec = async (tresc) => {
+        const w = path.join(zl, 'wynik-pdf.json');
+        fs.rmSync(w, { force: true }); fs.writeFileSync(path.join(zl, 'pdf'), tresc);
+        for (let i = 0; i < 240; i++) { await czekaj(500); try { return JSON.parse(fs.readFileSync(w, 'utf8')); } catch (e) { /* jeszcze nie */ } }
+        return null;
+      };
+      const bez = await zlec('uklad = a4\nwspolnearkusze = nie\nplik = Export/arkusze-bez.pdf\n');
+      const z = await zlec('uklad = a4\nwspolne = tak\nplik = Export/arkusze-z.pdf\n');
+      const zle = await zlec('uklad = a4\nwspolnearkusze = może\n');
+      const ob = arkusze.oczekiwane;
+      arkusze.zlecenie = { bez: bez && { ok: bez.ok, strony: bez.strony, arkusze: bez.arkusze }, z: z && { ok: z.ok, strony: z.strony, arkusze: z.arkusze }, zle: zle && { ok: zle.ok, blad: zle.blad } };
+      arkusze.zlecenie.ok = !!(bez && bez.ok && bez.strony === ob.bez.awersy + ob.bez.rewersy && bez.arkusze && bez.arkusze.wspolne === false
+        && z && z.ok && z.strony === ob.z.awersy + ob.z.rewersy && z.arkusze && z.arkusze.awersy === ob.z.awersy && z.arkusze.wspolne === true
+        && zle && zle.ok === false && /wspolnearkusze/.test(zle.blad || ''));
+      arkusze.ok = arkusze.ok && arkusze.zlecenie.ok;
+    }
+  }
   await wc.executeJavaScript('buildPrint()');
   await pdfDoPliku(wc, wynik);
   // Menu aplikacji: własne (polskie), a nie domyślne Electrona.
@@ -2309,8 +2425,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
     && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
+  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

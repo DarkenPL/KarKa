@@ -90,7 +90,7 @@ Numery liczą się w kolejności wierszy pliku danych. Data to dzień wygenerowa
 | Sekcja | Opis |
 |---|---|
 | `[TALIA Nazwa]` | Zaczyna kolejną talię w tym samym pliku. Wszystko przed pierwszą `[TALIA …]` jest **wspólne** dla talii z pliku: `KARTA`, `CZCIONKA` oraz elementy awersu i rewersu, rysowane pod elementami talii. Każda talia potrzebuje własnego `DANE`. Talia może nadpisać wspólne `KARTA` albo `CZCIONKA`. Dwie talie o tej samej nazwie: druga jest pomijana (z uwagą). |
-| `[REWERS]` | Poniżej rysuje się rewers talii, wspólny dla wszystkich jej kart. Bez tej sekcji talia nie ma rewersu. Na rewersie pola `[Kolumna]` są puste. |
+| `[REWERS]` | Poniżej rysuje się rewers talii, wspólny dla wszystkich jej kart. Bez tej sekcji talia nie ma rewersu. Na rewersie pola `[Kolumna]` są puste. Na wydruku A4 karty kilku talii mogą stać na jednym arkuszu – za każdą kartą drukuje się rewers jej talii (opcja „Talie na wspólnych arkuszach”, [aplikacja](aplikacja.md)). |
 | `[AWERS]` | Powrót do rysowania awersu. |
 
 ## Elementy

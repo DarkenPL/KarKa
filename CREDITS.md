@@ -119,3 +119,17 @@ Kopie ikon z przykładów 02 i 04 (te same pliki i licencja).
 | `Ikony/wielblad.svg` | [camel](https://game-icons.net/1x1/delapouite/camel.html) | Delapouite |
 | `Ikony/amfora.svg` | [amphora](https://game-icons.net/1x1/delapouite/amphora.html) | Delapouite |
 | `Ikony/palma.svg` | [palm-tree](https://game-icons.net/1x1/delapouite/palm-tree.html) | Delapouite |
+
+### `przyklady/07-gildie`
+
+Kopie ikon z przykładów 01, 02, 04 i 05 (te same pliki i licencja).
+
+| Plik | Ikona | Autor |
+|---|---|---|
+| `Ikony/mapa.svg` | [treasure-map](https://game-icons.net/1x1/lorc/treasure-map.html) | Lorc |
+| `Ikony/monety.svg` | [two-coins](https://game-icons.net/1x1/delapouite/two-coins.html) | Delapouite |
+| `Ikony/kowadlo.svg` | [anvil](https://game-icons.net/1x1/lorc/anvil.html) | Lorc |
+| `Ikony/slady.svg` | [boot-prints](https://game-icons.net/1x1/lorc/boot-prints.html) | Lorc |
+| `Ikony/tarcza.svg` | [checked-shield](https://game-icons.net/1x1/lorc/checked-shield.html) | Lorc |
+| `Ikony/ksiega.svg` | [spell-book](https://game-icons.net/1x1/delapouite/spell-book.html) | Delapouite |
+| `Ikony/runa.svg` | [rune-stone](https://game-icons.net/1x1/lorc/rune-stone.html) | Lorc |
