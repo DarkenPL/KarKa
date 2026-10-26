@@ -32,7 +32,7 @@ KOMENDA = argument, argument, opcja=wartość, flaga
 | `STAŁA = margines, 4` | Stała: `[=margines]` w dowolnej komendzie zostaje zamienione na `4`. Wygodne dla powtarzanych liczb i kolorów (`STAŁA = złoty, #C9A227` → `kolor=[=złoty]`). Stała działa w całym pliku szablonu, także w taliach i rewersach. |
 | `NAZWA = Przedmioty` | Nazwa talii (podgląd, pliki JPG, eksport). Domyślnie nazwa z `[TALIA …]` albo z nazwy pliku. |
 | `DANE = przedmioty.csv, przedmioty.xlsx` | Plik(i) z kartami. Pierwszy znaleziony wygrywa. Plik może leżeć w podfolderze projektu: `DANE = dane/przedmioty.csv`. |
-| `KARTA = 63, 88, zaokrąglenie=3, obwódka=0.7, kolor_obwódki=#222222` | Szerokość i wysokość karty w mm. Opcjonalnie zaokrąglone rogi i obwódka całej karty (rysowana na wierzchu). W sekcji `[REWERS]` ustawia tylko rogi i obwódkę rewersu; rozmiar jest zawsze jak awersu. |
+| `KARTA = 63, 88, zaokrąglenie=3, obwódka=0.7, kolor_obwódki=#222222` | Szerokość i wysokość karty w mm. Opcjonalnie zaokrąglone rogi i obwódka całej karty (rysowana na wierzchu). W sekcji `[REWERS]` ustawia tylko rogi i obwódkę rewersu; rozmiar jest zawsze jak awersu. **`spad=3`** (od 0.6.2, mm od 0 do 10, kropka dziesiętna: `spad=2.5`) deklaruje spad do druku w drukarni – patrz [Spad](#spad-w-szablonie-od-062). Spad w części wspólnej dziedziczą talie bez własnej `KARTA` (własna `KARTA` w talii bez `spad=` oznacza talię bez spadu); w `[REWERS]` `spad=` jest błędem (rewers ma spad awersu). |
 | `KOLOR = las, #7BA05B` | Nazwany kolor (paleta wspólna dla wszystkich szablonów). Nazwy można używać w danych i szablonie zamiast kodu, np. `TŁO = [Kolor] \| las`, a także jako ikony-prostokąta `{kolor-las}` (`{kolor-las-mix}` jest w połowie biały). |
 | `PCIO`, `STÓŁ` | Nieużywane (dawny eksport do istniejącego pokoju playingcards.io). Teraz eksport tworzy nowy pokój bez dodatkowych komend – patrz [playingcards.md](playingcards.md). |
 
@@ -311,7 +311,18 @@ Cały przykład: `przyklady/06-targ`.
 ### `CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#1d1b19`
 Domyślna czcionka, rozmiar i inne opcje (także flagi, np. `kursywa`) dla kolejnych `TEKST`-ów. Działa do następnej `CZCIONKA`.
 
-**Druk w drukarni:** czarny tekst i ikony wpisuj jako `#000` – domyślny kolor tekstu `#1d1b19` i inne ciemne odcienie wychodzą po konwersji do CMYK jako czerń czterokolorowa, a drukarnie chcą czystej czerni K100 (np. `CZCIONKA = …, kolor=#000`). W PDF dla drukarni w CMYK tylko `#000` (w szablonie i w ikonach SVG) daje czystą czerń K100 – [opis](aplikacja.md#okna). Tekst i ważne elementy trzymaj co najmniej 3 mm od krawędzi karty, a tło prowadź do samej krawędzi (spad dorysuje aplikacja). Obrazek `dopasuj=wypełnij` albo `rozciągnij` przy krawędzi zostaje w spadzie w miejscu i skali – żeby spad nie był pusty, obraz musi wystawać poza ramkę o 3 mm (albo daj pod nim tło w kolorze brzegu). Sprawdza to Raport w trybie drukarni – [opis](aplikacja.md#raport).
+**Druk w drukarni:** czarny tekst i ikony wpisuj jako `#000` – domyślny kolor tekstu `#1d1b19` i inne ciemne odcienie wychodzą po konwersji do CMYK jako czerń czterokolorowa, a drukarnie chcą czystej czerni K100 (np. `CZCIONKA = …, kolor=#000`). W PDF dla drukarni w CMYK tylko `#000` (w szablonie i w ikonach SVG) daje czystą czerń K100 – [opis](aplikacja.md#okna). Tekst i ważne elementy trzymaj co najmniej 3 mm od linii cięcia (tolerancja cięcia to ok. ±1 mm). Przy przygotowaniu do druku w drukarni zadeklaruj spad (`KARTA = 63, 88, spad=3`) i przygotuj tło oraz obrazki przy krawędzi ze spadem – [zasady niżej](#spad-w-szablonie-od-062). Bez deklaracji spad jest dorabiany awaryjnie (tło powiększone, obrazki przy krawędzi przedłużone), z ostrzeżeniem. Sprawdza to Raport w trybie drukarni – [opis](aplikacja.md#raport).
+
+### Spad w szablonie (od 0.6.2)
+
+Spad to pas obrazu poza linią cięcia (zwykle 3 mm z każdej strony), który zapewnia, że po cięciu nie zostanie biała krawędź. **W prototypach (gra online, druk domowy A4) spad nie jest potrzebny** – dopisz go dopiero, gdy projekt idzie do drukarni.
+
+- `KARTA = 63, 88, spad=3` – deklaracja. Od tej chwili `TŁO` z pliku to plik **karty ze spadem** (63 × 88 mm + 3 mm z każdej strony = 69 × 94 mm), rysowany od −spad do szerokość + spad.
+- Obrazki `OBRAZEK` z `dopasuj=wypełnij` albo `rozciągnij` (bez `kadr=` i `obrót=`), które dotykają krawędzi karty, mają ramkę przedłużoną o spad po stronach, których dotykają – plik też ma zawierać spad.
+- Podgląd, druk A4, obrazki JPG/PNG, katalog i playingcards.io przycinają do linii cięcia (karta ma `overflow: hidden`), więc wyglądają jak dotąd. PDF dla drukarni rysuje tło i obrazki w całości, bez skalowania. Kolorowe `TŁO` i `PROSTOKĄT` działają jak dawniej.
+- Projektowanie: tło prowadź do krawędzi spadu, ważne elementy (tekst, twarze, ikony) trzymaj min. 3 mm od linii cięcia.
+- PDF dla drukarni bierze spad z szablonu (największy zadeklarowany) – ma pierwszeństwo przed oknem i kluczem `spad` zlecenia. Gdy żadna talia nie deklaruje spadu, używa spadu z okna/zlecenia i dorabia go (z ostrzeżeniem); talia ze spadem innym niż w PDF też dostaje ostrzeżenie.
+- Przykład: [`08-wieze`](../przyklady/08-wieze).
 
 ### `CZCIONKA_PLIK = "Moja Czcionka", Fonts/MojaCzcionka.ttf`
 Czcionka z pliku w folderze projektu. Potem używasz jej jako `czcionka="Moja Czcionka"`. Czcionki zainstalowane w systemie działają bez tej komendy.
