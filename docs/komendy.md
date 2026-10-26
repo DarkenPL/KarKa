@@ -146,6 +146,7 @@ LINIA = 10, 50, 50, 50, początek=kropka, koniec=strzałka
 | `min=0.6` | najmniejsza skala, gdy tekst się nie mieści |
 | `obrys=0.3`, `kolor_obrysu=#000000` | obrys liter (grubość w mm) – czytelny tekst na obrazku albo gradiencie |
 | `cień` albo `cień=#00000099` | cień pod tekstem (domyślnie półprzezroczysty czarny) |
+| `lista=tak` | wiersze zaczynające się od `1.`, `12.`, `-` albo `•` (i spacji) to punkty listy z wcięciem wiszącym – patrz „Akapity i listy” niżej |
 | `grupa=nazwa` | pola z tą samą grupą zmniejszają się razem (na wszystkich kartach talii o tyle samo) i nie mogą na siebie nachodzić, np. koszt z lewej i punkty z prawej w jednym wierszu |
 
 Flagi: `pogrubienie`, `kursywa`, `podkreślenie`, `wersaliki`, `jedna_linia`, `bez_formatowania` (formatowanie z danych w tym polu zostaje zwykłym tekstem – patrz niżej).
@@ -169,6 +170,7 @@ W tekście szablonu i w komórkach danych (CSV/XLSX) działają:
 | `<small>…</small>` | mniejszy tekst – 0,6 rozmiaru otoczenia | tak | tak |
 | `<big>…</big>` | większy tekst – 1,4 rozmiaru otoczenia | tak | tak |
 | `<rozmiar=12>…</rozmiar>` | tekst 12 pt (także `10,5`, `12pt`) | tak | tak |
+| `<lewo>`, `<środek>` (`<srodek>`), `<prawo>` na początku wiersza | wyrównanie tego wiersza (akapitu) | tak | tak |
 
 - Znaczniki piszemy **bez atrybutów** (`<b>`, nie `<b class="x">`), wielkość liter nie ma znaczenia (`<B>` = `<b>`). Każdy inny znacznik (`<img>`, `<br>`, `<span>`…) zostaje na karcie zwykłym tekstem.
 - W danych `**…**` i `~~…~~` muszą mieć parę w tej samej komórce. Pojedyncze `*` i `~` to zwykłe znaki.
@@ -204,7 +206,32 @@ TEKST = 4, 50, 55, 22, [Efekt], rozmiar=20, wyrównanie=środek, pion=środek
 TEKST = 4, 74, 55, 8, "<big>Uwaga!</big> Reszta <rozmiar=8>drobnym drukiem</rozmiar>", rozmiar=10
 ```
 
-Cały przykład: `przyklady/05-zaklecia` (kolumna `Opis` z każdym znacznikiem – karty 09 i 10 z `<small>`, `<big>` i `<rozmiar=6>`, kolumna `Cytat` z `bez_formatowania`).
+#### Akapity i listy (od 0.5.17)
+
+Akapit to wiersz treści – kończy go nowa linia w komórce danych albo `\n` w tekście szablonu.
+
+- **Wyrównanie akapitu:** `<lewo>`, `<środek>` (także `<srodek>`) albo `<prawo>` **na początku wiersza** wyrównuje ten jeden wiersz; pozostałe wiersze mają wyrównanie pola (`wyrównanie=`). Przed znacznikiem mogą stać spacje i formatowanie (`**<środek>Tytuł**` działa). Zamknięcie (`</środek>`) na końcu wiersza jest dozwolone, ale niepotrzebne – wyrównanie i tak kończy się z końcem wiersza.
+- Znacznik w środku wiersza (`Tekst <środek>dalej`) albo zamknięcie bez otwarcia zostaje tekstem z Uwagą – wyrównać można tylko cały wiersz.
+- Formatowanie przechodzi przez granice wierszy jak dotąd: `<b>` otwarte w jednym wierszu i zamknięte w następnym pogrubia oba.
+- **Listy – `lista=tak` w `TEKST`:** wiersz zaczynający się od `1.`, `12.` (numer z kropką), `-` albo `•`, a po nim spacji, dostaje **wcięcie wiszące** – kolejne linie tego punktu zaczynają się równo z tekstem za numerem, nie pod numerem. Pogrubiony numer: `**1.** Tekst`. `*` nie jest punktorem (to kursywa). Wiersze bez punktora (`Zwykły tekst`, `-5 obrażeń`, `1.5 punktu`) to zwykłe akapity. Wcięcie ma szerokość numeru danego wiersza (`12.` jest szersze niż `1.`).
+- `pion=środek`, zmniejszanie za długiego tekstu i `grupa=` działają z akapitami tak samo jak bez nich.
+- `bez_formatowania` wyłącza znaczniki akapitu **z danych** (zostają tekstem); `lista=tak` nadal działa.
+- Pole bez tych znaczników i bez `lista=` wygląda dokładnie jak wcześniej (ten sam HTML – karty nie są „zmienione od ostatniego PDF”).
+
+```
+; karty.csv (komórka z nowymi liniami, w cudzysłowie)
+ID;Nazwa;Opis
+11;Rytuał;"**1.** Zapłać {mana}.
+**2.** Odrzuć kartę z ręki – najlepiej taką, której i tak nie zagrasz.
+**3.** Dobierz 2 karty.
+<środek><i>Raz na turę.</i>"
+
+; szablon
+TEKST = 3, 37.5, 38, 18, [Opis], rozmiar=8, pion=środek, lista=tak
+TEKST = 4, 4, 55, 20, "<środek><big>Tura</big>\nDobierz kartę.\n<prawo><small>– ściąga</small>", rozmiar=9
+```
+
+Cały przykład: `przyklady/05-zaklecia` (kolumna `Opis` z każdym znacznikiem – karty 09 i 10 z `<small>`, `<big>` i `<rozmiar=6>`, karta 11 z listą numerowaną i akapitem `<środek>`, karta 12 z nagłówkami `<big>`, listą `•` i podpisem `<prawo>`; kolumna `Cytat` z `bez_formatowania`).
 
 ![Formatowanie z danych – przed (0.5.4) i po (0.5.5)](img/formatowanie.jpg)
 

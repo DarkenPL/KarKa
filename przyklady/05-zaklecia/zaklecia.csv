@@ -11,3 +11,13 @@ ID,Ilość,Nazwa,Szkoła,Obrazek,Koszt,Opis,Cytat
 <small>(Jeśli zapłacisz {mana} – zablokuj wszystkie.)</small>","Lepiej się zasłonić, niż tłumaczyć."
 10,1,Grzmot,burza,Ikony/blyskawica.svg,2,"<big>Huk!</big>
 Każdy gracz odrzuca 1 kartę. <rozmiar=6>(Ty też.)</rozmiar>","Słychać go w trzech wioskach."
+11,1,Rytuał przywołania,natura,Ikony/liscie.svg,2,"**1.** Zapłać {mana}.
+**2.** Odrzuć kartę z ręki – najlepiej taką, której i tak nie zagrasz.
+**3.** Dobierz 2 karty.
+<środek><i>Raz na turę.</i>","Kto przywołuje, ten sprząta."
+12,1,Ściąga adepta,wróżby,Ikony/ksiega.svg,0,"<środek><big>Tura</big>
+• dobierz kartę,
+• rzuć jedno zaklęcie i zapłać jego koszt.
+<środek><big>Mana</big>
+Na koniec tury odzyskaj {mana}.
+<prawo><small>– Mistrz Kaganek</small>","Czytaj, zanim rzucisz."

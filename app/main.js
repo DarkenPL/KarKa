@@ -2179,6 +2179,126 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-rozmiary.png', (await wc.capturePage(rozmiary.rect)).toPNG());
     await wc.executeJavaScript("document.getElementById('test-rozmiary').remove()");
   }
+  // Akapity w polu TEKST (issue #71 b, --test-edytor, bez zmian w plikach projektu):
+  // <lewo>/<środek>/<prawo> na początku wiersza i lista=tak z wcięciem wiszącym.
+  let akapity = null;
+  if (process.argv.includes('--test-edytor')) {
+    akapity = await wc.executeJavaScript(`(() => {
+      const wyniki = {};
+      const spr = (nazwa, warunek) => { wyniki[nazwa] = !!warunek; };
+      const d = document.createElement('div');
+      d.id = 'test-akapity';
+      d.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;background:#fff;padding:8px;display:flex;gap:8px';
+      document.body.appendChild(d);
+      const karta = (linie, row, naglowek) => {
+        const t = parseTemplate('[TALIA Test]\\n' + (naglowek || 'KARTA = 63, 88, zaokrąglenie=3\\nTŁO = #f4ecd8\\n') + linie + '\\n', 'test.txt').talie[0];
+        const warn = new Set(), fmt = new Set();
+        const r = renderCard(t, t.awers, row || {}, { warn, icons: RAPORT.icons, label: 'Test 1', plik: 'test.txt', kolumny: true, formatowanie: fmt, wbudowane: {} });
+        const k = document.createElement('div');
+        k.className = 'karta'; k.dataset.talia = 'Test'; k.title = 'akapity'; k.style.cssText = r.style;
+        k.innerHTML = r.html;
+        d.appendChild(k);
+        return { k, uwagi: [...warn], fmt: [...fmt], html: r.html };
+      };
+      const zakres = document.createRange();
+      const tekstRect = (el) => {
+        let l = Infinity, r = -Infinity;
+        const it = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        for (let n = it.nextNode(); n; n = it.nextNode()) { zakres.selectNodeContents(n); for (const q of zakres.getClientRects()) if (q.width > 0.5) { l = Math.min(l, q.left); r = Math.max(r, q.right); } }
+        return { left: l, right: r };
+      };
+      const blisko = (a, b, tol = 1.5) => Math.abs(a - b) <= tol;
+      // 1. wyrównanie wierszy: pole wyrównane do prawej, wiersze ze znacznikami (dane i szablon)
+      const a = karta('TEKST = 4, 4, 55, 40, "[A]", rozmiar=12, wyrównanie=prawo\\nTEKST = 4, 46, 55, 12, "<środek>Szablon\\\\nZwykły", rozmiar=12', {
+        A: 'Domyślny\\n<środek>Środek\\n<lewo>Lewo\\n<srodek>Bez ogonków</srodek>\\n**<prawo>Pogrubiony</prawo>**\\n<b>Gruby\\n<środek>dalej</b>' });
+      fitAll(d);
+      const [pa, ps] = a.k.querySelectorAll('.el.tekst');
+      const ak = [...pa.querySelectorAll('.akapit')];
+      const er = pa.getBoundingClientRect();
+      const ta = ak.map((x) => getComputedStyle(x).textAlign);
+      spr('wyrownanieLiczba', ak.length === 7 && pa.firstElementChild.children.length === 7);
+      spr('wyrownanieStyl', ta.join(',') === 'right,center,left,center,right,right,center');
+      const r1 = ak.map(tekstRect);
+      spr('wyrownaniePozycja', blisko(r1[0].right, er.right) && blisko((r1[1].left + r1[1].right) / 2, (er.left + er.right) / 2) && blisko(r1[2].left, er.left)
+        && blisko(r1[4].right, er.right) && r1[1].left > er.left + 20 && r1[1].right < er.right - 20);
+      spr('znacznikiZdjete', !pa.innerHTML.includes('&lt;') && ak[4].querySelector('b')?.textContent === 'Pogrubiony');
+      spr('przezWiersze', ak[5].querySelector('b')?.textContent === 'Gruby' && ak[6].querySelector('b')?.textContent === 'dalej' && !pa.querySelector('b:empty'));
+      spr('wyrownanieUwagi', !a.uwagi.length && a.fmt.includes('Test 1 – [A]'));
+      const sa = [...ps.querySelectorAll('.akapit')];
+      spr('wyrownanieSzablon', sa.length === 2 && getComputedStyle(sa[0]).textAlign === 'center' && getComputedStyle(sa[1]).textAlign === 'left');
+      // 2. lista=tak: wcięcie wiszące, pogrubiony numer, wiersze bez punktora zwykłe
+      const b = karta('TEKST = 4, 4, 40, 78, "[A]", rozmiar=11, lista=tak', {
+        A: '**1.** Pierwszy punkt jest na tyle długi, że zawija się na kilka linii tekstu.\\n- Myślnik też ma długi tekst, który zawija się w następną linię.\\nZwykły wiersz bez punktora, też dość długi, żeby się zawinął.\\n12. Dwunasty punkt z długim tekstem do zawinięcia w polu.\\n• Kropka\\n-5 obrażeń\\n1.5 punktu\\n* gwiazdka' });
+      fitAll(d);
+      const pb = b.k.querySelector('.el.tekst');
+      const ab = [...pb.querySelectorAll('.akapit')];
+      spr('listaKlasy', ab.map((x) => (x.classList.contains('lista') ? 'L' : '-')).join('') === 'LL-LL---');
+      spr('listaPogrubiony', ab[0].querySelector('.punkt b')?.textContent === '1.' && !pb.querySelector('b:empty') && ab[3].querySelector('.punkt').textContent.trim() === '12.');
+      // druga linia tekstu za punktem zaczyna się tam, gdzie pierwsza litera po numerze
+      const wiszace = (akapit) => {
+        const w = akapit.querySelector('.wiersz');
+        const it = document.createTreeWalker(w, NodeFilter.SHOW_TEXT);
+        const rects = [];
+        for (let n = it.nextNode(); n; n = it.nextNode()) { zakres.selectNodeContents(n); rects.push(...[...zakres.getClientRects()].filter((q) => q.width > 0.5)); }
+        const linie = [...new Set(rects.map((q) => Math.round(q.top)))];
+        const lewa = (top) => Math.min(...rects.filter((q) => Math.round(q.top) === top).map((q) => q.left));
+        const punkt = akapit.querySelector('.punkt').getBoundingClientRect();
+        return { linie: linie.length, l1: lewa(linie[0]), l2: lewa(linie[1]), punkt: punkt.left };
+      };
+      const w0 = wiszace(ab[0]), w1 = wiszace(ab[1]), w3 = wiszace(ab[3]);
+      spr('listaWiszace', [w0, w1, w3].every((w) => w.linie >= 2 && blisko(w.l1, w.l2, 0.6) && w.l1 > w.punkt + 3));
+      const zr = document.createRange(); zr.selectNodeContents(ab[2].firstChild);
+      const zwRects = [...zr.getClientRects()].filter((q) => q.width > 0.5);
+      spr('listaZwykly', zwRects.length >= 2 && blisko(Math.min(...zwRects.map((q) => q.left)), pb.getBoundingClientRect().left, 0.6));
+      spr('listaUwagi', !b.uwagi.length && !b.k.classList.contains('za-dlugi'));
+      // 3. lista + wyrównanie, za długi tekst (fitAll), pion=środek
+      const c = karta('TEKST = 4, 4, 55, 16, "[A]", rozmiar=14, lista=tak, pion=środek, min=0.3\\nTEKST = 4, 30, 55, 40, "[B]", rozmiar=12, lista=tak, pion=środek', {
+        A: '1. Bardzo długi punkt, który na pewno się nie mieści w tak niskim polu i musi się zmniejszyć.\\n2. Drugi punkt też.\\n<środek>Wyśrodkowany akapit pod listą.',
+        B: '1. Krótko.\\n<środek>Środek' });
+      fitAll(d);
+      const [c1, c2] = c.k.querySelectorAll('.el.tekst');
+      spr('fitAll', parseFloat(c1.style.fontSize) < 14 * 0.9 && !c.k.classList.contains('za-dlugi') && !overflows(c1));
+      const e2 = c2.getBoundingClientRect(), t2 = c2.firstElementChild.getBoundingClientRect();
+      spr('pionSrodek', blisko((e2.top + e2.bottom) / 2, (t2.top + t2.bottom) / 2) && t2.height < e2.height - 20
+        && getComputedStyle(c2.querySelectorAll('.akapit')[1]).textAlign === 'center');
+      // 4. grupa=: bloki akapitów na całą szerokość nie liczą się jako kolizja – liczy się tylko tekst
+      const g = karta('TEKST = 4, 4, 34, 10, "<lewo>Koszt", rozmiar=16, grupa=g\\nTEKST = 25, 4, 34, 10, "<prawo>Punkty", rozmiar=16, grupa=g');
+      fitAll(d);
+      const [g1, g2] = g.k.querySelectorAll('.el.tekst');
+      spr('grupa', parseFloat(g1.style.fontSize) === 16 && parseFloat(g2.style.fontSize) === 16 && !g.k.classList.contains('za-dlugi'));
+      // 5. dane: bez_formatowania, znacznik w środku wiersza, zamknięcie bez otwarcia, niedomknięte
+      const n = karta('TEKST = 4, 4, 55, 12, "[A]", rozmiar=10, bez_formatowania\\nTEKST = 4, 20, 55, 12, "[B]", rozmiar=10\\nTEKST = 4, 36, 55, 12, "[C]", rozmiar=10\\nTEKST = 4, 52, 55, 12, "[D]", rozmiar=10', {
+        A: '<środek>Tekst', B: 'Tekst <środek>w środku', C: 'Linia</prawo>', D: '<prawo>Bez zamknięcia\\n<środek>Drugi</prawo>' });
+      const [n1, n2, n3, n4] = [...n.k.querySelectorAll('.el.tekst .tresc')];
+      spr('bezFormatowania', !n1.querySelector('.akapit') && n1.innerHTML === '&lt;środek&gt;Tekst');
+      spr('wSrodkuWiersza', !n2.querySelector('.akapit') && n2.innerHTML === 'Tekst &lt;środek&gt;w środku' && n.uwagi.some((w) => /Test 1 \\(kolumna \\[B\\]\\): znacznik <środek> działa tylko na początku wiersza/.test(w)));
+      spr('nadmiarowe', !n3.querySelector('.akapit') && n3.innerHTML === 'Linia&lt;/prawo&gt;' && n.uwagi.some((w) => /\\[C\\]\\): znacznik <\\/prawo> działa tylko na końcu wiersza/.test(w)));
+      const n4a = n4.querySelectorAll('.akapit');
+      spr('niedomkniete', n4a.length === 2 && getComputedStyle(n4a[0]).textAlign === 'right' && n4a[1].innerHTML === 'Drugi&lt;/prawo&gt;' && n.uwagi.length === 3);
+      d.removeChild(g.k); d.removeChild(n.k);
+      // 6. raport drukarni: obwiednia glifów wyśrodkowanego akapitu jak w polu wyrównanym do środka
+      const o = karta('TEKST = 4, 4, 55, 20, "<środek>MMM", rozmiar=20\\nTEKST = 4, 30, 55, 20, "MMM", rozmiar=20, wyrównanie=środek');
+      fitAll(d);
+      const [o1, o2] = [...o.k.querySelectorAll('.el.tekst')].map(obwiedniaGlifow);
+      spr('obwiednia', blisko(o1.x1, o2.x1, 0.5) && blisko(o1.x2, o2.x2, 0.5) && blisko(o1.y2 - o1.y1, o2.y2 - o2.y1, 0.5));
+      d.removeChild(o.k);
+      // 7. zgodność: pole bez nowych znaczników – HTML jak w 0.5.15; lista=tak bez punktorów – ten sam HTML
+      const z = karta('TEKST = 1, 2, 30, 10, "<b>A</b> <i>b</i>\\\\nDrugi", rozmiar=9, pion=środek\\nTEKST = 1, 14, 30, 10, "<b>A</b> <i>b</i>\\\\nDrugi", rozmiar=9, pion=środek, lista=tak', {}, 'KARTA = 63, 44\\n');
+      const pole = '<div class="el tekst" style="left:1mm;top:2mm;width:30mm;height:10mm;;font-size:9pt;line-height:1.15;text-align:left;justify-content:center" data-pt="9"><div class="tresc"><b>A</b> <i>b</i><br>Drugi</div></div>';
+      spr('zgodnosc', z.html === pole + pole.replace('top:2mm', 'top:14mm'));
+      d.removeChild(z.k);
+      // 8. edytor: lista= koloruje się jak opcja, znaczniki akapitu w tekście bez błędów
+      const kol = kolorujLinie('TEKST = 1, 1, 10, 10, "<środek>a", lista=tak');
+      spr('edytor', kol.includes('<span class="sk-opc">lista</span>') && kol.includes('&lt;środek&gt;a'));
+      const ok = Object.values(wyniki).every(Boolean);
+      const rect = d.getBoundingClientRect();
+      return { ok, wyniki, html: pa.innerHTML.slice(0, 600), lista: pb.innerHTML.slice(0, 600), uwagi: [...a.uwagi, ...b.uwagi, ...n.uwagi], wiszace: [w0, w1, w3], obwiednia: [o1, o2], zgodnosc: z.html,
+        rect: { x: 0, y: 0, width: Math.ceil(rect.width), height: Math.ceil(rect.height) } };
+    })()`);
+    await wc.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))');
+    fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-akapity.png', (await wc.capturePage(akapity.rect)).toPNG());
+    await wc.executeJavaScript("document.getElementById('test-akapity').remove()");
+  }
   await wc.executeJavaScript('buildPrint()');
   await pdfDoPliku(wc, wynik);
   // Menu aplikacji: własne (polskie), a nie domyślne Electrona.
@@ -2189,8 +2309,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
     && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
+  process.stdout.write(JSON.stringify({ szablon, stan, uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
