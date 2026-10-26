@@ -377,6 +377,185 @@ async function grupyCmyk(buf, PDFLib) {
   return zmiany ? Buffer.from(await doc.save({ useObjectStreams: false })) : buf;
 }
 
+// ── Nadruk czerni K100 (issue #92) ──────────────────────────────────────────
+// Po Ghostscripcie (nie zależy od tego, czy gs przenosi /OP): w strumieniach treści stron i XObject Form
+// tekst wypisywany (Tj, TJ, ', ") w czystej czerni „0 0 0 1 k” dostaje nadruk – przed operatorem stan graficzny
+// /KarkaNadrukN z /op true (wypełnienie), a przy obrysowaniu liter (Tr 1, 2, 5, 6) w „0 0 0 1 K” – /OP true; /OPM 1, więc
+// zerowe kanały C, M, Y nie wycinają tła. Przed każdym innym rysowaniem (f, S, re…f, sh, Do, obrazki) nadruk jest
+// wyłączany – prostokąty, linie i obrazki w K100 nadal wybijają (jak dotąd). Kolory inne niż „0 0 0 1 k/K” (także
+// cs/scn, g, rg) i tekst niewidoczny (Tr 3, 7) – bez nadruku. Obrys liter z Chromium (-webkit-text-stroke) to osobny
+// tekst czcionką Type3 – też tekst, więc też nadrukowany. Zwraca { bufor, obiekty } – obiekty = bloki BT…ET z nadrukiem.
+const STANY_NADRUKU = ['KarkaNadruk0', 'KarkaNadruk1', 'KarkaNadruk2', 'KarkaNadruk3'];   // indeks = op + 2·OP
+const BIALE = new Set([0, 9, 10, 12, 13, 32]);
+const OGRANICZNIKI = new Set('()<>[]{}/%'.split('').map((z) => z.charCodeAt(0)));
+// Tokeny strumienia treści: { t: 'op' | 'num' | 'inny', w (tekst), p (początek) }; napisy, słowniki, tablice, nazwy
+// i komentarze to „inny”; obrazek w treści (BI … ID dane EI) – jeden token op „BI” (dane pomijane do „EI”).
+function* tokenyTresci(s) {
+  const n = s.length;
+  let i = 0;
+  while (i < n) {
+    const c = s.charCodeAt(i);
+    if (BIALE.has(c)) { i++; continue; }
+    const p = i;
+    if (c === 37) { while (i < n && s[i] !== '\n' && s[i] !== '\r') i++; continue; }          // % komentarz
+    if (c === 40) {                                                                              // ( napis )
+      let g = 0;
+      for (; i < n; i++) {
+        const z = s[i];
+        if (z === '\\') { i++; continue; }
+        if (z === '(') g++;
+        else if (z === ')' && --g === 0) { i++; break; }
+      }
+      yield { t: 'inny', p }; continue;
+    }
+    if (c === 60 && s[i + 1] === '<') { i += 2; yield { t: 'inny', p }; continue; }            // <<
+    if (c === 62 && s[i + 1] === '>') { i += 2; yield { t: 'inny', p }; continue; }            // >>
+    if (c === 60) { const k = s.indexOf('>', i); i = k < 0 ? n : k + 1; yield { t: 'inny', p }; continue; }   // <hex>
+    if (OGRANICZNIKI.has(c) && c !== 47) { i++; yield { t: 'inny', p }; continue; }            // [ ] { } )
+    i++;                                                                                         // /nazwa albo zwykłe znaki
+    while (i < n && !BIALE.has(s.charCodeAt(i)) && !OGRANICZNIKI.has(s.charCodeAt(i))) i++;
+    const w = s.slice(p, i);
+    if (c === 47) { yield { t: 'nazwa', w, p }; continue; }
+    if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(w)) { yield { t: 'num', w, p }; continue; }
+    if (w === 'BI') {                       // słownik obrazka do ID, potem dane do białego znaku + EI + białego znaku/końca
+      const id = /\sID[\s]/g; id.lastIndex = i;
+      const m = id.exec(s);
+      let k = m ? m.index + m[0].length : n;
+      const ei = /\sEI(?=[\s]|$)/g; ei.lastIndex = k;
+      const e = ei.exec(s);
+      i = e ? e.index + e[0].length : n;
+      yield { t: 'op', w, p }; continue;
+    }
+    yield { t: 'op', w, p };
+  }
+}
+const RYSOWANIE = new Set(['f', 'F', 'f*', 'B', 'B*', 'b', 'b*', 'S', 's', 'sh', 'Do', 'BI']);
+const TEKST = new Set(['Tj', 'TJ', "'", '"']);
+const czyK100 = (a) => a.length === 4 && a.map(Number).join(' ') === '0 0 0 1';
+
+// Jeden strumień (tekst latin1) → { tekst, obiekty, uzyte:Set(indeksów stanów), formy:[nazwy XObject z Do] }.
+// zmieniaNadruk(nazwa) – czy ExtGState z zasobów ma /OP albo /op (wtedy stan nadruku nieznany).
+function nadrukWStrumieniu(s, zmieniaNadruk) {
+  const wstawki = [];                         // [pozycja, tekst]
+  const uzyte = new Set(), formy = [];
+  let st = { fill: false, stroke: false, tr: 0, stan: 0 };   // stan: indeks stanu nadruku w PDF (null = nieznany)
+  const stos = [];
+  let argumenty = [], wBT = false, btNadruk = false, obiekty = 0, ostatniaNazwa = null;
+  const ustaw = (pozycja, chce) => {
+    if (st.stan === chce) return;
+    wstawki.push([pozycja, `/${STANY_NADRUKU[chce]} gs `]);
+    uzyte.add(chce);
+    st.stan = chce;
+  };
+  let poczatek = null;                        // pozycja pierwszego argumentu operatora – wstawki idą przed argumenty
+  for (const tk of tokenyTresci(s)) {
+    if (tk.t !== 'op' && poczatek === null) poczatek = tk.p;
+    if (tk.t === 'num') { argumenty.push(tk.w); continue; }
+    if (tk.t === 'nazwa') { ostatniaNazwa = tk.w.slice(1); argumenty.push(tk.w); continue; }
+    if (tk.t !== 'op') { argumenty.push(null); continue; }
+    const op = tk.w, przed = poczatek === null ? tk.p : poczatek;
+    switch (op) {
+      case 'q': stos.push({ ...st }); break;
+      case 'Q': if (stos.length) st = stos.pop(); break;
+      case 'k': st.fill = czyK100(argumenty); break;
+      case 'K': st.stroke = czyK100(argumenty); break;
+      case 'g': case 'rg': case 'cs': case 'sc': case 'scn': st.fill = false; break;
+      case 'G': case 'RG': case 'CS': case 'SC': case 'SCN': st.stroke = false; break;
+      case 'Tr': st.tr = Number(argumenty[argumenty.length - 1]) || 0; break;
+      case 'gs': if (ostatniaNazwa && zmieniaNadruk(ostatniaNazwa)) st.stan = null; break;
+      case 'BT': wBT = true; btNadruk = false; break;
+      case 'ET': if (wBT && btNadruk) obiekty++; wBT = false; break;
+      default:
+        if (TEKST.has(op)) {
+          // Tr: 0, 2, 4, 6 – wypełnienie liter, 1, 2, 5, 6 – obrys liter (3, 7 – niewidoczny).
+          const wypelnia = [0, 2, 4, 6].includes(st.tr), obrysowuje = [1, 2, 5, 6].includes(st.tr);
+          const chce = (wypelnia && st.fill ? 1 : 0) + (obrysowuje && st.stroke ? 2 : 0);
+          ustaw(przed, chce);
+          if (chce) btNadruk = true;
+        } else if (RYSOWANIE.has(op)) {
+          ustaw(przed, 0);
+          if (op === 'Do' && ostatniaNazwa) formy.push(ostatniaNazwa);
+        }
+    }
+    argumenty = [];
+    ostatniaNazwa = null;
+    poczatek = null;
+  }
+  if (!wstawki.length) return { tekst: s, obiekty: 0, uzyte, formy };
+  let wynik = '', od = 0;
+  for (const [p, t] of wstawki) { wynik += s.slice(od, p) + t; od = p; }
+  return { tekst: wynik + s.slice(od), obiekty, uzyte, formy };
+}
+
+async function nadrukCzerni(buf, PDFLib) {
+  const { PDFDocument, PDFName, PDFRawStream, PDFArray, PDFDict, PDFRef, PDFNumber } = PDFLib;
+  const doc = await PDFDocument.load(buf, { updateMetadata: false });
+  const ctx = doc.context;
+  const obiekt = (x) => (x instanceof PDFRef ? ctx.lookup(x) : x);
+  let stany = null;                           // wspólne ExtGState (tworzone przy pierwszym użyciu)
+  const stan = (i) => {
+    if (!stany) stany = STANY_NADRUKU.map((_, j) => ctx.register(ctx.obj({ Type: 'ExtGState', op: !!(j & 1), OP: !!(j & 2), OPM: 1 })));
+    return stany[i];
+  };
+  const zrobione = new Set();
+  let obiekty = 0;
+  // Strumień → tekst albo null (tylko bez filtra albo sam FlateDecode, bez DecodeParms – jak czernK100).
+  const czytaj = (o) => {
+    if (!(o instanceof PDFRawStream)) return null;
+    const d = o.dict, filtr = d.get(PDFName.of('Filter'));
+    const filtry = filtr instanceof PDFArray ? filtr.asArray().map(String) : filtr ? [String(filtr)] : [];
+    if (filtry.length > 1 || (filtry.length === 1 && filtry[0] !== '/FlateDecode') || d.get(PDFName.of('DecodeParms'))) return null;
+    try { return { tekst: (filtry.length ? zlib.inflateSync(Buffer.from(o.contents)) : Buffer.from(o.contents)).toString('latin1'), flate: filtry.length > 0 }; } catch (e) { return null; }
+  };
+  const slownik = (zasoby, klucz) => {
+    let d = obiekt(zasoby.get(PDFName.of(klucz)));
+    if (!(d instanceof PDFDict)) { d = ctx.obj({}); zasoby.set(PDFName.of(klucz), d); }
+    return d;
+  };
+  // Treść (lista referencji strumieni) z zasobami → dopisuje użyte stany do ExtGState zasobów, potem formy z Do.
+  const przetworz = (refy, zasoby) => {
+    if (!(zasoby instanceof PDFDict)) return;
+    const ext = obiekt(zasoby.get(PDFName.of('ExtGState')));
+    const zmieniaNadruk = (n) => {
+      const g = ext instanceof PDFDict && obiekt(ext.get(PDFName.of(n)));
+      return g instanceof PDFDict && !STANY_NADRUKU.includes(n) && !!(g.get(PDFName.of('OP')) || g.get(PDFName.of('op')));
+    };
+    const formy = new Set();
+    for (const ref of refy) {
+      if (!(ref instanceof PDFRef)) continue;
+      const klucz = ref.toString();
+      if (zrobione.has(klucz)) continue;
+      zrobione.add(klucz);
+      const o = obiekt(ref), t = czytaj(o);
+      if (!t) continue;
+      const w = nadrukWStrumieniu(t.tekst, zmieniaNadruk);
+      w.formy.forEach((f) => formy.add(f));
+      if (!w.uzyte.size) continue;
+      obiekty += w.obiekty;
+      const e = slownik(zasoby, 'ExtGState');
+      for (const i of w.uzyte) e.set(PDFName.of(STANY_NADRUKU[i]), stan(i));
+      const dane = t.flate ? zlib.deflateSync(Buffer.from(w.tekst, 'latin1')) : Buffer.from(w.tekst, 'latin1');
+      o.dict.set(PDFName.of('Length'), PDFNumber.of(dane.length));
+      ctx.assign(ref, PDFRawStream.of(o.dict, dane));
+    }
+    const xo = obiekt(zasoby.get(PDFName.of('XObject')));
+    if (!(xo instanceof PDFDict)) return;
+    for (const n of formy) {
+      const ref = xo.get(PDFName.of(n)), f = obiekt(ref);
+      if (!(f instanceof PDFRawStream) || String(f.dict.get(PDFName.of('Subtype'))) !== '/Form') continue;
+      const wlasne = obiekt(f.dict.get(PDFName.of('Resources')));
+      przetworz([ref], wlasne instanceof PDFDict ? wlasne : zasoby);   // forma bez Resources korzysta z zasobów rodzica
+    }
+  };
+  for (const s of doc.getPages()) {
+    const { Resources } = s.node.normalizedEntries();
+    const c = obiekt(s.node.get(PDFName.of('Contents')));
+    const refy = c instanceof PDFArray ? c.asArray() : c ? [s.node.get(PDFName.of('Contents'))] : [];
+    if (refy.length) przetworz(refy, Resources);
+  }
+  return { bufor: obiekty ? Buffer.from(await doc.save({ useObjectStreams: false })) : buf, obiekty };
+}
+
 // Czy Ghostscript naprawdę użył profilu (spike: -sOutputICCProfile bywał pomijany bez słowa) – czerwony prostokąt
 // z profilem drukarni ma wyjść inaczej niż z domyślnym profilem Ghostscripta. Raz na profil (pamięć wg SHA-256).
 const PROFIL_SPRAWDZONY = new Map();
@@ -413,7 +592,8 @@ async function sprawdzProfilGs(gs, profil, PDFLib) {
 // Konwersja bufora PDF (jedna część z drukarnia.przygotujDruk) → { bufor, kontrola, czas }.
 // Kolejno: sprawdzenie profilu, czerń #000 → K100, Ghostscript, po(bufor) – poprawka po Ghostscripcie
 // (drukarnia.js: ramki stron z planu druku), kontrola wyniku.
-async function konwertujBufor(buf, { gs, profil, sygnal, PDFLib, po } = {}) {
+// nadruk (domyślnie true, #92): tekst w czystej czerni K100 z nadrukiem (nadrukCzerni) – wynik ma też { nadruk: liczba obiektów }.
+async function konwertujBufor(buf, { gs, profil, sygnal, PDFLib, po, nadruk = true } = {}) {
   gs = gs || znajdzGs();
   if (!gs.ok) throw new Error(gs.powod);
   sprawdzPlikIcc(profil);
@@ -424,12 +604,15 @@ async function konwertujBufor(buf, { gs, profil, sygnal, PDFLib, po } = {}) {
     fs.writeFileSync(we, (await czernK100(buf, PDFLib)).bufor);
     const { czas } = await konwertuj(we, wy, { gs, profil, sygnal });
     let bufor = await grupyCmyk(fs.readFileSync(wy), PDFLib);
+    let obiektyNadruku = 0;
+    if (nadruk) ({ bufor, obiekty: obiektyNadruku } = await nadrukCzerni(bufor, PDFLib));
     if (po) bufor = await po(bufor);
     const kontrola = await sprawdzPdf(bufor, PDFLib);
+    kontrola.nadruk = nadruk ? obiektyNadruku : null;
     return { bufor, kontrola, czas };
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 
 module.exports = { PROFILE, DOMYSLNY, PODPOWIEDZ_GS, MIN_WERSJA_GS, znajdzGs, argumentyGs, konwertuj, opisBleduGs,
   sprawdzPlikIcc, profilLokalny, pobierzProfil, rozwiazProfil, adresPaczki, czyKlucz, sprawdzPdf, konwertujBufor, sha256,
-  czernK100, grupyCmyk, katalogIccGs, wypakujProfileGs, sprawdzProfilGs };
+  czernK100, grupyCmyk, nadrukCzerni, nadrukWStrumieniu, katalogIccGs, wypakujProfileGs, sprawdzProfilGs };

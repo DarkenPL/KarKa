@@ -397,7 +397,8 @@ const listaPrzykladow = () => {
 // na awersy i rewersy (drukarnia.js) – wtedy wynik to lista plików, inaczej jedna ścieżka.
 // druk.cmyk = { plik, nazwa } (profil już rozwiązany – profilDoDruku): każda część przez Ghostscripta (cmyk.js),
 // ramki stron jeszcze raz z planu, kontrola wyniku. Pliki zapisywane dopiero, gdy wszystkie części się udały –
-// przy błędzie nie powstaje żaden plik (RGB nie udaje CMYK). Wynik wtedy: { pliki, cmyk: { profil, ghostscript, pliki[] } }.
+// przy błędzie nie powstaje żaden plik (RGB nie udaje CMYK). Wynik wtedy: { pliki, cmyk: { profil, ghostscript, nadrukCzerni, pliki[] } }.
+// druk.cmyk.nadruk (#92, domyślnie true): czarny tekst K100 nadrukowany (cmyk.nadrukCzerni) – pliki[].nadruk = liczba obiektów tekstu.
 async function pdfDoPliku(webContents, plik, druk) {
   const dane = await webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: 'none' } });
   if (!druk) { fs.writeFileSync(plik, dane); return plik; }
@@ -407,10 +408,10 @@ async function pdfDoPliku(webContents, plik, druk) {
     const gs = cmyk.znajdzGs({ odswiez: true });
     if (!gs.ok) throw new Error(gs.powod);
     if (!druk.cmyk.plik) throw new Error('brak profilu CMYK');
-    raport = { profil: druk.cmyk.nazwa, ghostscript: gs.wersja, czas: 0, pliki: [] };
+    raport = { profil: druk.cmyk.nazwa, ghostscript: gs.wersja, nadrukCzerni: druk.cmyk.nadruk !== false, czas: 0, pliki: [] };
     const PDFLib = drukarnia.pdfLib(ZASOBY);
     for (const c of czesci) {
-      const w = await cmyk.konwertujBufor(c.bufor, { gs, profil: druk.cmyk.plik, PDFLib,
+      const w = await cmyk.konwertujBufor(c.bufor, { gs, profil: druk.cmyk.plik, PDFLib, nadruk: druk.cmyk.nadruk !== false,
         po: (b) => drukarnia.ustawRamki(b, druk, c.indeksy, ZASOBY) });
       const k = w.kontrola, nazwa = path.basename(c.plik);
       if (k.strony !== c.strony) throw new Error(`${nazwa}: po konwersji ${k.strony} stron zamiast ${c.strony}`);
@@ -1471,8 +1472,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     if (!ow.ok) bledy.push('okno: ' + JSON.stringify(ow));
     // e) raport drukarni: sekcje tylko z drukarnia: true.
     const sekcje = await js(`(async () => ({ z: (await raportJson({ drukarnia: true })).map((x) => x.tytul), bez: (await raportJson({})).map((x) => x.tytul) }))()`);
-    drukarniaPdf.raport = { z: sekcje.z.filter((t) => t.startsWith('Drukarnia:')).length, pierwsze: sekcje.z.slice(0, 5).every((t) => t.startsWith('Drukarnia:')), bez: sekcje.bez.filter((t) => t.startsWith('Drukarnia:')).length };
-    drukarniaPdf.raport.ok = drukarniaPdf.raport.z === 5 && drukarniaPdf.raport.pierwsze && drukarniaPdf.raport.bez === 0;
+    drukarniaPdf.raport = { z: sekcje.z.filter((t) => t.startsWith('Drukarnia:')).length, pierwsze: sekcje.z.slice(0, 6).every((t) => t.startsWith('Drukarnia:')), bez: sekcje.bez.filter((t) => t.startsWith('Drukarnia:')).length };
+    drukarniaPdf.raport.ok = drukarniaPdf.raport.z === 6 && drukarniaPdf.raport.pierwsze && drukarniaPdf.raport.bez === 0;
     if (!drukarniaPdf.raport.ok) bledy.push('raport: ' + JSON.stringify(drukarniaPdf.raport));
     // Zmiana szablonu (tylko testowa kopia): tekst 1 mm od krawędzi, kolor „prawie czerń” – w pierwszej talii, przed jej [REWERS].
     if (!jestPrzykladem(szablon)) {
@@ -1757,15 +1758,16 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         try {
           const stan = await odswiezCmyk();
           const p = otworzOkno('druk');
-          const c = f().querySelector('[name=cmyk]'), s = f().querySelector('[name=profil]');
+          const c = f().querySelector('[name=cmyk]'), s = f().querySelector('[name=profil]'), n = f().querySelector('[name=nadrukCzerni]');
           const r = { gs: !!(stan && stan.gs && stan.gs.ok), cmyk: !!c, wlaczony: !!c && !c.disabled, zaznaczony: !!c && c.checked,
-            profil: !!s && !s.disabled, opcje: s ? [...s.options].map((x) => x.value) : [], wybrany: s ? s.value : null };
+            profil: !!s && !s.disabled, opcje: s ? [...s.options].map((x) => x.value) : [], wybrany: s ? s.value : null,
+            nadruk: !!n && !n.disabled && n.checked };
           document.getElementById('okno').dispatchEvent(new Event('cancel')); await p;
           return r;
         } finally { if (przed) USTAWIENIA_OKIEN.druk = przed; else delete USTAWIENIA_OKIEN.druk; }
       })()`);
       const ow = cmykTest.okno;
-      ow.ok = ow.gs && ow.cmyk && ow.wlaczony && ow.zaznaczony && ow.profil && ow.opcje.join() === 'fogra39,fogra51,__inny' && ow.wybrany === 'fogra39';
+      ow.ok = ow.gs && ow.cmyk && ow.wlaczony && ow.zaznaczony && ow.profil && ow.opcje.join() === 'fogra39,fogra51,__inny' && ow.wybrany === 'fogra39' && ow.nadruk;
       if (!ow.ok) bledy.push('okno: ' + JSON.stringify(ow));
       // b) PDF: awersy i rewersy (spad 3) w CMYK.
       const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'gk-cmyk-'));
@@ -1776,7 +1778,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         const wPlanie = plan.pliki.map((_, n) => plan.strony.filter((s) => s.plik === n)).filter((a) => a.length);
         const W = plan.szer * MMpt, H = plan.wys * MMpt;
         cmykTest.pdf = { pliki: (w.pliki || []).map((p) => path.basename(p)), czas: Date.now() - t0, gsCzas: w.cmyk && w.cmyk.czas, profil: w.cmyk && w.cmyk.profil,
-          kontrola: ((w.cmyk && w.cmyk.pliki) || []).map((k) => ({ strony: k.strony, rgb: k.rgb, przestrzenieRgb: k.przestrzenieRgb, czern: k.czern, obrazki: k.obrazki, trimBox: k.trimBox, ok: k.ok })) };
+          kontrola: ((w.cmyk && w.cmyk.pliki) || []).map((k) => ({ strony: k.strony, rgb: k.rgb, przestrzenieRgb: k.przestrzenieRgb, czern: k.czern, obrazki: k.obrazki, trimBox: k.trimBox, nadruk: k.nadruk, ok: k.ok })) };
+        if (!w.cmyk || w.cmyk.nadrukCzerni !== true) bledy.push('pdf: nadruk czerni nie jest domyślnie włączony');
         if (!w.cmyk || w.cmyk.profil !== 'test' || w.cmyk.ghostscript !== gs.wersja) bledy.push('pdf: raport cmyk: ' + JSON.stringify(w.cmyk && { profil: w.cmyk.profil, gs: w.cmyk.ghostscript }));
         if (!w.pliki || w.pliki.length !== wPlanie.length) bledy.push(`pdf: plików ${w.pliki && w.pliki.length}, w planie ${wPlanie.length}`);
         for (let n = 0; n < (w.pliki || []).length; n++) {
@@ -1785,6 +1788,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
           if (!k || !k.ok || k.rgb !== 0 || k.przestrzenieRgb !== 0 || k.trimBox !== k.strony || k.strony !== wPlanie[n].length) bledy.push(`pdf: plik ${n}: kontrola ${JSON.stringify(k && { ok: k.ok, rgb: k.rgb, strony: k.strony, trimBox: k.trimBox })}`);
           const strony_ = (await PDFDocument.load(fs.readFileSync(w.pliki[n]))).getPages();
           if (strony_.length !== wPlanie[n].length) bledy.push(`pdf: plik ${n}: stron ${strony_.length}, w planie ${wPlanie[n].length}`);
+          // Nadruk czerni (#92): liczba obiektów ↔ stany /KarkaNadruk z /op true w pliku.
+          const surowy = fs.readFileSync(w.pliki[n]).toString('latin1');
+          if (!Number.isInteger(k && k.nadruk) || (k.nadruk > 0) !== /\/KarkaNadruk[13]\b/.test(surowy)) bledy.push(`pdf: plik ${n}: nadruk ${k && k.nadruk}, a stany nadruku w pliku: ${/KarkaNadruk[13]/.test(surowy)}`);
           strony_.forEach((s, i) => {
             const mb = s.getMediaBox(), tb = s.getTrimBox(), c = wPlanie[n][i] && wPlanie[n][i].ciecie;
             if (!(bliskie(mb.x, 0) && bliskie(mb.y, 0) && bliskie(mb.width, W) && bliskie(mb.height, H))) bledy.push(`pdf: plik ${n} str. ${i + 1}: MediaBox ${[mb.x, mb.y, mb.width, mb.height].map((x) => x.toFixed(2))}`);
@@ -1799,6 +1805,12 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
           cmykTest.pdfimages = { obrazkow: wiersze.length, kolory: [...new Set(wiersze.map((c) => c[5] + '/' + c[6]))] };
           if (zle.length) bledy.push('pdfimages: obrazki nie w CMYK/gray: ' + zle.map((c) => c.slice(0, 8).join(' ')).join(' | '));
         } else cmykTest.pdfimages = 'brak narzędzia pdfimages';
+        // c) bez nadruku (nadrukCzerni = nie): w wyniku nadruk null, w plikach żadnych stanów nadruku.
+        const bez = await pdfDoPliku(wc, path.join(tmp, 'bez-nadruku.pdf'), { ...plan, cmyk: { plik: icc, nazwa: 'test', nadruk: false } });
+        cmykTest.bezNadruku = { nadrukCzerni: bez.cmyk && bez.cmyk.nadrukCzerni, nadruk: ((bez.cmyk && bez.cmyk.pliki) || []).map((k) => k.nadruk),
+          stanyWPliku: (bez.pliki || []).some((f) => /KarkaNadruk/.test(fs.readFileSync(f).toString('latin1'))) };
+        const bn = cmykTest.bezNadruku;
+        if (bn.nadrukCzerni !== false || bn.nadruk.some((x) => x !== null) || bn.stanyWPliku) bledy.push('pdf bez nadruku: ' + JSON.stringify(bn));
       } catch (e) { bledy.push('pdf: ' + e.message); }
       finally { fs.rmSync(tmp, { recursive: true, force: true }); }
       cmykTest.bledy = bledy;
@@ -1908,7 +1920,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const r1 = await zlec('raport', 'drukarnia = tak\n');
       dr.raportTak = r1 && { ok: r1.ok, sekcje: (r1.raport || []).map((x) => x.tytul).filter((t) => t.startsWith('Drukarnia:')).length,
         pola: r1.drukarnia ? ['odstep', 'czern', 'krawedz', 'spad'].map((k) => Array.isArray(r1.drukarnia[k])) : null };
-      dr.raportTak.ok = !!(r1 && r1.ok && dr.raportTak.sekcje === 5 && dr.raportTak.pola && dr.raportTak.pola.every(Boolean));
+      dr.raportTak.ok = !!(r1 && r1.ok && dr.raportTak.sekcje === 6 && dr.raportTak.pola && dr.raportTak.pola.every(Boolean));
       const r2 = await zlec('raport');
       dr.raportBez = r2 && { ok: r2.ok, sekcje: (r2.raport || []).map((x) => x.tytul).filter((t) => t.startsWith('Drukarnia:')).length, wynikDrukarnia: 'drukarnia' in r2 };
       dr.raportBez.ok = !!(r2 && r2.ok && dr.raportBez.sekcje === 0 && !dr.raportBez.wynikDrukarnia);
@@ -1922,7 +1934,14 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const wProjekcie = (p) => path.join(projekt, p);
       const c1 = await zlec('pdf', `uklad = drukarnia\nprofil = ${cmykTest.profil}\nplik = Export/cmyk.pdf\n`);
       cz.icc = c1 && { ok: c1.ok, pliki: c1.pliki, blad: c1.blad, profil: c1.cmyk && c1.cmyk.profil, kontrola: c1.cmyk && c1.cmyk.pliki.map((k) => ({ rgb: k.rgb, ok: k.ok, trimBox: k.trimBox, strony: k.strony })) };
-      cz.icc.ok = !!(c1 && c1.ok && c1.cmyk && c1.cmyk.pliki.length === c1.pliki.length && c1.cmyk.pliki.every((k) => k.rgb === 0 && k.ok) && c1.pliki.every((p) => fs.existsSync(wProjekcie(p))));
+      cz.icc.ok = !!(c1 && c1.ok && c1.cmyk && c1.cmyk.pliki.length === c1.pliki.length && c1.cmyk.pliki.every((k) => k.rgb === 0 && k.ok && Number.isInteger(k.nadruk)) && c1.pliki.every((p) => fs.existsSync(wProjekcie(p))));
+      // Nadruk czerni (#92): bez klucza – włączony (domyślne okna), nadrukczerni = nie → wyłączony; bez profilu – ostrzeżenie.
+      const c1n = await zlec('pdf', `uklad = drukarnia\nprofil = ${cmykTest.profil}\nnadrukczerni = nie\nplik = Export/cmyk-bez-nadruku.pdf\n`);
+      const c1r = await zlec('pdf', 'uklad = drukarnia\nnadruk = tak\nplik = Export/rgb-nadruk.pdf\n');
+      cz.nadruk = { domyslnie: c1 && c1.cmyk && c1.cmyk.nadrukCzerni, nie: c1n && c1n.cmyk && { nadrukCzerni: c1n.cmyk.nadrukCzerni, pliki: c1n.cmyk.pliki.map((k) => k.nadruk) },
+        rgb: c1r && { ok: c1r.ok, ostrzezenia: c1r.ostrzezenia, cmyk: 'cmyk' in c1r } };
+      cz.nadruk.ok = cz.nadruk.domyslnie === true && !!(c1n && c1n.ok && c1n.cmyk.nadrukCzerni === false && c1n.cmyk.pliki.every((k) => k.nadruk === null))
+        && !!(c1r && c1r.ok && !('cmyk' in c1r) && (c1r.ostrzezenia || []).some((x) => /nadrukczerni/.test(x)));
       // Bez sieci: adres udawany (nic tam nie nasłuchuje) i brak pobranego profilu → błąd z eci.org, bez pliku.
       // „Fogra39” (inna wielkość liter niż klucz) – patrz niżej: dokładne „fogra39” trafia dziś w błąd opcjeZlecenia (karty.html).
       const adresPrzed = process.env.KARKA_PROFILE_ADRES;
@@ -1950,7 +1969,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       await js(ustPrzed === 'null' || !JSON.parse(ustPrzed).druk ? 'delete USTAWIENIA_OKIEN.druk' : `USTAWIENIA_OKIEN.druk = ${JSON.stringify(JSON.parse(ustPrzed).druk)}`);
       cz.bezProfilu = { ok: c5 && c5.ok, cmyk: c5 && 'cmyk' in c5, pliki: c5 && c5.pliki };
       cz.bezProfilu.ok = !!(c5 && c5.ok && !('cmyk' in c5) && c5.pliki.every((p) => fs.existsSync(wProjekcie(p))));
-      cz.ok = ['icc', 'fogra39', 'fogra39Male', 'nieznany', 'a4', 'bezProfilu'].every((k) => cz[k] && cz[k].ok);
+      cz.ok = ['icc', 'nadruk', 'fogra39', 'fogra39Male', 'nieznany', 'a4', 'bezProfilu'].every((k) => cz[k] && cz[k].ok);
       z.cmyk = cz;
     } else if (cmykTest) z.cmyk = cmykTest.pominiety ? { pominiety: cmykTest.pominiety } : { ok: false, blad: cmykTest.blad };
     // Niezapisany edytor: zmiana tytułu kart w edytorze; zlecenie widzi wersję z dysku, edytor zostaje bez zmian.
