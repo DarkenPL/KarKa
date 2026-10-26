@@ -1433,13 +1433,34 @@ function ocenPas(piks, zewn) {
   return { rodzaj: jednolity ? 'jednolity' : 'mieszany', kolor, udzial: blisko };
 }
 
-// Wynik: { margines, odstep: [{ karta, talia, strona, odstep, krawedz, element, tekst }], czern: [...], krawedz: [...] }
+// Wynik: { margines, odstep: [{ karta, talia, strona, odstep, krawedz, element, tekst }], czern: [...], krawedz: [...], spad: [{ karta, talia, strona, plik, brak }] }
+// Obrazki wypełnij / rozciągnij dotykające krawędzi karty, których obraz nie sięga do końca spadu
+// (#74): w układzie Drukarnia ramka rośnie o spad, a obraz zostaje w miejscu – w spadzie wychodzi tło.
+// Liczone z rozmiaru naturalnego (cover: skala = max(szer/nat_szer, wys/nat_wys), wystaje w osi, w której
+// obraz jest większy od ramki, wg object-position; rozciągnij: nie wystaje wcale). kadr= i obrócone – pomijane.
+function obrazkiBezSpadu(k, spad = SPAD_DRUKARNI) {
+  const [w, h] = cardMm(k), wynik = [];
+  for (const el of k.querySelectorAll(':scope > .el.obrazek')) {
+    const img = el.querySelector('img');
+    if (!img || !/cover|fill/.test(img.style.objectFit) || /translate/.test(img.style.transform)) continue;
+    const g = krawedzieSpadu(el, w, h);
+    if (!g) continue;
+    const p = obrazWRamce(img, img.naturalWidth, img.naturalHeight, g.ew, g.eh);
+    if (img.style.objectFit === 'cover' && !p.wystaje) continue;      // rozmiaru nie znamy – nie zgadujemy
+    const wystaje = { lewo: -p.ox, prawo: p.ox + p.iw - g.ew, gora: -p.oy, dol: p.oy + p.ih - g.eh };
+    const brak = ['lewo', 'prawo', 'gora', 'dol'].filter((b) => g[b] && wystaje[b] < spad - 0.01)
+      .map((b) => ({ krawedz: { lewo: 'lewa', prawo: 'prawa', gora: 'górna', dol: 'dolna' }[b], wystaje: Math.round(Math.max(0, wystaje[b]) * 100) / 100 }));
+    if (brak.length) wynik.push({ plik: (URL_PLIK.get(img.src) || '').replace(/@[^@]*$/, ''), brak });
+  }
+  return wynik;
+}
+
 async function raportDrukarni() {
   const praca = async () => {
     const filtr = $('filtr').value; $('filtr').value = ''; applyFilter();      // odfiltrowane talie też
     try {
       const karty = [...$('podglad').querySelectorAll('.talia .karta')];
-      const odstep = [], czern = new Map(), pasy = new Map(), widziane = new Set();
+      const odstep = [], czern = new Map(), pasy = new Map(), spad = [], widziane = new Set();
       for (const k of karty) {
         const rewers = k.classList.contains('rewers');
         const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' : k.dataset.row);
@@ -1458,6 +1479,7 @@ async function raportDrukarni() {
           if (!x.karty.includes(opisKarty(k))) x.karty.push(opisKarty(k));
           czern.set(kk, x);
         }
+        for (const x of obrazkiBezSpadu(k)) spad.push({ karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...x });
         const p = await pasKarty(k);
         if (p && !p.blad && ['czarny', 'ryzykowny'].includes(p.rodzaj)) {
           const kk = k.dataset.talia + '|' + (rewers ? 'r' : 'a') + '|' + p.rodzaj + '|' + (p.odcien || '') + '|' + p.kolor;
@@ -1467,7 +1489,7 @@ async function raportDrukarni() {
       }
       odstep.sort((a, b) => a.odstep - b.odstep);
       odstep.forEach((x) => delete x.klucz);
-      return { margines: MARGINES_DRUKARNI, odstep, czern: [...czern.values()], krawedz: [...pasy.values()] };
+      return { margines: MARGINES_DRUKARNI, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad };
     } finally { $('filtr').value = filtr; applyFilter(); }
   };
   // Obrazki kart (html-to-image) czytają podgląd – na wyłączność, chyba że eksport już trwa.
@@ -1494,6 +1516,10 @@ async function sekcjeDrukarni(lista) {
   lista('Drukarnia: kolor przy krawędzi karty (pas 0–3 mm)', r.krawedz.map((x) =>
     `${esc(x.talia)} – ${x.strona === 'rewers' ? 'rewers' : 'awersy (' + x.karty.length + ')'}: <b>${esc(x.kolor)}</b>${x.odcien ? ' (' + x.odcien + ')' : ''} – ${RADA[x.rodzaj]}` + (x.strona === 'awers' ? `: ${ileKart(x.karty)}` : '')),
     'przy krawędziach nie ma czarnej ramki ani trudnych kolorów');
+  lista('Drukarnia: obrazek przy krawędzi nie sięga do końca spadu', r.spad.slice(0, POKAZ).map((x) =>
+    `${esc(x.karta)}: ${esc(x.plik)} – ${x.brak.map((b) => `${b.krawedz} krawędź (obraz wystaje ${mm(b.wystaje)} z ${SPAD_DRUKARNI} mm spadu)`).join(', ')}. W spadzie tło pod obrazkiem – obraz nie wystaje poza ramkę`)
+    .concat(r.spad.length > POKAZ ? [`… i ${r.spad.length - POKAZ} kart więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
+    'obrazki przy krawędziach wypełniają spad');
 }
 
 // o.drukarnia (albo przełącznik „Tryb drukarni” w panelu) – dodatkowe sekcje dla drukarni na początku.
@@ -1904,37 +1930,68 @@ function printCard(k, w, h) {
 // Karta ze spadem (dla drukarni): pole (w + 2s) × (h + 2s), rysunek karty przesunięty o spad.
 // Tło sięga do krawędzi spadu; kształty i obrazki (wypełnij/rozciągnij) dotykające krawędzi karty
 // są przedłużone o spad. Teksty, ikony, linie i obwódka karty zostają na swoim miejscu.
+// Obrazek: ramka rośnie o spad, ale obraz zostaje w miejscu i skali (jak w InDesignie, #74) – w obszarze
+// cięcia nic się nie zmienia, a spad wypełnia część obrazu wystającą poza pierwotną ramkę (cover) albo,
+// gdy obraz dokładnie mieści się w ramce, tło pod spodem (Raport drukarni to zgłasza).
 // Bez zaokrąglenia rogów – rogi wycina drukarnia.
+const SPAD_E = 0.05;                                 // tolerancja „dotyka krawędzi” w mm
+const naMmKarty = (v, cale) => (String(v).endsWith('%') ? parseFloat(v) * cale / 100 : parseFloat(v));
+// Ramka elementu (mm) i krawędzie karty, których dotyka; null = element nie jest przedłużany.
+function krawedzieSpadu(el, w, h) {
+  if (el.style.transform) return null;               // obrócone – bez przedłużania
+  const x = naMmKarty(el.style.left, w), y = naMmKarty(el.style.top, h), ew = naMmKarty(el.style.width, w), eh = naMmKarty(el.style.height, h);
+  if ([x, y, ew, eh].some(Number.isNaN)) return null;
+  if (el.style.borderRadius && el.style.borderRadius !== '0px') return null;   // zaokrąglone / elipsy zostają
+  const r = { x, y, ew, eh, lewo: x <= SPAD_E, gora: y <= SPAD_E, prawo: x + ew >= w - SPAD_E, dol: y + eh >= h - SPAD_E };
+  return r.lewo || r.gora || r.prawo || r.dol ? r : null;
+}
+// Obraz w ramce fw × fh (mm) dla object-fit cover / fill: rozmiar i przesunięcie względem lewego górnego rogu ramki.
+// nw, nh = rozmiar naturalny (0 = nieznany → obraz w ramce, bez wystawania).
+function obrazWRamce(img, nw, nh, fw, fh) {
+  if (img.style.objectFit !== 'cover' || !nw || !nh) return { iw: fw, ih: fh, ox: 0, oy: 0, wystaje: false };
+  const sk = Math.max(fw / nw, fh / nh), iw = nw * sk, ih = nh * sk;
+  const [px = 'center', py = 'center'] = (img.style.objectPosition || 'center center').split(/\s+/);
+  const f = (p) => (p.endsWith('%') ? parseFloat(p) / 100 : { left: 0, top: 0, center: 0.5, right: 1, bottom: 1 }[p] ?? 0.5);
+  return { iw, ih, ox: (fw - iw) * f(px), oy: (fh - ih) * f(py), wystaje: true };
+}
+const OBRAZY_SPADU = ':scope > .el.ksztalt, :scope > .el.obrazek';
 function kartaZeSpadem(k, w, h, s) {
   const c = k.cloneNode(true);
   c.classList.remove('za-dlugi', 'wybrana', 'zmieniona', 'nowa');
   c.style.width = mm(w + 2 * s); c.style.height = mm(h + 2 * s); c.style.borderRadius = '0';
+  const oryginaly = [...k.querySelectorAll(OBRAZY_SPADU)];      // rozmiar naturalny obrazków czytamy z karty podglądu
   const wnetrze = document.createElement('div');
   wnetrze.style.cssText = `position:absolute;left:${mm(s)};top:${mm(s)};width:${mm(w)};height:${mm(h)};overflow:visible;`;
   wnetrze.append(...c.childNodes);
   c.appendChild(wnetrze);
-  const naMm = (v, cale) => (String(v).endsWith('%') ? parseFloat(v) * cale / 100 : parseFloat(v));
-  const E = 0.05;                                   // tolerancja „dotyka krawędzi” w mm
-  for (const el of wnetrze.querySelectorAll(':scope > .el.ksztalt, :scope > .el.obrazek')) {
-    if (el.style.transform) continue;                // obrócone – bez przedłużania
+  [...wnetrze.querySelectorAll(OBRAZY_SPADU)].forEach((el, i) => {
     const img = el.querySelector('img');
-    if (img && !/cover|fill/.test(img.style.objectFit)) continue;   // „zmieść” zmieniłoby położenie obrazka
-    let x = naMm(el.style.left, w), y = naMm(el.style.top, h), ew = naMm(el.style.width, w), eh = naMm(el.style.height, h);
-    if ([x, y, ew, eh].some(Number.isNaN)) continue;
-    if (el.style.borderRadius && el.style.borderRadius !== '0px') continue;   // zaokrąglone / elipsy zostają
-    const lewo = x <= E, gora = y <= E, prawo = x + ew >= w - E, dol = y + eh >= h - E;
-    if (lewo) { ew += x + s; x = -s; }
-    if (gora) { eh += y + s; y = -s; }
-    if (prawo) ew = w + s - x;
-    if (dol) eh = h + s - y;
-    if (!(lewo || gora || prawo || dol)) continue;
-    // kadr= (ramka przycina obraz): jak w InDesignie ramka rośnie o spad, a obraz zostaje w tym samym miejscu
-    // i skali – w obszarze cięcia nic się nie zmienia, spad wypełnia część obrazu wystająca poza ramkę.
-    if (img && el.style.overflow === 'hidden' && /translate/.test(img.style.transform))
-      Object.assign(img.style, { position: 'absolute', left: mm(naMm(el.style.left, w) - x), top: mm(naMm(el.style.top, h) - y),
-        width: el.style.width, height: el.style.height });
+    if (img && !/cover|fill/.test(img.style.objectFit)) return;   // „zmieść” zmieniłoby położenie obrazka
+    const g = krawedzieSpadu(el, w, h);
+    if (!g) return;
+    let { x, y, ew, eh } = g;
+    const x0 = x, y0 = y, ew0 = ew, eh0 = eh;
+    if (g.lewo) { ew += x + s; x = -s; }
+    if (g.gora) { eh += y + s; y = -s; }
+    if (g.prawo) ew = w + s - x;
+    if (g.dol) eh = h + s - y;
+    if (img) {
+      if (el.style.overflow === 'hidden' && /translate/.test(img.style.transform)) {
+        // kadr=: ramka przycina obraz, który zostaje w tym samym miejscu i skali
+        Object.assign(img.style, { position: 'absolute', left: mm(x0 - x), top: mm(y0 - y), width: el.style.width, height: el.style.height });
+      } else {
+        // wypełnij / rozciągnij: obraz w pierwotnej ramce zostaje w miejscu i skali; ramka (przycina) rośnie o spad.
+        // cover: obraz rysowany w swoim naturalnym rozmiarze po przeskalowaniu (wystaje poza pierwotną ramkę).
+        const o = oryginaly[i] && oryginaly[i].querySelector('img');
+        const p = obrazWRamce(img, o ? o.naturalWidth : 0, o ? o.naturalHeight : 0, ew0, eh0);
+        el.style.overflow = 'hidden';
+        Object.assign(img.style, { position: 'absolute', left: mm(x0 - x + p.ox), top: mm(y0 - y + p.oy), width: mm(p.iw), height: mm(p.ih) });
+        if (p.wystaje) img.style.objectFit = 'fill';
+        if (img.style.transform) img.style.transformOrigin = `${mm(ew0 / 2 - p.ox)} ${mm(eh0 / 2 - p.oy)}`;   // odbicie wokół środka pierwotnej ramki
+      }
+    }
     Object.assign(el.style, { left: mm(x), top: mm(y), width: mm(ew), height: mm(eh) });
-  }
+  });
   return c;
 }
 
