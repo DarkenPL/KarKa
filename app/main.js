@@ -1436,7 +1436,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     })()`);
     const ow = drukarniaPdf.okno;
     drukarniaPdf.okno.ok = ow.domyslnie.spad === '3' && ow.domyslnie.spady.join() === '3,2' && ow.domyslnie.strony.join() === 'osobno,naprzemian' && ow.domyslnie.stronyWybrane === 'osobno'
-      && ow.zapamietane.spad === '2.5' && ow.zapamietane.spady.length === 3 && ow.zapamietane.spady.includes('2.5');
+      && ow.zapamietane.spad === (o.zad ? String(o.zad) : '2.5') &&   /* spad z szablonu (#84): zaznaczony spad szablonu */ ow.zapamietane.spady.length === 3 && ow.zapamietane.spady.includes('2.5');
     if (!ow.ok) bledy.push('okno: ' + JSON.stringify(ow));
     // e) raport drukarni: sekcje tylko z drukarnia: true.
     const sekcje = await js(`(async () => ({ z: (await raportJson({ drukarnia: true })).map((x) => x.tytul), bez: (await raportJson({})).map((x) => x.tytul) }))()`);
@@ -1639,10 +1639,18 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         buildPrint({ uklad: 'a4', karty });
         // okno Druk i PDF: ostrzeżenie przy braku deklaracji, przy pełnej deklaracji pole spadu nieaktywne
         const pOkno = otworzOkno('druk'), f = document.getElementById('oknoForm');
-        r.okno = { ostrzezenie: !!f.querySelector('.ostrzezenie-spadu'), wylaczone: [...f.querySelectorAll('[name=spad]')].every((x) => x.disabled), zSzablonu: /Spad z szablonu/.test(f.innerHTML) };
+        r.okno = { ostrzezenie: !!f.querySelector('.ostrzezenie-spadu'), wylaczone: [...f.querySelectorAll('[name=spad]')].every((x) => x.disabled), zSzablonu: /Spad z szablonu/.test(f.innerHTML),
+          zaznaczony: (f.querySelector('[name=spad]:checked') || {}).value };
         document.getElementById('okno').dispatchEvent(new Event('cancel')); await pOkno;
         if (bez.length && !r.okno.ostrzezenie) b.push('okno: brak ostrzeżenia');
-        if (!bez.length && (r.okno.ostrzezenie || !r.okno.wylaczone || !r.okno.zSzablonu)) b.push('okno: ' + JSON.stringify(r.okno));
+        if (!bez.length && (r.okno.ostrzezenie || !r.okno.wylaczone || !r.okno.zSzablonu || r.okno.zaznaczony !== String(Math.max(...zSpadem.map(spadTalii))))) b.push('okno: ' + JSON.stringify(r.okno));
+        // talie mieszane (sztuczne wpisy w TALIE): spad = największy zadeklarowany, ostrzeżenia dla talii bez spadu i z mniejszym
+        TALIE.push({ nazwa: '__bez', spad: 0 }, { nazwa: '__dwa', spad: 2 }, { nazwa: '__trzy', spad: 3 });
+        try {
+          const m = spadDruku(['__bez', '__dwa', '__trzy'].map((t) => ({ dataset: { talia: t } })), 1);
+          r.mieszane = m;
+          if (m.s !== 3 || !m.zSzablonu || m.bez.join() !== '__bez' || m.ostrzezenia.length !== 2 || !/talie bez spadu w szablonie: __bez/.test(m.ostrzezenia[0]) || !/talia __dwa: .*bez obrazu/.test(m.ostrzezenia[1])) b.push('mieszane ' + JSON.stringify(m));
+        } finally { TALIE.splice(-3); }
         // raport drukarni
         const rap = await raportDrukarni(), ss = rap.spadSzablonu;
         r.raport = { bez: ss.bez, pliki: ss.pliki.length };

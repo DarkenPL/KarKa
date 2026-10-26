@@ -1091,7 +1091,9 @@ function renderCard(tpl, cmds, row, ctx) {
       if (sp && !kadr && !obrot && fit !== 'contain') {
         const E = 0.05, l = x <= E, g = y <= E, pr = x + w >= tpl.w - E, d = y + h >= tpl.h - E;
         if (l || g || pr || d) {
-          const nx = l ? -sp : x, ny = g ? -sp : y, nw = (pr ? tpl.w + sp : x + w) - nx, nh = (d ? tpl.h + sp : y + h) - ny;
+          // ramka sięga co najmniej krawędzi spadu; obrazek wysunięty dalej zostaje jak w szablonie
+          const nx = l ? Math.min(x, -sp) : x, ny = g ? Math.min(y, -sp) : y;
+          const nw = (pr ? Math.max(x + w, tpl.w + sp) : x + w) - nx, nh = (d ? Math.max(y + h, tpl.h + sp) : y + h) - ny;
           ramka = `left:${nx}mm;top:${ny}mm;width:${nw}mm;height:${nh}mm;`;
         }
       }
@@ -1625,7 +1627,6 @@ function ocenPas(piks, zewn) {
 function obrazkiBezSpadu(k, spad = SPAD_DRUKARNI) {
   const [w, h] = cardMm(k), wynik = [];
   if (spadTalii(k.dataset.talia)) return wynik;                    // spad z szablonu – sprawdza plikiZeSpadem
-
   for (const el of k.querySelectorAll(':scope > .el.obrazek')) {
     const img = el.querySelector('img');
     if (!img || !/cover|fill/.test(img.style.objectFit) || /translate/.test(img.style.transform)) continue;
@@ -2276,7 +2277,8 @@ function spadDruku(karty, spadOkna) {
   const bez = talie.filter(([, x]) => !x).map(([t]) => t), ostrzezenia = [];
   if (bez.length && s) ostrzezenia.push((bez.length === talie.length ? 'projekt nie deklaruje spadu w szablonie' : 'talie bez spadu w szablonie: ' + bez.join(', '))
     + ` – spad ${mmTxt(s)} jest w PDF dorabiany (tło powiększone, obrazki przy krawędzi przedłużone). Do druku w drukarni dopisz spad w szablonie (np. KARTA = 63, 88, spad=3) i przygotuj tło i obrazki przy krawędzi ze spadem`);
-  for (const [t, x] of talie) if (x && x !== s) ostrzezenia.push(`talia ${t}: spad w szablonie ${mmTxt(x)}, w PDF ${mmTxt(s)} – brakujące ${mmTxt(s - x)} dorobione`);
+  // Pliki talii mają spad x < s: tło i obrazki zostają w miejscu, więc pozostały pas spadu wypełnia tylko kolor tła karty.
+  for (const [t, x] of talie) if (x && x !== s) ostrzezenia.push(`talia ${t}: spad w szablonie ${mmTxt(x)}, w PDF ${mmTxt(s)} – zewnętrzne ${mmTxt(s - x)} spadu tej talii będzie bez obrazu (tylko kolor tła karty)`);
   return { s, bez, ostrzezenia, zSzablonu: zadeklarowane.length > 0 };
 }
 // Odcisk rewersu do porównania kart: ten sam wygląd i rozmiar = ten sam rewers (bez data-talia i title).
@@ -3199,8 +3201,12 @@ function poleOkna(nazwa, rodzaj, u) {
       const talie = [...$('podglad').querySelectorAll('.talia')].map((t) => t.dataset.talia);
       const bez = talie.filter((t) => !spadTalii(t)), zad = talie.map(spadTalii).filter(Boolean);
       const wszystkie = talie.length && !bez.length;
+      // Pełna deklaracja: wybór nieaktywny i zaznaczony na spadzie z szablonu (nie na zapamiętanym).
+      const sSz = zad.length ? Math.max(...zad) : null;
+      if (wszystkie && !opcje.some(([v]) => +v === sSz)) opcje.push([sSz, mmTxt(sSz) + ' <span class="opis">– z szablonu</span>']);
       let pole = radio('Spad <span class="opis">(układ Drukarnia) – tło i elementy przy krawędzi wychodzą poza linię cięcia</span>', 'spad',
         opcje.map(([v, t]) => [v, t, wszystkie]));
+      if (wszystkie) pole = pole.replace(/ checked/g, '').replace(`value="${sSz}"`, `value="${sSz}" checked`);
       const info = wszystkie ? `<div class="opis">Spad z szablonu: ${mmTxt(Math.max(...zad))} – tło i obrazki przy krawędzi to pliki ze spadem.</div>`
         : bez.length ? `<div class="opis ostrzezenie-spadu">⚠ ${bez.length === talie.length ? 'Projekt nie deklaruje spadu w szablonie' : 'Talie bez spadu w szablonie: ' + esc(bez.join(', '))}` +
           ` – w PDF dla drukarni spad będzie dorabiany (tło powiększone, obrazki przy krawędzi przedłużone). Do druku w drukarni dopisz np. <code>KARTA = 63, 88, spad=3</code> i przygotuj tło i obrazki ze spadem.` +
@@ -3272,7 +3278,7 @@ function otworzOkno(rodzaj, domyslna) {
           o.cmyk = !pole || pole.disabled ? u.cmyk : pole.checked;     // bez Ghostscripta – zapamiętany wybór zostaje
           o.profil = !wybor || wybor.disabled || wybor.value === '__inny' ? u.profil : wybor.value;
         }
-        else if (p === 'spad') { const v = parseFloat(form.querySelector('[name=spad]:checked')?.value ?? ''); o.spad = Number.isNaN(v) ? u.spad : Math.min(10, Math.max(0, v)); }
+        else if (p === 'spad') { const x = form.querySelector('[name=spad]:checked'); const v = x && !x.disabled ? parseFloat(x.value) : NaN; /* nieaktywne (spad z szablonu) – zapamiętany zostaje */ o.spad = Number.isNaN(v) ? u.spad : Math.min(10, Math.max(0, v)); }
         else { const x = form.querySelector(`[name=${p}]:checked`); o[p] = x ? (p === 'dpi' ? +x.value : x.value) : u[p]; }
       }
       return o;
