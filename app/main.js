@@ -1019,24 +1019,27 @@ function szerokoscJpg(b) {
 }
 // ── Tryb testowy (CI): --test-pdf <szablon.txt|folder|-> <plik.pdf> ──────────
 // Otwiera projekt, czeka na karty, zapisuje PDF i zrzut podglądu, wypisuje stan i kończy.
-// Bloki --test-edytor (#88). --test-bloki a,b uruchamia tylko wymienione bloki (CI w pull requeście: pełny zestaw
-// na jednym projekcie, bloki zależne od treści na przykładach, których dotyczą); bez opcji – wszystkie jak dotąd.
-// Nieznana nazwa w --test-bloki = błąd testu (literówka nie może po cichu wyłączyć bloku).
-// Lista bloków z własnego kodu (każde wywołanie testBloku('nazwa')) – nowy blok nie wymaga dopisywania tutaj.
-const BLOKI_TESTU = () => [...new Set([...fs.readFileSync(__filename, 'utf8').matchAll(/testBloku\('(\w+)'\)/g)].map((m) => m[1]))];
+// Bloki --test-edytor (#88). --test-bloki a,b uruchamia tylko wymienione bloki, --test-bloki -a,-b – wszystkie poza
+// wymienionymi (CI w pull requeście dzieli pełny zestaw 07-gildie na dwa równoległe procesy: lista i jej dopełnienie, więc
+// nowy blok zawsze trafia do jednego z nich); bez opcji – wszystkie jak dotąd. Nieznana nazwa = błąd testu (literówka nie
+// może po cichu wyłączyć bloku). Lista bloków z własnego kodu (każde wywołanie testBloku('nazwa')) – bez dopisywania tutaj.
+const BLOKI_TESTU = () => [...new Set([...fs.readFileSync(__filename, 'utf8').matchAll(/\(testBloku\('(\w+)'\)/g)].map((m) => m[1]))];
 function wybraneBlokiTestu() {
   const i = process.argv.indexOf('--test-bloki');
   if (i < 0) return null;
   const lista = String(process.argv[i + 1] || '').split(',').map((x) => x.trim()).filter(Boolean);
-  const znane = BLOKI_TESTU(), zle = lista.filter((x) => !znane.includes(x));
-  if (zle.length || !lista.length) throw new Error('--test-bloki: nieznane bloki ' + (zle.join(', ') || '(pusta lista)') + ' – dostępne: ' + znane.join(', '));
-  return lista;
+  const bez = lista.filter((x) => x.startsWith('-')).map((x) => x.slice(1)), tylko = lista.filter((x) => !x.startsWith('-'));
+  const znane = BLOKI_TESTU(), zle = [...bez, ...tylko].filter((x) => !znane.includes(x));
+  if (zle.length || !lista.length || (bez.length && tylko.length))
+    throw new Error('--test-bloki: ' + (zle.length ? 'nieznane bloki ' + zle.join(', ') : !lista.length ? 'pusta lista' : 'nie łącz nazw z -nazwami')
+      + ' – dostępne: ' + znane.join(', '));
+  return { tylko: tylko.length ? tylko : null, bez };
 }
 // Czas bloku = od jego testBloku() do następnego (albo do końca testu) – pole czasyBlokow w wyniku (obserwacja CI, #88).
 const CZASY_TESTU = [];
 function testBloku(nazwa) {
-  const lista = process.argv.includes('--test-edytor') ? wybraneBlokiTestu() : [];
-  const tak = !lista || lista.includes(nazwa);
+  const w = process.argv.includes('--test-edytor') ? wybraneBlokiTestu() : { tylko: [], bez: [] };
+  const tak = !w || ((!w.tylko || w.tylko.includes(nazwa)) && !w.bez.includes(nazwa));
   CZASY_TESTU.push([tak ? nazwa : null, Date.now()]);
   return tak;
 }
@@ -1048,7 +1051,7 @@ function czasyBlokow() {
 async function trybTestowy(folder, wynik, przywrocone = []) {
   const P = aktywny, wc = P.wc, szablon = P.szablon, projekt = P.folder;   // projekt testowy = aktywna zakładka
   const czekaj = (ms) => new Promise((r) => setTimeout(r, ms));
-  const bloki = wybraneBlokiTestu();                      // sprawdzenie nazw od razu (błąd → { ok: false, blad })
+  wybraneBlokiTestu();                                    // sprawdzenie nazw od razu (błąd → { ok: false, blad })
   let stan = '';
   for (let i = 0; folder !== '-' && i < 120; i++) {
     await czekaj(500);
@@ -1238,6 +1241,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       ok: spokoj && kolory > 0 && /blad/.test(blad) && /nieznana komenda/.test(blad) && zmianyPrzed && (oryginal === zmieniony || szer === 70) && zapisany && przywrocony };
     await js('przelaczEdytor(true)');
     fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-edytor.png', (await wc.capturePage()).toPNG());
+    await js('przelaczEdytor(false)');              // następne bloki zaczynają bez edytora także przy --test-bloki (#88)
   }
   // Druk wybranych kart i tryb szkicu (--test-edytor): 2 zaznaczone karty → 2 karty w wydruku, białe tło.
   let wybor = null;
@@ -1279,7 +1283,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     const doDruku = await js("document.querySelectorAll('#druk .karta:not(.rewers)').length");
     await wpisz(oryginal); await czekaj(3500);
     const poPowrocie = await liczby();
-    await js('przelaczEdytor(true)');
+    await js('przelaczEdytor(false)');              // jak po bloku edytor – kolejne bloki bez edytora (#88)
     zmienione = { poZapisie, poZmianie, porownanie, doDruku, poPowrocie };
     zmienione.ok = poZapisie.widoczne && poZapisie.zm === 0 && poZapisie.nowe === 0 && poZmianie.zm > 0
       && porownanie >= Math.min(poZmianie.zm, 40) && doDruku === poZmianie.zm && poPowrocie.zm === 0;
@@ -2688,7 +2692,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
     && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: bloki || (process.argv.includes('--test-edytor') ? 'wszystkie' : 'bez --test-edytor'), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
