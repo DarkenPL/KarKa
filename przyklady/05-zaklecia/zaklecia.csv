@@ -7,3 +7,7 @@ ID,Ilość,Nazwa,Szkoła,Obrazek,Koszt,Opis,Cytat
 06,2,Eliksir,natura,Ikony/eliksir.svg,0,"Odzyskaj {mana}{mana}.","Smakuje jak kompot z mchu."
 07,1,Kryształowa kula,wróżby,Ikony/krysztal.svg,2,"Podejrzyj 3 wierzchnie karty talii i ułóż je w dowolnej kolejności.","Gwiazdy mówią: **nie dziś**."
 08,1,Runa ochrony,wróżby,Ikony/runa.svg,3,"<del>Na zawsze.</del> Do twojej następnej tury karty {kolor-ogień} i {kolor-lód} nie zadają ci obrażeń <strike>wcale</strike>.","Wyryta raz, chroni na zawsze. Prawie."
+09,2,Tarcza many,lód,Ikony/lod.svg,1,"Zablokuj 2 obrażenia.
+<small>(Jeśli zapłacisz {mana} – zablokuj wszystkie.)</small>","Lepiej się zasłonić, niż tłumaczyć."
+10,1,Grzmot,burza,Ikony/blyskawica.svg,2,"<big>Huk!</big>
+Każdy gracz odrzuca 1 kartę. <rozmiar=6>(Ty też.)</rozmiar>","Słychać go w trzech wioskach."

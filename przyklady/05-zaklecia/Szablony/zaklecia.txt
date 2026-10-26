@@ -5,6 +5,8 @@
 ;  • w danych: ikony {mana} i kolorowe prostokąty {kolor-ogień} (nazwa koloru z palety, polskie znaki działają),
 ;  • formatowanie w danych (kolumna Opis): **pogrubienie**, ~~przekreślenie~~ i znaczniki <b> <strong> <i> <em> <u> <s> <del> <strike>,
 ;    a w kolumnie Cytat flaga bez_formatowania – gwiazdki z danych zostają zwykłymi znakami,
+;  • rozmiary w jednym polu (karty 09 i 10): <small> (0,6 rozmiaru pola), <big> (1,4) i <rozmiar=6> (pt) –
+;    efekt z dopiskiem wyśrodkowane razem w pionie; przy zmniejszaniu pola wszystko maleje proporcjonalnie,
 ;  • elementy tylko dla wybranych kart (jeśli= z !=), ELIPSA z gradientem,
 ;  • rewers z własnymi rogami i obwódką (KARTA w [REWERS]), [AWERS] po rewersie,
 ;  • ikony z folderu Ikony bez pliku ikony.csv: plik mana.svg = {mana}.

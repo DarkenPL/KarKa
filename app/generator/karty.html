@@ -33,6 +33,12 @@
   background: linear-gradient(to bottom, var(--k) 0 var(--p, 100%), #fff var(--p, 100%) 100%);
 }
 .karta b, .karta strong { font-weight: 600; }
+/* Rozmiary w treści pola (#71): <small>/<big> względem otoczenia, <rozmiar=N> względem rozmiaru pola.
+   --pole = rozmiar pola po dopasowaniu (fitAll zmienia font-size pola), więc wszystko skaluje się razem. */
+@property --pole { syntax: '<length>'; inherits: true; initial-value: 0px; }
+.el.tekst { --pole: 1em; }
+.karta small { font-size: 0.6em; }
+.karta big { font-size: 1.4em; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Interfejs (bez wpływu na wydruk)
@@ -728,9 +734,11 @@ function liniaSvg(c, tpl, ctx, colorOf) {
 // Wartości z danych są maskowane znakami sterującymi, żeby wzorce szablonu ich nie łapały:
 //   \u0001 = *   \u0002 / \u0003 = ** otwarcie / zamknięcie   \u0004 / \u0005 = ~~ otwarcie / zamknięcie
 //   \u0006 = ~   \u0007 = <  (tylko przy bez_formatowania – znacznik z danych zostaje tekstem)
-const ZNACZNIKI_TEKSTU = ['b', 'strong', 'i', 'em', 'u', 's', 'del', 'strike'];
-const ZNACZNIK_RE = new RegExp(`&lt;(/?)(${ZNACZNIKI_TEKSTU.join('|')})&gt;`, 'gi');
-const ZNACZNIK_DANYCH_RE = new RegExp(`<(/?)(${ZNACZNIKI_TEKSTU.join('|')})>`, 'i');
+// Rozmiary (#71): <small> = 0,6, <big> = 1,4 rozmiaru otoczenia (zagnieżdżone mnożą się),
+// <rozmiar=12>…</rozmiar> = 12 pt przy rozmiarze pola bez zmniejszania (liczony względem pola – --pole w CSS).
+const ZNACZNIKI_TEKSTU = ['b', 'strong', 'i', 'em', 'u', 's', 'del', 'strike', 'small', 'big', 'rozmiar'];
+const ZNACZNIK_RE = new RegExp(`&lt;(/?)(${ZNACZNIKI_TEKSTU.join('|')})(?:\\s*=\\s*([^&\\s]*)\\s*)?&gt;`, 'gi');
+const ZNACZNIK_DANYCH_RE = new RegExp(`<(/?)(${ZNACZNIKI_TEKSTU.join('|')})>|<rozmiar\\s*=\\s*[^>\\s]*\\s*>`, 'i');
 function maskujDane(v, formatowanie) {
   if (!formatowanie) return v.replace(/\*/g, '\u0001').replace(/~/g, '\u0006').replace(/</g, '\u0007');
   return v.replace(/\*\*([\s\S]+?)\*\*/g, '\u0002$1\u0003').replace(/~~([\s\S]+?)~~/g, '\u0004$1\u0005')
@@ -741,19 +749,30 @@ const odmaskuj = (s) => s.replace(/[\u0002\u0003]/g, '**').replace(/[\u0004\u000
 const maFormatowanie = (v) => /\*\*[\s\S]+?\*\*|~~[\s\S]+?~~/.test(v) || ZNACZNIK_DANYCH_RE.test(v);
 // Znaczniki z listy (po esc() jako &lt;b&gt;) → prawdziwe; niedomknięte domykane na końcu pola,
 // zamknięcie bez otwarcia zostaje tekstem. Zwraca { html, niedomkniete[], nadmiarowe[] }.
-function znacznikiTekstu(html) {
-  const stos = [], nadmiarowe = [];
-  const out = html.replace(ZNACZNIK_RE, (m, zam, nazwa) => {
+function znacznikiTekstu(html, pt) {
+  const stos = [], nadmiarowe = [], zle = [];      // stos: { n, otw } – otw = znacznik otwierający (do ponownego otwarcia)
+  const out = html.replace(ZNACZNIK_RE, (m, zam, nazwa, arg) => {
     const n = nazwa.toLowerCase();
-    if (!zam) { stos.push(n); return `<${n}>`; }
-    const i = stos.lastIndexOf(n);
+    if (!zam) {
+      let otw = `<${n}>`;
+      if (n === 'rozmiar') {
+        const r = liczbaZTekstu(String(arg ?? '').replace(/pt$/i, ''));
+        if (!(r > 0)) { zle.push(m.replace(/&lt;/g, '<').replace(/&gt;/g, '>')); return m; }
+        otw = pt > 0 ? `<span class="rozmiar" style="font-size:calc(var(--pole) * ${+(r / pt).toFixed(4)})">` : `<span class="rozmiar" style="font-size:${r}pt">`;
+      } else if (arg !== undefined) return m;           // <b=…> – nie nasz znacznik, zostaje tekstem
+      stos.push({ n, otw }); return otw;
+    }
+    if (arg !== undefined) return m;
+    const zamknij = (x) => (x.n === 'rozmiar' ? '</span>' : `</${x.n}>`);
+    const i = stos.map((x) => x.n).lastIndexOf(n);
     if (i < 0) { nadmiarowe.push(n); return m; }
     const wewn = stos.splice(i);                      // zamykamy też znaczniki otwarte w środku i otwieramy je ponownie
-    wewn.shift();
+    const ten = wewn.shift();
     stos.push(...wewn);
-    return wewn.slice().reverse().map((x) => `</${x}>`).join('') + `</${n}>` + wewn.map((x) => `<${x}>`).join('');
+    return wewn.slice().reverse().map(zamknij).join('') + zamknij(ten) + wewn.map((x) => x.otw).join('');
   });
-  return { html: out + stos.slice().reverse().map((x) => `</${x}>`).join(''), niedomkniete: stos, nadmiarowe };
+  const domkniecie = stos.slice().reverse().map((x) => (x.n === 'rozmiar' ? '</span>' : `</${x.n}>`)).join('');
+  return { html: out + domkniecie, niedomkniete: stos.map((x) => x.n), nadmiarowe, zle };
 }
 
 // Liczba z tekstu – przecinek dziesiętny (17,8) jak kropka; przy nieczytelnej wartości NaN.
@@ -855,7 +874,7 @@ function renderCard(tpl, cmds, row, ctx) {
     const same = (a !== '' && b !== '' && !Number.isNaN(+a) && !Number.isNaN(+b)) ? +a === +b : a === b;   // 001 = 1
     return op === '=' ? same : !same;
   }));
-  const rich = (s, kolumny) => {
+  const rich = (s, kolumny, pt) => {
     let h = renderText(s, ctx.icons, ctx.warn)
       .replace(/\*\*([\s\S]+?)\*\*/g, '<b>$1</b>').replace(/\*([^*]+?)\*/g, '<i>$1</i>');
     if (h.includes('~~')) h = h.replace(/~~([\s\S]+?)~~/g, '<s>$1</s>');
@@ -863,10 +882,11 @@ function renderCard(tpl, cmds, row, ctx) {
       .replace(/\u0002/g, '<b>').replace(/\u0003/g, '</b>').replace(/\u0004/g, '<s>').replace(/\u0005/g, '</s>');
     const lt = (x) => x.replace(/\u0007/g, '&lt;');    // < z danych przy bez_formatowania – zawsze tekst
     if (!h.includes('&lt;')) return lt(h);
-    const z = znacznikiTekstu(h);
+    const z = znacznikiTekstu(h, pt);
     const gdzie = `${ctx.label}` + (kolumny.length ? ` (kolumna ${kolumny.map((k) => '[' + k + ']').join(', ')})` : '');
     if (z.niedomkniete.length) ctx.warn.add(`${gdzie}: niedomknięty znacznik ${z.niedomkniete.map((x) => '<' + x + '>').join(' ')} – domknięty na końcu pola`);
     if (z.nadmiarowe.length) ctx.warn.add(`${gdzie}: znacznik ${z.nadmiarowe.map((x) => '</' + x + '>').join(' ')} bez otwarcia – zostaje tekstem`);
+    if (z.zle.length) ctx.warn.add(`${gdzie}: ${z.zle.join(' ')} – potrzebny rozmiar w pt, np. <rozmiar=12> – zostaje tekstem`);
     return lt(z.html);
   };
   const mm = (v) => (String(v).trim().endsWith('%') ? String(v).trim() : num(v) + 'mm');
@@ -925,7 +945,7 @@ function renderCard(tpl, cmds, row, ctx) {
       if (f.has('wersaliki')) st.push('text-transform:uppercase');
       const cls = 'el tekst' + (f.has('jedna_linia') ? ' jedna-linia' : '');
       const data = ` data-pt="${pt}"` + (o.min ? ` data-min="${num(o.min)}"` : '') + (o.grupa ? ` data-grupa="${esc(o.grupa)}"` : '');
-      html += `<div class="${cls}" style="${esc(st.join(';'))}"${data}><div class="tresc">${rich(tr.s, tr.kolumny)}</div></div>`;
+      html += `<div class="${cls}" style="${esc(st.join(';'))}"${data}><div class="tresc">${rich(tr.s, tr.kolumny, pt)}</div></div>`;
     } else if (c.kom === 'obrazek') {
       const p = value(c.args[4]);
       if (!p) continue;
@@ -2569,7 +2589,7 @@ window.exportPcio = exportPcio;
 const ED = { dysk: null, zmiany: false, konflikt: null, bledy: new Map(), tylkoOdczyt: false, czasomierz: 0 };
 const edPole = $('edPole');
 
-const RE_ARG = /("(?:[^"\\]|\\.)*"?)|(\[[^\]\n]*\]?)|(\{[^}\n]*\}?)|(#[0-9a-fA-F]{3,8}\b)|([\p{L}_][\p{L}\p{N}_]*)(?=\s*=)|((?<![\p{L}\p{N}_.])-?\d+(?:\.\d+)?(?![\p{L}\p{N}_]))/gu;
+const RE_ARG = /("(?:[^"\\]|\\.)*"?)|(\[[^\]\n]*\]?)|(\{[^}\n]*\}?)|(#[0-9a-fA-F]{3,8}\b)|(?<![<\p{L}\p{N}_])([\p{L}_][\p{L}\p{N}_]*)(?=\s*=)|((?<![\p{L}\p{N}_.])-?\d+(?:\.\d+)?(?![\p{L}\p{N}_]))/gu;
 const kolorujPola = (t) => esc(t)
   .replace(/\[[^\]]*\]/g, (m) => `<span class="sk-pole">${m}</span>`)
   .replace(/\{[^}]*\}/g, (m) => `<span class="sk-ikona">${m}</span>`);
