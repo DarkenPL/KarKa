@@ -1088,6 +1088,35 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const P = aktywny, wc = P.wc, szablon = P.szablon, projekt = P.folder;   // projekt testowy = aktywna zakładka
   const czekaj = (ms) => new Promise((r) => setTimeout(r, ms));
   wybraneBlokiTestu();                                    // sprawdzenie nazw od razu (błąd → { ok: false, blad })
+  // Raport drukarni zaraz po starcie (#111): zlecenie raport (drukarnia = tak), gdy tylko strona przyjmuje zlecenia
+  // (warunek jak w wykonajPlikZlecenia), potem panel Raport, zlecenie i przebudowa naraz z filtrem podglądu, na końcu
+  // raport po ustaleniu się strony. Te same pozycje odstępu, żadnej karty niezmierzonej, filtr bez zmian; karta odpięta
+  // od strony = niezmierzona (nie „OK”). 05-zaklecia ma stopkę „nr [ID]” 2,15 mm od dolnej krawędzi – tam pozycje muszą być.
+  let raportStart = null;
+  if (testBloku('raportStart') && folder !== '-') {
+    for (let i = 0; i < 2400 && !(await wc.executeJavaScript('!!(window.wykonajZlecenie && window.zbudowano)').catch(() => false)); i++) await czekaj(25);
+    raportStart = await wc.executeJavaScript(`(async () => {
+      const lista = (d) => d ? d.odstep.map((x) => x.karta + ' ' + x.odstep).join('|') : null;
+      const opis = (d) => d && { karty: d.karty, odstep: d.odstep.length, niezmierzone: d.niezmierzone.length };
+      const start = (await wykonajZlecenie('raport', { drukarnia: 'tak' })).drukarnia;
+      const filtr = $('filtr').options[1] ? $('filtr').options[1].value : '';
+      $('filtr').value = filtr; applyFilter();
+      let bylo = null; try { bylo = localStorage.getItem('raportDrukarnia'); localStorage.setItem('raportDrukarnia', '1'); } catch (e) { /* bez zapisu */ }
+      const [, z] = await Promise.all([pokazRaport(true), wykonajZlecenie('raport', { drukarnia: 'tak' }), build()]);
+      const panel = /Nie zmierzono/.test($('raport').innerHTML);
+      await pokazRaport(false);
+      try { if (bylo === null) localStorage.removeItem('raportDrukarnia'); else localStorage.setItem('raportDrukarnia', bylo); } catch (e) { /* bez zapisu */ }
+      const filtrPo = $('filtr').value; $('filtr').value = ''; applyFilter();
+      await new Promise((r) => setTimeout(r, 1500));
+      const potem = await raportDrukarni();
+      const odpieta = odstepyKarty(document.querySelector('#podglad .karta').cloneNode(true));
+      return { start: opis(start), naraz: opis(z.drukarnia), potem: opis(potem), filtr: filtrPo === filtr, panelBezBledu: !panel,
+        zgodne: lista(start) === lista(potem) && lista(z.drukarnia) === lista(potem), odpieta: !!(odpieta && odpieta.niezmierzona) };
+    })()`);
+    const r = raportStart, stopka = /"nr \[ID\]"/.test(fs.readFileSync(szablon, 'utf8'));
+    r.ok = !!(r.start && r.naraz && r.potem) && [r.start, r.naraz, r.potem].every((x) => x.karty > 0 && x.niezmierzone === 0)
+      && r.zgodne && r.filtr && r.panelBezBledu && r.odpieta && (!stopka || r.start.odstep > 0);
+  }
   let stan = '';
   for (let i = 0; folder !== '-' && i < 120; i++) {
     await czekaj(500);
@@ -3101,9 +3130,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     && Menu.getApplicationMenu().items[0].submenu.items.some((i) => i.label === 'Sprawdź aktualizacje…');
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
-    && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
+    && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
