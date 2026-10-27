@@ -1105,6 +1105,12 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const [panelHtml, z] = await Promise.all([raportProjektu(), wykonajZlecenie('raport', { drukarnia: 'tak' }), build(), pokazRaport(true)]);
       const panel = /Nie zmierzono/.test(panelHtml) || !/Drukarnia: tekst/.test(panelHtml);
       await pokazRaport(false);
+      // Przebudowa przy widocznym panelu Raport sama uruchamia jeszcze jeden raport (zbudujTeraz → pokazRaport(true), bez
+      // czekania) – trwa on dalej po Promise.all i do końca ma pusty filtr. Pod obciążeniem (CI, 4 procesy naraz) test
+      // czytał filtr w jego trakcie, a potem ten raport przywracał filtr testu kolejnym blokom. Czekamy, aż kolejki ustaną.
+      for (let r = null, b = null; r !== KOLEJKA_RAPORTU_DRUKARNI || b !== KOLEJKA_BUDOWY;) {
+        r = KOLEJKA_RAPORTU_DRUKARNI; b = KOLEJKA_BUDOWY; await Promise.all([r, b]);
+      }
       try { if (bylo === null) localStorage.removeItem('raportDrukarnia'); else localStorage.setItem('raportDrukarnia', bylo); } catch (e) { /* bez zapisu */ }
       const filtrPo = $('filtr').value; $('filtr').value = ''; applyFilter();
       await KOLEJKA_BUDOWY;
@@ -1241,7 +1247,11 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     // się nie zmienia; „tak” – najdawniej używana zamknięta, nowa otwarta). Potem zamknięcie dodatkowych.
     const puste = [];
     while (projekty.length < LIMIT_ZAKLADEK) { const n = await nowaZakladka(); if (!n) break; puste.push(n); }
-    const limit = { liczba: projekty.length, pasekPlus: await pasek.webContents.executeJavaScript("document.getElementById('nowa').classList.contains('ukryty')") };
+    // Stan paska dochodzi osobnym komunikatem (zakladki:stan) – pod obciążeniem (CI, kilka procesów) jeszcze go nie było.
+    const plusUkryty = () => pasek.webContents.executeJavaScript("document.getElementById('nowa').classList.contains('ukryty')");
+    let pasekPlus = false;
+    for (let i = 0; i < 40 && !(pasekPlus = await plusUkryty()); i++) await czekaj(50);
+    const limit = { liczba: projekty.length, pasekPlus };
     projekty.forEach((x) => { x.zmiany = true; }); TEST.limit = null;
     limit.odmowa = { wynik: await nowaZakladka(), test: TEST.limit, liczba: projekty.length };
     projekty.forEach((x) => { x.zmiany = false; });
