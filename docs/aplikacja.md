@@ -59,7 +59,8 @@ Wersję, nazwę wydania i źródło kodu pokazuje **KarKa → O aplikacji KarKa*
    - przykłady są w edytorze tylko do odczytu.
 
    Szablon nadal możesz edytować w dowolnym innym edytorze tekstu.
-4. **Pasek** nad kartami: **Edytor**, **Historia**, **Raport**, wybór talii w podglądzie i **Eksport obrazków…**. Pod nim wiersz stanu: liczba kart, karty zmienione od ostatniego PDF i zaznaczone karty. Pozostałe polecenia są w menu **Plik** (druk, PDF, eksport do playingcards.io) i **Widok** (odświeżanie, raport).
+4. **Pasek** nad kartami: **Edytor**, **Historia**, **Raport**, wybór talii w podglądzie i **Eksport obrazków…**. Pod nim wiersz stanu: liczba kart, karty zmienione od ostatniego PDF i zaznaczone karty. Pozostałe polecenia są w menu **Plik** (druk, PDF, eksport do playingcards.io) i **Widok** (odświeżanie, raport, **Pokaż rewersy kart**).
+   - **Widok → Pokaż rewersy kart** (od 0.6.5): zamiast awersów podgląd pokazuje rewers każdej karty, w tej samej kolejności, z podpisem „ID · Rewers N” (numer wariantu, gdy talia ma rewersy zależne od karty). Karta bez rewersu ma szare pole „bez rewersu”. To tylko podgląd – druk, eksport i wybór kart działają jak zwykle. Ustawienie nie jest zapamiętywane: nowa zakładka i ponowne wczytanie projektu pokazują awersy.
 5. <a id="okna"></a>**Okna druku i eksportu.** Eksport obrazków (⌘E), druk (⌘P), zapis PDF (⇧⌘S) i pokój playingcards.io otwierają okno z opcjami. Okno **pamięta ostatnie ustawienia osobno dla każdego projektu**. Enter zatwierdza, Esc anuluje.
    - **Obrazki:** rozdzielczość 150 dpi (ekran, playtesty online) albo 300 dpi (druk, drukarnie), format JPG albo PNG (przezroczyste zaokrąglone rogi), które karty, talie, rewersy jako osobne pliki.
    - **Druk i PDF:** układ, linie cięcia, spad, rewersy, **szkic** (bez teł i obrazków, czarny tekst – oszczędza tusz), które karty, talie; przyciski **Drukuj…** i **Zapisz PDF**.
@@ -121,12 +122,12 @@ Wersję, nazwę wydania i źródło kodu pokazuje **KarKa → O aplikacji KarKa*
 | ⌘R | Odśwież karty (automatyczne odświeżanie: **Widok → Odświeżaj automatycznie**) |
 
 - **Eksport obrazków** zapisuje każdą kartę (i rewersy) jako osobny plik JPG albo PNG w folderze `Export` obok szablonu albo folderu `Szablony`.
-  - Nazwy: `NazwaProjektu_NazwaTalii_NumerKarty_NumerKopii.jpg` (albo `.png`), np. `ZlotaWyprawa_Przedmioty_7_2.jpg`; rewers: `ZlotaWyprawa_Przedmioty_rewers.jpg`.
+  - Nazwy: `NazwaProjektu_NazwaTalii_NumerKarty_NumerKopii.jpg` (albo `.png`), np. `ZlotaWyprawa_Przedmioty_7_2.jpg`; rewers: `ZlotaWyprawa_Przedmioty_rewers.jpg`. Rewers zależny od karty (od 0.6.5) – plik na kartę: `ZlotaWyprawa_Przedmioty_7_rewers.jpg` ([opis](komendy.md#rewers-zależny-od-karty-od-061)).
   - Nazwa projektu pochodzi z komendy `PROJEKT = …` w szablonie, a bez niej z nazwy pliku szablonu. Numer karty to kolumna `ID` (gdy jej brak – numer wiersza), a numer kopii liczy się od 1 według kolumny `Ilość`.
   - Polskie znaki i spacje są pomijane (`Karty Wpływu` → `KartyWplywu`).
   - Pliki o tych samych nazwach są nadpisywane, inne pliki w `Export` zostają.
 - **Eksport do playingcards.io** zapisuje nowy pokój (`NazwaProjektu – playingcards.pcio`) w folderze projektu – każda talia jako osobny stos ([opis](playingcards.md)). Stos ma jeden rewers: gdy karty talii mają różne rewersy (kolumny w `[REWERS]`, od 0.6.1), w pokoju jest najczęstszy z nich, a pasek stanu i wynik zlecenia (`ostrzezenia`) mówią o tym („talia X ma 3 różne rewersy – w pokoju użyto najczęstszego”).
-- **Katalog talii** (**Plik → Eksport → Katalog talii (JPG)…**): dla każdej talii obrazek JPG – najpierw rewers (niebieska ramka), potem siatka zmniejszonych awersów z podpisami (ID, nazwa, liczba kopii) – do przeglądu całej talii, instrukcji i dla testerów. Pliki `NazwaProjektu_NazwaTalii.jpg` w `Export/katalog`; obrazek ma najwyżej ok. 2000×2000 px, więc duże talie dzielą się na kilka plików (`_1`, `_2`…). Karty z za długim tekstem mają czerwoną ramkę.
+- **Katalog talii** (**Plik → Eksport → Katalog talii (JPG)…**): dla każdej talii obrazek JPG – najpierw rewers (niebieska ramka; przy rewersach zależnych od karty – każdy wariant z podpisem „Rewers 2 · ×4”, od 0.6.5), potem siatka zmniejszonych awersów z podpisami (ID, nazwa, liczba kopii) – do przeglądu całej talii, instrukcji i dla testerów. Pliki `NazwaProjektu_NazwaTalii.jpg` w `Export/katalog`; obrazek ma najwyżej ok. 2000×2000 px, więc duże talie dzielą się na kilka plików (`_1`, `_2`…). Karty z za długim tekstem mają czerwoną ramkę.
   - Katalog można też zamówić bez klikania – [zlecenie z pliku](#zlecenia-z-pliku) `katalog`.
 - **Przykłady** są tylko do odczytu. Eksport obrazków pyta wtedy o folder. Żeby zmieniać przykład, skopiuj jego folder z repozytorium i otwórz szablon kopii.
 
@@ -140,12 +141,12 @@ Otwarta aplikacja wykonuje polecenia zapisane w plikach – bez klikania. Służ
 
 | Polecenie | Co robi | Klucze |
 |---|---|---|
-| `stan` | talie i karty (ID, nazwa, kopie), karty zmienione i nowe od ostatniego PDF, Uwagi – bez plików | – |
-| `raport` | Raport projektu (powtórzone ID, puste pola, nieużywane kolumny, obrazki poniżej 300 dpi, nieużywane ikony i obrazki) – bez plików | `drukarnia` |
+| `stan` | talie i karty (ID, nazwa, kopie), karty zmienione i nowe od ostatniego PDF, Uwagi – bez plików; od 0.6.5 przy talii `rewersy` (liczba różnych rewersów: wariantów rewersu zależnego, 1 – wspólny, 0 – bez `[REWERS]`), przy karcie `rewersZmieniony` i w wyniku `rewersyZmienione` (karty, którym od ostatniego PDF zmienił się rewers zależny) | – |
+| `raport` | Raport projektu (powtórzone ID, puste pola, nieużywane kolumny, obrazki poniżej 300 dpi, nieużywane ikony i obrazki; od 0.6.5 sekcja „Rewersy zależne od karty” – liczba wariantów i kolumny z `[REWERS]`, których brak w danych – tylko w projektach z takim rewersem) – bez plików | `drukarnia` |
 | `pdf` | jak **Plik → Zapisz PDF**; zapamiętuje wydruk (potem „tylko zmienione” i Porównaj) | `uklad` (a4 / pojedyncze / drukarnia), `ciecie` (znaczniki / nozyczki / oba), `strony`, `rewersy`, `wspolneArkusze`, `szkic`, `spad`, `profil`, `przesuniecieX`, `przesuniecieY`, `talie`, `id`, `tylkoZmienione`, `plik` |
 | `obrazki` | eksport JPG/PNG do `Export/` | `dpi` (150 / 300), `format` (jpg / png), `talie`, `id`, `rewersy` |
 | `pcio` | pokój playingcards.io w folderze projektu (`Projekt – playingcards.pcio`) – stos na każdą talię z wybranymi kartami | `dpi` (150 / 300), `talie`, `id` |
-| `katalog` | katalog talii (JPG) do `.generator/katalog/` | `talie`, `id` |
+| `katalog` | katalog talii (JPG) do `.generator/katalog/`; w wyniku przy talii `rewersy` – liczba kafelków rewersów (od 0.6.5) | `talie`, `id` |
 | `aktualizacja` | sprawdza, czy jest nowa wersja aplikacji; z `instaluj = tak` instaluje ją i uruchamia aplikację ponownie | `instaluj` (domyślnie `nie`), `restart` (domyślnie `tak`) |
 
 - `talie` i `id` to listy po przecinku (`talie = Rośliny, Pogoda`, `id = 1, 7`); wielkość liter i polskie znaki nie mają znaczenia. `rewersy`, `wspolneArkusze` (też `wspolne`; talie na wspólnych arkuszach A4), `szkic`, `tylkoZmienione`: `tak` / `nie`. `strony`: `osobno` / `naprzemian` (też `na przemian`), tylko dla `uklad = drukarnia`. `spad` w mm (0–10), domyślnie 3 (z okna); spad zadeklarowany w szablonie (`KARTA = …, spad=N`) ma pierwszeństwo; `przesuniecieX`/`przesuniecieY` – przesunięcie rewersów w mm (−10…10, plus = w prawo / w dół).

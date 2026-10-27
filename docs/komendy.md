@@ -108,7 +108,9 @@ TEKST = 8, 36, 47, 40, [RewersOpis], wyrównanie=środek, jeśli=[Rodzaj]=dwustr
 ```
 
 - Rewers, który nie używa żadnej kolumny (ani `[_id]`, `[_numer]`, `[_kopia]`), jest wspólny dla talii – dokładnie jak wcześniej. Pola wspólne dla całej talii (`[_liczba]`, `[_wersja]`, `[_talia]`, `[_projekt]`, `[_data]`) i stałe `[=nazwa]` nie robią z rewersu zależnego.
-- Karty o takim samym rewersie dzielą go: w podglądzie każdy **różny** rewers stoi na początku talii z podpisem „Rewers 2 · ×4” (wzór i liczba kart).
+- Karty o takim samym rewersie dzielą go: w podglądzie każdy **różny** rewers stoi na początku talii z podpisem „Rewers 2 · ×4” (wzór i liczba kart). Który rewers dostała która karta, pokazuje **Widok → Pokaż rewersy kart** (od 0.6.5).
+- Eksport obrazków (od 0.6.5): rewers zależny zapisuje się osobno dla każdej karty, obok jej awersu – `Projekt_Talia_<ID>_rewers.jpg` (przy `[_numer]`/`[_kopia]` w rewersie – `Projekt_Talia_<ID>_<kopia>_rewers.jpg`). Wspólny rewers – jak dotąd jeden plik `Projekt_Talia_rewers.jpg`.
+- Katalog talii (od 0.6.5): na początku talii każdy wariant rewersu z podpisem „Rewers 2 · ×4”; przy wyborze kart (`id`) – tylko warianty wybranych kart.
 - Brakująca kolumna daje Uwagę tak jak na awersie.
 - Gradientu (`#fff > #000`) nie da się wpisać w komórkę danych – z kolumny działa jeden kolor albo plik.
 - Druk: na arkuszu A4 i w układzie Drukarnia za każdą kartą idzie jej rewers. playingcards.io – jeden rewers na stos: użyty jest najczęstszy rewers talii, a wynik eksportu zawiera ostrzeżenie.
