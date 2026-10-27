@@ -265,7 +265,7 @@ Opcja wszystkich elementów (`TEKST`, `OBRAZEK`, `IKONA`, `PROSTOKĄT`, `ELIPSA`
 Plik obrazka podany w kolumnie albo wprost, np. `Art/lis.png`. Obsługiwane formaty to PNG, JPG, SVG, GIF i WEBP.
 
 Opcje:
-- `dopasuj=zmieść | wypełnij | rozciągnij`,
+- `dopasuj=zmieść | wypełnij | rozciągnij` – **domyślnie `zmieść`** (cały obraz w ramce, bez przycinania; z `kadr=` domyślnie `wypełnij`),
 - `wyrównanie=lewo | środek | prawo`,
 - `pion=góra | środek | dół`,
 - `kadr=dx dy skala` – ramka z obrazem w środku, jak w InDesignie; `krycie=` i `odbicie=` – patrz [Układ z danych](#układ-z-danych--pozycja-z-kolumn-kadr-krycie-odbicie).
@@ -321,6 +321,7 @@ Spad to pas obrazu poza linią cięcia (zwykle 3 mm z każdej strony), który za
 
 - `KARTA = 63, 88, spad=3` – deklaracja. Od tej chwili `TŁO` z pliku to plik **karty ze spadem** (63 × 88 mm + 3 mm z każdej strony = 69 × 94 mm), rysowany od −spad do szerokość + spad.
 - Obrazki `OBRAZEK` z `dopasuj=wypełnij` albo `rozciągnij` (bez `kadr=` i `obrót=`), które dotykają krawędzi karty, mają ramkę przedłużoną o spad po stronach, których dotykają – plik też ma zawierać spad.
+- **Nakładka ze spadem potrzebuje `dopasuj=wypełnij`** (albo `rozciągnij`). Domyślne `zmieść` nie przedłuża ramki o spad, więc plik ze spadem (np. 69 × 94 mm) zostaje **pomniejszony** do ramki karty (63 × 88 mm) i rozjeżdża się z tłem – w PDF dla drukarni widać to jako przesuniętą kopię krawędzi. Dobrze: `OBRAZEK = 0, 0, 63, 88, Art/ramka.png, dopasuj=wypełnij`. Raport w trybie drukarni i zlecenie `pdf` ostrzegają, gdy obrazek „zmieść” przy krawędzi karty ma plik o proporcjach ramki ze spadem (od 0.6.6).
 - Podgląd, druk A4, obrazki JPG/PNG, katalog i playingcards.io przycinają do linii cięcia (karta ma `overflow: hidden`), więc wyglądają jak dotąd. PDF dla drukarni rysuje tło i obrazki w całości, bez skalowania. Kolorowe `TŁO` i `PROSTOKĄT` działają jak dawniej.
 - Projektowanie: tło prowadź do krawędzi spadu, ważne elementy (tekst, twarze, ikony) trzymaj min. 3 mm od linii cięcia.
 - PDF dla drukarni bierze spad z szablonu (największy zadeklarowany) – ma pierwszeństwo przed oknem i kluczem `spad` zlecenia. Gdy żadna talia nie deklaruje spadu, używa spadu z okna/zlecenia i dorabia go (z ostrzeżeniem); talia ze spadem innym niż w PDF też dostaje ostrzeżenie.
