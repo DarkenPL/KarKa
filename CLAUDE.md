@@ -181,8 +181,8 @@ Od 12.10.2026 kolejka zadań to **issues**: https://github.com/DarkenPL/KarKa/is
 
 Pełna historia: `docs/historia.md`.
 
+- **v0.6.8** – Electron 44.8.0 → 45.0.0 (Chromium 156, Node 24.22): zmiany łamiące zgodność w 45 (preloady z sandboxem, ASAR, `window.open`) sprawdzone – kod bez zmian; pełna aktualizacja (inny Electron). Duże wersje Electrona ręcznie (#101). Szczegóły: `docs/historia.md`.
 - **v0.6.7** – issue #85, etap 1 (#85 zostaje otwarte – profile drukarni w 0.7.0): dwa okna zamiast „Druk i PDF” – **Druk domowy A4…** (⌘P; linie cięcia, wspólne arkusze, rewersy, przesunięcie, szkic; Drukuj… tylko tu) i **PDF dla drukarni…** (⇧⌘S; spad, strony, CMYK, nadruk K100); `OKNA.a4`/`OKNA.drukarnia`, `ustawieniaOkna` (przeniesienie zapamiętanych pól z `USTAWIENIA_OKIEN.druk`), `ustawieniaDruku(uklad)` dla zlecenia `pdf` – pola okna układu (te same klucze i domyślne); `uklad = pojedyncze` tylko w zleceniu, z ostrzeżeniem. Test `oknaDruku`. Szczegóły: `docs/historia.md`.
 - **v0.6.6** – issue #94 (A + C): raport drukarni i zlecenie `pdf` ostrzegają o pliku ze spadem w ramce „zmieść” przy krawędzi karty (`plikiZmiesc`, `spadSzablonu.zmiesc`, ostrzeżenie w `spadDruku`) – dodaj `dopasuj=wypełnij`; `docs/komendy.md` – domyślne `dopasuj=zmieść`, nakładki ze spadem. Rysowanie bez zmian. Szczegóły: `docs/historia.md`.
-- **v0.6.5** – issue #47, dodatki (zamyka #47): **Widok → Pokaż rewersy kart** (klony `rewersKarty` w `#podgladRewersy` poza `#podglad`; `#podglad` chowany wysokością 0, nie `display: none`), eksport obrazków – rewers zależny jako `Projekt_Talia_<ID>_rewers.jpg` (`planEksportuObrazkow`), katalog z wszystkimi wariantami rewersu, `stan` (`rewersy`, `rewersZmieniony`, `rewersyZmienione`), raport – sekcja „Rewersy zależne od karty”. Szczegóły: `docs/historia.md`.
 
 Kolejność i start każdego zadania ustala właściciel – nie zaczynać bez jego sygnału.
