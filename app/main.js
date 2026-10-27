@@ -446,7 +446,7 @@ async function profilDoDruku(profil, { pytaj, folder }) {
   if (pytaj) {
     const o = await dialog.showMessageBox(okno, { type: 'question', buttons: ['Pobierz', 'Anuluj'], defaultId: 0, cancelId: 1,
       message: `Pobrać profil kolorów ${opis.nazwa} z eci.org?`,
-      detail: `Do PDF w CMYK potrzebny jest profil drukarni (paczka ok. ${opis.paczkaMB} MB). Pobierany jest raz i zostaje w danych aplikacji. Możesz też wskazać własny plik .icc w oknie Druk i PDF.` });
+      detail: `Do PDF w CMYK potrzebny jest profil drukarni (paczka ok. ${opis.paczkaMB} MB). Pobierany jest raz i zostaje w danych aplikacji. Możesz też wskazać własny plik .icc w oknie PDF dla drukarni.` });
     if (o.response !== 0) return null;
   }
   try {
@@ -455,7 +455,7 @@ async function profilDoDruku(profil, { pytaj, folder }) {
     return { plik, nazwa: opis.nazwa, klucz: r.brak };
   } finally { if (okno && !okno.isDestroyed()) okno.setProgressBar(-1); }
 }
-// Stan do okna Druk i PDF: Ghostscript (opcja wyszarzona bez niego) i które profile są już pobrane.
+// Stan do okna PDF dla drukarni: Ghostscript (opcja wyszarzona bez niego) i które profile są już pobrane.
 ipcMain.handle('cmyk:stan', () => ({ gs: cmyk.znajdzGs({ odswiez: true }),
   profile: Object.fromEntries(Object.entries(cmyk.PROFILE).map(([k, p]) => [k, { nazwa: p.nazwa, pobrany: !!cmyk.profilLokalny(k, folderProfili()), paczkaMB: p.paczkaMB }])) }));
 ipcMain.handle('cmyk:wybierzProfil', async () => {
@@ -872,8 +872,9 @@ function zbudujMenu() {
         { label: 'Zapisz szablon', accelerator: 'CmdOrCtrl+S', enabled: !!p.szablon && !jestPrzykladem(p.szablon), click: wStronie('window.zapiszSzablon && zapiszSzablon()') },
         { label: 'Historia wersji…', enabled: !!p.folder, click: wStronie('window.pokazHistorie && pokazHistorie(true)') },
         { type: 'separator' },
-        { label: 'Drukuj…', accelerator: 'CmdOrCtrl+P', enabled: !!p.folder, click: wStronie("window.oknoDruku && oknoDruku('drukuj')") },
-        { label: 'Zapisz PDF…', accelerator: 'Shift+CmdOrCtrl+S', enabled: !!p.folder, click: wStronie("window.oknoDruku && oknoDruku('pdf')") },
+        // #85, etap 1 (0.6.7): dwa okna zamiast „Druk i PDF” – każde tylko ze swoimi opcjami.
+        { label: 'Druk domowy A4…', accelerator: 'CmdOrCtrl+P', enabled: !!p.folder, click: wStronie('window.oknoDrukuA4 && oknoDrukuA4()') },
+        { label: 'PDF dla drukarni…', accelerator: 'Shift+CmdOrCtrl+S', enabled: !!p.folder, click: wStronie('window.oknoPdfDrukarni && oknoPdfDrukarni()') },
         {
           label: 'Eksport',
           submenu: [
@@ -1367,8 +1368,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const r = { format: f.querySelector('[name=format]:checked').value, dpi: f.querySelector('[name=dpi]:checked').value, rewersy: f.querySelector('[name=rewersy]').checked };
       document.querySelector('#oknoPrzyciski button').click(); await p; return r; })()`);
     const plik = await js('window.generatorApp.eksportUstawienia()');
-    const druk = await js(`(() => { window.__okno = otworzOkno('druk', 'drukuj'); const f = document.getElementById('oknoForm');
-      return { pola: ['uklad', 'rewersy', 'szkic', 'ktore'].filter((n) => f.querySelector('[name=' + n + ']')).length, domyslny: document.querySelector('#oknoPrzyciski .domyslny').textContent }; })()`);
+    const druk = await js(`(() => { window.__okno = otworzOkno('a4', 'drukuj'); const f = document.getElementById('oknoForm');
+      return { pola: ['ciecie', 'rewersy', 'szkic', 'ktore'].filter((n) => f.querySelector('[name=' + n + ']')).length, domyslny: document.querySelector('#oknoPrzyciski .domyslny').textContent }; })()`);
     await czekaj(300);
     fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-okno.png', (await wc.capturePage()).toPNG());
     await js("document.getElementById('okno').dispatchEvent(new Event('cancel')); window.__okno");
@@ -1376,6 +1377,98 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     okna = { png: png.length, kartyWidok, szer, zapamietane, plik: plik && plik.obrazki, druk };
     okna.ok = png.length === kartyWidok && szer >= szerMin && zapamietane.format === 'png' && zapamietane.dpi === '300' && !zapamietane.rewersy
       && plik && plik.obrazki && plik.obrazki.format === 'png' && druk.pola === 4 && druk.domyslny === 'Drukuj…';
+  }
+  // Okna druku (#85, etap 1, --test-edytor, każdy projekt): „Druk domowy A4…” i „PDF dla drukarni…” – każde tylko ze swoimi
+  // polami, „Drukuj…” tylko w A4; zapamiętane ustawienia dawnego okna „Druk i PDF” przeniesione (każde okno bierze swoje pola);
+  // zapis z okna dopisuje układ i pola do zestawu zlecenia pdf (pola drugiego okna zostają); zlecenie bez ustawień = wartości
+  // domyślne jak do 0.6.6; uklad = pojedyncze – działa z ostrzeżeniem; menu Plik – pozycje i skróty. Zrzuty -okno-a4.png i
+  // -okno-drukarnia.png. Ustawienia okien na końcu jak przed blokiem (także w pliku ustawień projektu).
+  let oknaDruku = null;
+  if (testBloku('oknaDruku')) {
+    const js = (k) => wc.executeJavaScript(k);
+    const ustPrzed = await js('JSON.stringify(USTAWIENIA_OKIEN)');
+    const bledy = [];
+    oknaDruku = { bledy };
+    try {
+      // Zapamiętane ustawienia dawnego okna (0.6.6): układ drukarnia, wszystkie pola inne niż domyślne.
+      const DAWNE = { uklad: 'drukarnia', ciecie: 'oba', wspolne: false, przesuniecieX: 1.5, przesuniecieY: -0.5, szkic: true, spad: 2, strony: 'naprzemian',
+        cmyk: true, profil: 'fogra51', nadrukCzerni: false, rewersy: false, ktore: 'wszystkie', pominTalie: [] };
+      // Domyślne zlecenia bez żadnych ustawień – jak dawnego okna (te same klucze i wartości).
+      oknaDruku.domyslneZlecenia = await js(`(() => { const p = USTAWIENIA_OKIEN; USTAWIENIA_OKIEN = {};
+        try { return opcjeZlecenia('pdf', {}).o; } finally { USTAWIENIA_OKIEN = p; } })()`);
+      const dz = oknaDruku.domyslneZlecenia, OCZ = { uklad: 'a4', ciecie: 'znaczniki', spad: 3, strony: 'osobno', rewersy: true, wspolne: true, przesuniecieX: 0, przesuniecieY: 0, szkic: false, ktore: 'wszystkie', cmyk: false };
+      for (const [k, v] of Object.entries(OCZ)) if (dz[k] !== v) bledy.push(`zlecenie bez ustawień: ${k} = ${JSON.stringify(dz[k])}, oczekiwane ${JSON.stringify(v)}`);
+      await js(`USTAWIENIA_OKIEN = { druk: ${JSON.stringify(DAWNE)} }; odswiezCmyk()`);
+      // Stan otwartego okna: nazwy pól, przyciski, przycisk domyślny, wartości.
+      const POLA = ['uklad', 'ciecie', 'wspolne', 'przesuniecieX', 'przesuniecieY', 'szkic', 'spad', 'strony', 'cmyk', 'profil', 'nadrukCzerni', 'rewersy', 'ktore'];
+      const otworz = (rodzaj) => js(`(() => { window.__okno = otworzOkno('${rodzaj}'); const f = document.getElementById('oknoForm'), q = (n) => f.querySelector('[name=' + n + ']');
+        const zazn = (n) => (f.querySelector('[name=' + n + ']:checked') || {}).value;
+        return { tytul: document.getElementById('oknoTytul').textContent, pola: ${JSON.stringify(POLA)}.filter(q),
+          przyciski: [...document.querySelectorAll('#oknoPrzyciski button')].map((b) => b.textContent), domyslny: document.querySelector('#oknoPrzyciski .domyslny').textContent,
+          ciecie: zazn('ciecie'), wspolne: q('wspolne') && q('wspolne').checked, przesuniecieX: q('przesuniecieX') && q('przesuniecieX').value,
+          szkic: q('szkic') && q('szkic').checked, rewersy: q('rewersy') && q('rewersy').checked, spad: zazn('spad'), spadWylaczony: !!q('spad') && q('spad').disabled,
+          strony: zazn('strony'), profil: q('profil') && q('profil').value, profilWylaczony: !!q('profil') && q('profil').disabled, nadruk: q('nadrukCzerni') && q('nadrukCzerni').checked };
+      })()`);
+      const zrzut = async (nazwa) => { await czekaj(300); fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-okno-' + nazwa + '.png', (await wc.capturePage()).toPNG()); };
+      const klik = (akcja) => js(`(async () => { document.querySelector('#oknoPrzyciski [data-akcja="${akcja}"]').click(); return await window.__okno; })()`);
+      // a) Druk domowy A4
+      const a4 = oknaDruku.a4 = await otworz('a4');
+      await zrzut('a4');
+      if (a4.tytul !== 'Druk domowy A4') bledy.push('a4: tytuł ' + a4.tytul);
+      if (a4.pola.join() !== 'ciecie,wspolne,przesuniecieX,przesuniecieY,szkic,rewersy,ktore') bledy.push('a4: pola ' + a4.pola.join());
+      if (a4.przyciski.join() !== 'Anuluj,Zapisz PDF,Drukuj…' || a4.domyslny !== 'Drukuj…') bledy.push('a4: przyciski ' + a4.przyciski.join() + ' / ' + a4.domyslny);
+      if (a4.ciecie !== 'oba' || a4.wspolne !== false || a4.przesuniecieX !== '1.5' || a4.szkic !== true || a4.rewersy !== false) bledy.push('a4: nie przeniesiono ustawień ' + JSON.stringify(a4));
+      const rA4 = oknaDruku.zapisA4 = await klik('pdf');
+      const poA4 = await js('({ a4: USTAWIENIA_OKIEN.a4, druk: USTAWIENIA_OKIEN.druk, zlecenie: opcjeZlecenia("pdf", {}).o })');
+      if (!rA4 || rA4.akcja !== 'pdf' || rA4.opcje.uklad !== 'a4' || rA4.opcje.ciecie !== 'oba') bledy.push('a4: wynik okna ' + JSON.stringify(rA4));
+      if (!poA4.a4 || 'uklad' in poA4.a4 || 'spad' in poA4.a4 || poA4.a4.ciecie !== 'oba') bledy.push('a4: zapamiętane ' + JSON.stringify(poA4.a4));
+      if (poA4.druk.uklad !== 'a4' || poA4.druk.spad !== 2 || poA4.druk.strony !== 'naprzemian' || poA4.zlecenie.uklad !== 'a4' || poA4.zlecenie.ciecie !== 'oba') bledy.push('a4: zestaw zlecenia ' + JSON.stringify(poA4.druk));
+      // b) PDF dla drukarni
+      const dr = oknaDruku.drukarnia = await otworz('drukarnia');
+      await zrzut('drukarnia');
+      const spadSzablonu = await js("[...document.querySelectorAll('#podglad .talia')].every((t) => spadTalii(t.dataset.talia))");
+      if (dr.tytul !== 'PDF dla drukarni') bledy.push('drukarnia: tytuł ' + dr.tytul);
+      if (dr.pola.join() !== 'spad,strony,cmyk,profil,nadrukCzerni,rewersy,ktore') bledy.push('drukarnia: pola ' + dr.pola.join());
+      if (dr.przyciski.join() !== 'Anuluj,Zapisz PDF' || dr.domyslny !== 'Zapisz PDF') bledy.push('drukarnia: przyciski ' + dr.przyciski.join());
+      if (dr.strony !== 'naprzemian' || dr.rewersy !== false || dr.nadruk !== false || (!spadSzablonu && dr.spad !== '2') || (spadSzablonu && !dr.spadWylaczony)
+        || (!dr.profilWylaczony && dr.profil !== 'fogra51')) bledy.push('drukarnia: nie przeniesiono ustawień ' + JSON.stringify(dr));
+      const rDr = oknaDruku.zapisDrukarnia = await klik('pdf');
+      const poDr = await js('({ druk: USTAWIENIA_OKIEN.druk, drukarnia: USTAWIENIA_OKIEN.drukarnia })');
+      if (!rDr || rDr.opcje.uklad !== 'drukarnia' || rDr.opcje.strony !== 'naprzemian') bledy.push('drukarnia: wynik okna ' + JSON.stringify(rDr));
+      if (!poDr.drukarnia || 'ciecie' in poDr.drukarnia || 'szkic' in poDr.drukarnia) bledy.push('drukarnia: zapamiętane ' + JSON.stringify(poDr.drukarnia));
+      if (poDr.druk.uklad !== 'drukarnia' || poDr.druk.ciecie !== 'oba' || poDr.druk.strony !== 'naprzemian') bledy.push('drukarnia: zestaw zlecenia ' + JSON.stringify(poDr.druk));
+      // c) Okno z własnymi ustawieniami nie bierze już pól z zestawu zlecenia.
+      const wlasne = await js(`(() => { USTAWIENIA_OKIEN.druk = { ...USTAWIENIA_OKIEN.druk, ciecie: 'znaczniki' }; return ustawieniaOkna('a4').ciecie; })()`);
+      if (wlasne !== 'oba') bledy.push('a4: własne ustawienia nadpisane zestawem zlecenia: ' + wlasne);
+      // d) Zlecenie pdf: uklad = pojedyncze działa (zgodność) z ostrzeżeniem; inne układy bez niego.
+      oknaDruku.pojedyncze = await js(`(() => { const z = (u) => opcjeZlecenia('pdf', { uklad: u });
+        const p = z('pojedyncze'), o = z('osobne'), d = z('drukarnia'), a = z('a4'), jest = (x) => x.ostrzezenia.some((t) => /pojedyncze.*przestarzały/.test(t));
+        return { uklad: p.o.uklad, ostrzezenie: jest(p), alias: o.o.uklad === 'pojedyncze' && jest(o), inne: jest(d) || jest(a) }; })()`);
+      const pj = oknaDruku.pojedyncze;
+      if (pj.uklad !== 'pojedyncze' || !pj.ostrzezenie || !pj.alias || pj.inne) bledy.push('zlecenie pojedyncze: ' + JSON.stringify(pj));
+      // e) Menu Plik: dwie pozycje ze skrótami, bez dawnych „Drukuj…” / „Zapisz PDF…”; pozycja otwiera swoje okno.
+      const plikM = Menu.getApplicationMenu().items.find((i) => i.label === 'Plik').submenu.items;
+      const poz = (l) => plikM.find((i) => i.label === l);
+      oknaDruku.menu = { a4: poz('Druk domowy A4…') && poz('Druk domowy A4…').accelerator, drukarnia: poz('PDF dla drukarni…') && poz('PDF dla drukarni…').accelerator,
+        dawne: plikM.some((i) => i.label === 'Drukuj…' || i.label === 'Zapisz PDF…') };
+      for (const [l, rodzaj] of [['Druk domowy A4…', 'Druk domowy A4'], ['PDF dla drukarni…', 'PDF dla drukarni']]) {
+        if (!poz(l)) continue;
+        poz(l).click();
+        let t = null;
+        for (let i = 0; i < 30 && !(t && t.otwarte); i++) { await czekaj(200); t = await js("({ otwarte: document.getElementById('okno').open, tytul: document.getElementById('oknoTytul').textContent })"); }
+        oknaDruku.menu[rodzaj] = t;
+        if (!t.otwarte || t.tytul !== rodzaj) bledy.push('menu: ' + l + ' → ' + JSON.stringify(t));
+        await js("document.getElementById('okno').dispatchEvent(new Event('cancel'))");
+        await czekaj(100);
+      }
+      const m = oknaDruku.menu;
+      if (m.a4 !== 'CmdOrCtrl+P' || m.drukarnia !== 'Shift+CmdOrCtrl+S' || m.dawne) bledy.push('menu: ' + JSON.stringify(m));
+    } catch (e) { bledy.push('wyjątek: ' + ((e && e.message) || e)); }
+    finally {
+      await js(`(async () => { if (document.getElementById('okno').open) document.getElementById('okno').dispatchEvent(new Event('cancel'));
+        USTAWIENIA_OKIEN = ${ustPrzed}; try { await window.generatorApp.zapiszEksportUstawienia(USTAWIENIA_OKIEN); } catch (e) {} })()`);
+    }
+    oknaDruku.ok = !bledy.length;
   }
   // Drukarnia (--test-edytor): strona na kopię (awers, rewers…), strona = karta + 2 × spad.
   let drukarnia = null;
@@ -1466,17 +1559,18 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     drukarniaPdf.bezRewersow = await przebieg('bez-rewersow', { spad: 3, strony: 'osobno', rewersy: false }, sp(3), [o.karty], o.szer + 2 * sp(3), o.wys + 2 * sp(3));
     // d) okno Druk i PDF: domyślnie spad 3 i strony „osobno”; zapamiętany spad 2,5 jako trzecia pozycja.
     drukarniaPdf.okno = await js(`(async () => {
-      const przed = USTAWIENIA_OKIEN.druk, f = () => document.getElementById('oknoForm');
+      const przed = USTAWIENIA_OKIEN.druk, przedD = USTAWIENIA_OKIEN.drukarnia, f = () => document.getElementById('oknoForm');
       const stan = async (ust) => {
-        if (ust) USTAWIENIA_OKIEN.druk = ust; else delete USTAWIENIA_OKIEN.druk;
-        const p = otworzOkno('druk');
+        if (ust) USTAWIENIA_OKIEN.drukarnia = ust; else delete USTAWIENIA_OKIEN.drukarnia;
+        delete USTAWIENIA_OKIEN.druk;
+        const p = otworzOkno('drukarnia');
         const r = { spady: [...f().querySelectorAll('[name=spad]')].map((x) => x.value), spad: (f().querySelector('[name=spad]:checked') || {}).value,
           strony: [...f().querySelectorAll('[name=strony]')].map((x) => x.value), stronyWybrane: (f().querySelector('[name=strony]:checked') || {}).value };
         document.getElementById('okno').dispatchEvent(new Event('cancel')); await p;
         return r;
       };
       try { return { domyslnie: await stan(null), zapamietane: await stan({ spad: 2.5 }) }; }
-      finally { if (przed) USTAWIENIA_OKIEN.druk = przed; else delete USTAWIENIA_OKIEN.druk; }
+      finally { if (przed) USTAWIENIA_OKIEN.druk = przed; else delete USTAWIENIA_OKIEN.druk; if (przedD) USTAWIENIA_OKIEN.drukarnia = przedD; else delete USTAWIENIA_OKIEN.drukarnia; }
     })()`);
     const ow = drukarniaPdf.okno;
     drukarniaPdf.okno.ok = ow.domyslnie.spad === '3' && ow.domyslnie.spady.join() === '3,2' && ow.domyslnie.strony.join() === 'osobno,naprzemian' && ow.domyslnie.stronyWybrane === 'osobno'
@@ -1681,8 +1775,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         if (!zSpadem.length && (plan.spad !== 2 || plan.spadZSzablonu || plan.bezSpadu.length !== talie.length || plan.ostrzezenia.length !== 1 || !/nie deklaruje spadu/.test(plan.ostrzezenia[0]))) b.push('plan bez deklaracji ' + JSON.stringify(r.plan));
         if (zSpadem.length && (plan.spad !== Math.max(...zSpadem.map(spadTalii)) || !plan.spadZSzablonu || plan.bezSpadu.length !== bez.length)) b.push('plan z deklaracją ' + JSON.stringify(r.plan));
         buildPrint({ uklad: 'a4', karty });
-        // okno Druk i PDF: ostrzeżenie przy braku deklaracji, przy pełnej deklaracji pole spadu nieaktywne
-        const pOkno = otworzOkno('druk'), f = document.getElementById('oknoForm');
+        // okno PDF dla drukarni: ostrzeżenie przy braku deklaracji, przy pełnej deklaracji pole spadu nieaktywne
+        const pOkno = otworzOkno('drukarnia'), f = document.getElementById('oknoForm');
         r.okno = { ostrzezenie: !!f.querySelector('.ostrzezenie-spadu'), wylaczone: [...f.querySelectorAll('[name=spad]')].every((x) => x.disabled), zSzablonu: /Spad z szablonu/.test(f.innerHTML),
           zaznaczony: (f.querySelector('[name=spad]:checked') || {}).value };
         document.getElementById('okno').dispatchEvent(new Event('cancel')); await pOkno;
@@ -1782,18 +1876,18 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       cmykTest = { gs: gs.wersja, profil: icc };
       // a) okno: pole cmyk włączone i zaznaczone, profile fogra39 / fogra51 / „inny plik”.
       cmykTest.okno = await js(`(async () => {
-        const przed = USTAWIENIA_OKIEN.druk, f = () => document.getElementById('oknoForm');
-        delete USTAWIENIA_OKIEN.druk;
+        const przed = USTAWIENIA_OKIEN.druk, przedD = USTAWIENIA_OKIEN.drukarnia, f = () => document.getElementById('oknoForm');
+        delete USTAWIENIA_OKIEN.druk; delete USTAWIENIA_OKIEN.drukarnia;
         try {
           const stan = await odswiezCmyk();
-          const p = otworzOkno('druk');
+          const p = otworzOkno('drukarnia');
           const c = f().querySelector('[name=cmyk]'), s = f().querySelector('[name=profil]'), n = f().querySelector('[name=nadrukCzerni]');
           const r = { gs: !!(stan && stan.gs && stan.gs.ok), cmyk: !!c, wlaczony: !!c && !c.disabled, zaznaczony: !!c && c.checked,
             profil: !!s && !s.disabled, opcje: s ? [...s.options].map((x) => x.value) : [], wybrany: s ? s.value : null,
             nadruk: !!n && !n.disabled && n.checked };
           document.getElementById('okno').dispatchEvent(new Event('cancel')); await p;
           return r;
-        } finally { if (przed) USTAWIENIA_OKIEN.druk = przed; else delete USTAWIENIA_OKIEN.druk; }
+        } finally { if (przed) USTAWIENIA_OKIEN.druk = przed; else delete USTAWIENIA_OKIEN.druk; if (przedD) USTAWIENIA_OKIEN.drukarnia = przedD; else delete USTAWIENIA_OKIEN.drukarnia; }
       })()`);
       const ow = cmykTest.okno;
       ow.ok = ow.gs && ow.cmyk && ow.wlaczony && ow.zaznaczony && ow.profil && ow.opcje.join() === 'fogra39,fogra51,__inny' && ow.wybrany === 'fogra39' && ow.nadruk;
@@ -2842,10 +2936,10 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const menuOk = menu.includes('Plik') && menu.includes('Widok') && !!plik && plik.submenu.items.some((i) => i.label === 'Zapisz szablon')
     && Menu.getApplicationMenu().items[0].submenu.items.some((i) => i.label === 'Sprawdź aktualizacje…');
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
-    && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
+    && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
     && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

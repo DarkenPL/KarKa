@@ -62,10 +62,11 @@ body { margin: 0; font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", 
 .okno { border: 1px solid #c9c2b8; border-radius: 10px; padding: 18px 22px; min-width: 380px; max-width: 560px; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
 .okno::backdrop { background: rgba(40,35,30,.25); }
 .okno h3 { margin: 0 0 12px; font-size: 16px; }
-.okno fieldset { border: 0; padding: 0; margin: 0 0 12px; }
+.okno fieldset { border: 0; padding: 0; margin: 0 0 12px; min-width: 0; }
 .okno legend { font-weight: 600; font-size: 13px; margin-bottom: 4px; padding: 0; }
 .okno fieldset label { display: flex; margin: 3px 0; font-size: 13px; }
 .okno .opis { color: #8a8378; font-size: 12px; }
+.okno fieldset label select { flex: 1 1 auto; min-width: 0; max-width: 100%; }   /* długa nazwa profilu – bez poziomego przewijania okna */
 .okno .talie { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .okno-przyciski { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 button, select { font: inherit; padding: 6px 12px; border: 1px solid #c9c2b8; border-radius: 6px; background: #fff; cursor: pointer; }
@@ -1767,10 +1768,9 @@ async function sekcjeDrukarni(lista) {
   lista('Drukarnia: „prawie czerń” zamiast #000', r.czern.map((x) =>
     `<b>${esc(x.kolor)}</b> (jasność ${x.jasnosc}) – ${esc(x.rodzaj)}: ${ileKart(x.karty)}. Po konwersji do CMYK wyjdzie czerń czterokolorowa – drukarnie chcą tekstu i małych ikon w czystej czerni (K100): wpisz #000`),
     'czarne teksty, obrysy i ikony są w #000');
-  // Nadruk czerni K100 (#92) – ustawienie z okna Druk i PDF (dotyczy PDF CMYK; zlecenie pdf: klucz nadrukczerni).
-  const ud = USTAWIENIA_OKIEN.druk || {};
-  r.nadrukCzerni = ud.nadrukCzerni !== false;
-  lista('Drukarnia: nadruk czarnego tekstu (K100)', r.nadrukCzerni ? [] : ['Nadruk czerni wyłączony – w PDF CMYK czarny tekst #000 wycina tło do bieli papieru (na kolorowym tle litery wyjdą jaśniejsze, a przy niedopasowaniu pasowania wokół liter pokaże się biały papier). Włącz „Nadruk czarnego tekstu” w oknie Druk i PDF albo poproś drukarnię o nadruk czerni w RIP-ie'],
+  // Nadruk czerni K100 (#92) – ustawienie z okna PDF dla drukarni (dotyczy PDF CMYK; zlecenie pdf: klucz nadrukczerni).
+  r.nadrukCzerni = ustawieniaOkna('drukarnia').nadrukCzerni !== false;
+  lista('Drukarnia: nadruk czarnego tekstu (K100)', r.nadrukCzerni ? [] : ['Nadruk czerni wyłączony – w PDF CMYK czarny tekst #000 wycina tło do bieli papieru (na kolorowym tle litery wyjdą jaśniejsze, a przy niedopasowaniu pasowania wokół liter pokaże się biały papier). Włącz „Nadruk czarnego tekstu” w oknie PDF dla drukarni albo poproś drukarnię o nadruk czerni w RIP-ie'],
     'włączony – w PDF CMYK czarny tekst #000 (K100) jest nadrukowany na tło (prostokąty, linie i obrazki – bez nadruku)');
   const RADA = {
     czarny: 'czarna ramka – drukarnia zaleca „border black” C40 M0 Y0 K100',
@@ -2366,7 +2366,8 @@ function kartaZeSpadem(k, w, h, s) {
   return c;
 }
 
-// o: { uklad: 'a4' | 'pojedyncze' | 'drukarnia', ciecie, spad, strony, rewersy, wspolne, szkic, karty } – z okna Druk / PDF
+// o: { uklad: 'a4' | 'pojedyncze' | 'drukarnia', ciecie, spad, strony, rewersy, wspolne, szkic, karty } – z okien druku
+// („Druk domowy A4”, „PDF dla drukarni”) albo zlecenia pdf (pojedyncze – tylko zlecenie, dla zgodności)
 // (domyślnie wszystkie karty, A4, z rewersami). Zwraca plan druku (PLAN_DRUKU) – dla układu Drukarnia
 // main.js ustawia według niego dokładny rozmiar stron, TrimBox i dzieli PDF na pliki (drukarnia.js):
 // { szer, wys, spad (mm), pliki: [''] | ['awersy', 'rewersy'], strony: [{ plik, ciecie: [x, y, w, h] }] }.
@@ -2805,7 +2806,7 @@ const KLUCZE_ZLECEN = {
   pcio: ['dpi', 'talie', 'id'],
 };
 const ALIASY_ZLECEN = { talia: 'talie', rewers: 'rewersy', zmienione: 'tylkozmienione', rozdzielczosc: 'dpi', wspolne: 'wspolnearkusze', nadruk: 'nadrukczerni' };
-const OKNO_ZLECENIA = { pdf: 'druk', obrazki: 'obrazki', pcio: 'pcio' };
+const OKNO_ZLECENIA = { obrazki: 'obrazki', pcio: 'pcio' };     // pdf – ustawieniaDruku()
 const nazwyTalii = () => [...$('podglad').querySelectorAll('.talia')].map((s) => s.dataset.talia);
 
 function opcjeZlecenia(polecenie, surowe = {}) {
@@ -2818,7 +2819,7 @@ function opcjeZlecenia(polecenie, surowe = {}) {
     v[k] = String(wart).trim();
   }
   const okno = OKNO_ZLECENIA[polecenie];
-  const o = okno ? { ...OKNA[okno].domyslne, ...(USTAWIENIA_OKIEN[okno] || {}) } : {};
+  const o = polecenie === 'pdf' ? ustawieniaDruku() : okno ? { ...OKNA[okno].domyslne, ...(USTAWIENIA_OKIEN[okno] || {}) } : {};
   const lista = (x) => x.split(',').map((y) => y.trim()).filter(Boolean);
   const tak = (k) => {
     const x = plain(v[k]);
@@ -2875,6 +2876,9 @@ function opcjeZlecenia(polecenie, surowe = {}) {
       if (!o.cmyk) ostrzezenia.push('nadrukczerni: działa tylko w PDF CMYK (z kluczem profil) – pominięty');
     }
   }
+  // „Każda karta na osobnej stronie” (#85: od 0.6.7 bez pozycji w oknach) – działa dla zgodności, z ostrzeżeniem.
+  if (polecenie === 'pdf' && o.uklad === 'pojedyncze')
+    ostrzezenia.push('uklad = pojedyncze (każda karta na osobnej stronie) jest przestarzały – od 0.6.7 nie ma go w oknach i może zniknąć w kolejnej wersji; działa jak dotąd. Zamiast niego: uklad = drukarnia, strony = naprzemian, spad = 0 (spad zadeklarowany w szablonie ma pierwszeństwo)');
   if (polecenie === 'obrazki') o.ktore = 'wszystkie';
   if (bledy.length) throw new Error(bledy.join('; '));
   return { o, ostrzezenia };
@@ -3277,7 +3281,7 @@ $('edytorPrzycisk').onclick = () => przelaczEdytor();
 const APP = window.generatorApp || null;
 
 // Zapis PDF wprost do pliku (tylko w aplikacji) – wydruk w dokładnym rozmiarze, bez okna drukowania.
-// o: { uklad, rewersy, szkic, ktore, pominTalie } – z okna Druk / PDF.
+// o: { uklad, rewersy, szkic, ktore, pominTalie } – z okna druku albo zlecenia pdf.
 async function zapiszPdf(o = {}) {
   const karty = kartyEksportu(o);
   if (!karty.length) { status('Brak kart do PDF – sprawdź wybór kart i talii.'); return; }
@@ -3310,7 +3314,7 @@ async function zapiszPdf(o = {}) {
   }
 }
 window.zapiszPdf = zapiszPdf;
-// Ghostscript i pobrane profile (main: cmyk:stan) – odświeżane przy każdym otwarciu okna Druk i PDF.
+// Ghostscript i pobrane profile (main: cmyk:stan) – odświeżane przy każdym otwarciu okna PDF dla drukarni.
 let CMYK_STAN = null, OSTATNI_CMYK = null;
 async function odswiezCmyk() {
   try { CMYK_STAN = await APP.cmykStan(); } catch (e) { CMYK_STAN = null; }
@@ -3320,15 +3324,27 @@ async function odswiezCmyk() {
 // ── Okna druku i eksportu ────────────────────────────────────────────────────
 // Jedno okno dialogowe z zestawem pól zależnym od rodzaju. Ostatnie ustawienia są zapamiętywane
 // osobno dla każdego projektu (dane aplikacji: eksport/<szablon>.json). Enter = przycisk domyślny, Esc = anuluj.
+// Druk (#85, etap 1, od 0.6.7): dwa okna zamiast jednego „Druk i PDF” – „Druk domowy A4…” (a4) i „PDF dla drukarni…”
+// (drukarnia), każde tylko ze swoimi polami. USTAWIENIA_OKIEN.druk zostaje jako zestaw zlecenia pdf (brak klucza =
+// ostatnie ustawienie z okna): zapis z okna druku dopisuje tam swoje pola i uklad. Okno bez własnych ustawień bierze
+// swoje pola z USTAWIENIA_OKIEN.druk (zapamiętane dawnego okna – ustawieniaOkna).
 let USTAWIENIA_OKIEN = {};
+// Wartości domyślne zlecenia pdf – jak dawnego okna „Druk i PDF” (te same klucze i wartości co do 0.6.6).
+const DRUK_DOMYSLNE = { uklad: 'a4', ciecie: 'znaczniki', spad: SPAD_DRUKARNI, strony: 'osobno', cmyk: true, profil: 'fogra39', nadrukCzerni: true, rewersy: true, wspolne: true, przesuniecieX: 0, przesuniecieY: 0, szkic: false, ktore: 'wszystkie', pominTalie: [] };
+const wybierzKlucze = (o, klucze) => Object.fromEntries(klucze.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
 const OKNA = {
   obrazki: { tytul: 'Eksport obrazków', pola: ['dpi', 'format', 'ktore', 'talie', 'rewersy'],
     domyslne: { dpi: 150, format: 'jpg', ktore: 'wszystkie', rewersy: true, pominTalie: [] },
     przyciski: [['ok', 'Eksportuj']],
     opis: 'Każda karta jako osobny plik w folderze Export projektu.' },
-  druk: { tytul: 'Druk i PDF', pola: ['uklad', 'ciecie', 'spad', 'strony', 'cmyk', 'rewersy', 'wspolne', 'przesuniecie', 'szkic', 'ktore', 'talie'],
-    domyslne: { uklad: 'a4', ciecie: 'znaczniki', spad: SPAD_DRUKARNI, strony: 'osobno', cmyk: true, profil: 'fogra39', nadrukCzerni: true, rewersy: true, wspolne: true, przesuniecieX: 0, przesuniecieY: 0, szkic: false, ktore: 'wszystkie', pominTalie: [] },
-    przyciski: [['drukuj', 'Drukuj…'], ['pdf', 'Zapisz PDF']] },
+  a4: { tytul: 'Druk domowy A4', uklad: 'a4', pola: ['ciecie', 'wspolne', 'rewersy', 'przesuniecie', 'szkic', 'ktore', 'talie'],
+    domyslne: wybierzKlucze(DRUK_DOMYSLNE, ['ciecie', 'wspolne', 'rewersy', 'przesuniecieX', 'przesuniecieY', 'szkic', 'ktore', 'pominTalie']),
+    przyciski: [['pdf', 'Zapisz PDF'], ['drukuj', 'Drukuj…']],
+    opis: 'Arkusze A4 do wydruku na własnej drukarce: karty 1:1 do wycięcia, ze znacznikami albo liniami cięcia.' },
+  drukarnia: { tytul: 'PDF dla drukarni', uklad: 'drukarnia', pola: ['spad', 'rewersy', 'strony', 'cmyk', 'ktore', 'talie'],
+    domyslne: wybierzKlucze(DRUK_DOMYSLNE, ['spad', 'rewersy', 'strony', 'cmyk', 'profil', 'nadrukCzerni', 'ktore', 'pominTalie']),
+    przyciski: [['pdf', 'Zapisz PDF']],
+    opis: 'Plik dla drukarni: strona na kopię karty, ze spadem, bez znaczników cięcia, z TrimBox.' },
   katalog: { tytul: 'Katalog talii', pola: ['talie'], domyslne: { pominTalie: [] },
     przyciski: [['ok', 'Zapisz katalog']],
     opis: 'Każda talia jako obrazek JPG: rewers, a po nim zmniejszone awersy z podpisami (ID, nazwa, liczba kopii) – do przeglądu, instrukcji i dla testerów. Pliki w folderze Export/katalog projektu.' },
@@ -3346,13 +3362,11 @@ function poleOkna(nazwa, rodzaj, u) {
     case 'dpi': return radio('Rozdzielczość', 'dpi', [[150, '150 dpi <span class="opis">– ekran, playtesty online (karta 63×88 mm ≈ 372×520 px)</span>'],
       [300, '300 dpi <span class="opis">– druk, drukarnie (≈ 744×1039 px)</span>']]);
     case 'format': return radio('Format', 'format', [['jpg', 'JPG <span class="opis">– mniejsze pliki, rogi białe</span>'], ['png', 'PNG <span class="opis">– przezroczyste zaokrąglone rogi</span>']]);
-    case 'uklad': return radio('Układ', 'uklad', [['a4', 'A4 ze znacznikami cięcia (karty 1:1)'], ['pojedyncze', 'Każda karta na osobnej stronie'],
-      ['drukarnia', 'Drukarnia <span class="opis">– strona na kopię, ze spadem, bez znaczników, z TrimBox</span>']]);
-    case 'ciecie': return radio('Linie cięcia <span class="opis">(układ A4)</span>', 'ciecie', [['znaczniki', 'Znaczniki na marginesie <span class="opis">– gilotyna, nóż</span>'],
+    case 'ciecie': return radio('Linie cięcia', 'ciecie', [['znaczniki', 'Znaczniki na marginesie <span class="opis">– gilotyna, nóż</span>'],
       ['nozyczki', 'Przerywane linie wzdłuż kart <span class="opis">– nożyczki</span>'], ['oba', 'Jedno i drugie']]);
     case 'przesuniecie': {
       const pole = (n, t) => `${t} <input type="number" name="${n}" min="-10" max="10" step="0.1" value="${esc(u[n] ?? 0)}" style="width:4.5em"> mm`;
-      return `<fieldset><legend>Przesunięcie rewersów <span class="opis">(układ A4, druk dwustronny)</span></legend><label>${pole('przesuniecieX', 'w prawo')}</label> <label>${pole('przesuniecieY', 'w dół')}</label>` +
+      return `<fieldset><legend>Przesunięcie rewersów <span class="opis">(druk dwustronny)</span></legend><label>${pole('przesuniecieX', 'w prawo')}</label> <label>${pole('przesuniecieY', 'w dół')}</label>` +
         '<div class="opis">Gdy po wydruku rewersy są przesunięte względem awersów, wpisz korektę: np. rewers 1 mm za bardzo w prawo → „w prawo” −1.</div></fieldset>';
     }
     case 'spad': {
@@ -3366,7 +3380,7 @@ function poleOkna(nazwa, rodzaj, u) {
       // Pełna deklaracja: wybór nieaktywny i zaznaczony na spadzie z szablonu (nie na zapamiętanym).
       const sSz = zad.length ? Math.max(...zad) : null;
       if (wszystkie && !opcje.some(([v]) => +v === sSz)) opcje.push([sSz, mmTxt(sSz) + ' <span class="opis">– z szablonu</span>']);
-      let pole = radio('Spad <span class="opis">(układ Drukarnia) – tło i elementy przy krawędzi wychodzą poza linię cięcia</span>', 'spad',
+      let pole = radio('Spad <span class="opis">– tło i elementy przy krawędzi wychodzą poza linię cięcia</span>', 'spad',
         opcje.map(([v, t]) => [v, t, wszystkie]));
       if (wszystkie) pole = pole.replace(/ checked/g, '').replace(`value="${sSz}"`, `value="${sSz}" checked`);
       const info = wszystkie ? `<div class="opis">Spad z szablonu: ${mmTxt(Math.max(...zad))} – tło i obrazki przy krawędzi to pliki ze spadem.</div>`
@@ -3375,7 +3389,7 @@ function poleOkna(nazwa, rodzaj, u) {
           (zad.length ? ` Talie ze spadem w szablonie mają ${mmTxt(Math.max(...zad))} i ten spad ma cały PDF.` : '') + '</div>' : '';
       return pole.replace(/<\/fieldset>$/, info + '</fieldset>');
     }
-    case 'strony': return radio('Strony <span class="opis">(układ Drukarnia)</span>', 'strony', [
+    case 'strony': return radio('Strony', 'strony', [
       ['osobno', 'Awersy i rewersy osobno <span class="opis">– plik awersów (karta na stronę), wspólny rewers na ostatniej stronie; różne rewersy → drugi plik: strona N = rewers awersu N</span>'],
       ['naprzemian', 'Na przemian <span class="opis">– awers, rewers, awers… w jednym pliku</span>']]);
     case 'cmyk': {
@@ -3384,8 +3398,8 @@ function poleOkna(nazwa, rodzaj, u) {
       const opcja = (v, t) => `<option value="${esc(v)}"${String(u.profil) === v ? ' selected' : ''}>${esc(t)}</option>`;
       const zEci = (k, t) => opcja(k, t + (pr[k] && !pr[k].pobrany ? ` – pobierze się z eci.org (${pr[k].paczkaMB} MB)` : ''));
       const wlasny = u.profil && !['fogra39', 'fogra51'].includes(u.profil) ? opcja(u.profil, 'plik: ' + String(u.profil).split('/').pop()) : '';
-      return `<fieldset class="pole-cmyk"><legend>Kolory <span class="opis">(układ Drukarnia)</span></legend>` +
-        `<label><input type="checkbox" name="cmyk"${jest && u.cmyk ? ' checked' : ''}${jest ? '' : ' disabled'}> Druk w drukarni (CMYK, Fogra39) ` +
+      return `<fieldset class="pole-cmyk"><legend>Kolory</legend>` +
+        `<label><input type="checkbox" name="cmyk"${jest && u.cmyk ? ' checked' : ''}${jest ? '' : ' disabled'}> Druk w drukarni (CMYK) ` +
         `<span class="opis">– konwersja Ghostscriptem; czarny tekst i ikony jako czysta czerń K100</span></label>` +
         (jest ? '' : `<div class="opis">${esc((gs && gs.powod) || 'Brak Ghostscripta. Zainstaluj: brew install ghostscript')}</div>`) +
         `<label>Profil <select name="profil"${jest ? '' : ' disabled'}>${zEci('fogra39', 'ISO Coated v2 (ECI) – Fogra39 (domyślny)')}${zEci('fogra51', 'PSO Coated v3 – Fogra51')}${wlasny}` +
@@ -3393,8 +3407,11 @@ function poleOkna(nazwa, rodzaj, u) {
         `<label><input type="checkbox" name="nadrukCzerni"${u.nadrukCzerni !== false ? ' checked' : ''}${jest ? '' : ' disabled'}> Nadruk czarnego tekstu (K100) ` +
         `<span class="opis">– litery w #000 nadrukowane na tło, bez wycinania (jak w InDesignie); prostokąty, linie i obrazki bez zmian</span></label></fieldset>`;
     }
-    case 'rewersy': return pole('rewersy', rodzaj === 'druk' ? 'Rewersy <span class="opis">– po każdym arkuszu kart arkusz rewersów (druk dwustronny)</span>' : 'Rewersy talii <span class="opis">– osobne pliki</span>');
-    case 'wspolne': return pole('wspolne', 'Talie na wspólnych arkuszach <span class="opis">(układ A4) – karty wszystkich talii ciągiem, bez pustych miejsc między taliami; arkusz rewersów składany miejsce po miejscu (lustro do druku dwustronnego, odwracanie wzdłuż dłuższej krawędzi)</span>');
+    case 'rewersy': return pole('rewersy', {
+      a4: 'Rewersy <span class="opis">– po każdym arkuszu kart arkusz rewersów (druk dwustronny)</span>',
+      drukarnia: 'Rewersy <span class="opis">– strony rewersów; ich miejsce wybierasz w „Strony”</span>',
+    }[rodzaj] || 'Rewersy talii <span class="opis">– osobne pliki</span>');
+    case 'wspolne': return pole('wspolne', 'Talie na wspólnych arkuszach <span class="opis">– karty wszystkich talii ciągiem, bez pustych miejsc między taliami; arkusz rewersów składany miejsce po miejscu (lustro do druku dwustronnego, odwracanie wzdłuż dłuższej krawędzi)</span>');
     case 'szkic': return pole('szkic', 'Szkic <span class="opis">– bez teł i obrazków, tekst czarny (oszczędza tusz)</span>');
     case 'ktore': {
       const z = ile('wybrana'), zm = ODCISKI ? ile('zmieniona') + ile('nowa') : 0;
@@ -3411,10 +3428,19 @@ function poleOkna(nazwa, rodzaj, u) {
   }
   return '';
 }
+// Ustawienia okna: domyślne ← zapamiętane. Okno druku (a4 / drukarnia) bez własnych zapamiętanych ustawień bierze
+// swoje pola z USTAWIENIA_OKIEN.druk – ustawień dawnego okna „Druk i PDF” (do 0.6.6).
+function ustawieniaOkna(rodzaj) {
+  const def = OKNA[rodzaj], wlasne = USTAWIENIA_OKIEN[rodzaj];
+  const dawne = def.uklad && !wlasne ? wybierzKlucze(USTAWIENIA_OKIEN.druk || {}, Object.keys(def.domyslne)) : {};
+  return { ...def.domyslne, ...dawne, ...(wlasne || {}) };
+}
+// Ustawienia zlecenia pdf (brak klucza = ostatnie ustawienie z okna druku albo domyślne jak do 0.6.6).
+const ustawieniaDruku = () => ({ ...DRUK_DOMYSLNE, ...(USTAWIENIA_OKIEN.druk || {}) });
 // Zwraca { akcja, opcje } albo null (anulowano). domyslna: która akcja jest pod Enterem.
 function otworzOkno(rodzaj, domyslna) {
   const def = OKNA[rodzaj];
-  const u = { ...def.domyslne, ...(USTAWIENIA_OKIEN[rodzaj] || {}) };
+  const u = ustawieniaOkna(rodzaj);
   const okno = $('okno'), form = $('oknoForm');
   $('oknoTytul').textContent = def.tytul;
   $('oknoPola').innerHTML = (def.opis ? `<p class="opis">${esc(def.opis)}</p>` : '') + def.pola.map((p) => poleOkna(p, rodzaj, u)).join('');
@@ -3453,8 +3479,10 @@ function otworzOkno(rodzaj, domyslna) {
       if (!b.dataset.akcja) return zamknij(null);
       const opcje = zbierz();
       USTAWIENIA_OKIEN[rodzaj] = opcje;
+      // Okno druku: zlecenie pdf bez klucza bierze ostatnie ustawienia – pola tego okna i jego układ (pola drugiego zostają).
+      if (def.uklad) USTAWIENIA_OKIEN.druk = { ...(USTAWIENIA_OKIEN.druk || {}), ...opcje, uklad: def.uklad };
       try { await APP.zapiszEksportUstawienia(USTAWIENIA_OKIEN); } catch (e) { /* bez zapamiętania */ }
-      zamknij({ akcja: b.dataset.akcja, opcje });
+      zamknij({ akcja: b.dataset.akcja, opcje: def.uklad ? { ...opcje, uklad: def.uklad } : opcje });
     };
     // „inny plik .icc…” – okno wyboru pliku w main (sprawdza, czy to profil CMYK); anulowanie = poprzedni wybór.
     const wyborProfilu = form.querySelector('[name=profil]');
@@ -3480,11 +3508,16 @@ async function oknoObrazkow() {
   const r = await otworzOkno('obrazki');
   if (r) return eksportObrazkow(r.opcje);
 }
-async function oknoDruku(domyslna = 'pdf') {
-  await odswiezCmyk();
-  const r = await otworzOkno('druk', domyslna);
+// Druk domowy A4 (⌘P): Drukuj… (systemowe okno drukowania) albo Zapisz PDF. PDF dla drukarni (⇧⌘S): tylko zapis PDF.
+async function oknoDrukuA4(domyslna = 'drukuj') {
+  const r = await otworzOkno('a4', domyslna);
   if (!r) return;
   return r.akcja === 'drukuj' ? drukuj(r.opcje) : zapiszPdf(r.opcje);
+}
+async function oknoPdfDrukarni() {
+  await odswiezCmyk();
+  const r = await otworzOkno('drukarnia');
+  if (r) return zapiszPdf(r.opcje);
 }
 async function oknoPcio() {
   const r = await otworzOkno('pcio');
@@ -3492,7 +3525,7 @@ async function oknoPcio() {
   try { return await exportPcio(r.opcje); }
   catch (e) { status('Eksport do playingcards.io nie powiódł się: ' + ((e && e.message) || e)); console.error(e); }
 }
-Object.assign(window, { oknoObrazkow, oknoDruku, oknoPcio });
+Object.assign(window, { oknoObrazkow, oknoDrukuA4, oknoPdfDrukarni, oknoPcio });
 $('obrazkiPrzycisk').onclick = () => oknoObrazkow();
 
 // Ekran powitalny, gdy nie otwarto jeszcze szablonu.
