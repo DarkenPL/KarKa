@@ -39,7 +39,7 @@ for c in "${cele[@]}"; do
     done < <(node scripts/grupy-testow.js)
     [ -n "$znaleziona" ] || { echo "07-gildie: nieznana grupa „$g” (node scripts/grupy-testow.js)"; exit 1; }
   else
-    zadania+=("$c|$(basename "$c")|")
+    zadania+=("$p|$(basename "$p")|")         # BEZ_EDYTORA: 07-gildie:grupa = cały przykład
   fi
 done
 
@@ -54,11 +54,11 @@ test1() {
   local opcje=($EDYTOR); [ -n "$bloki" ] && opcje+=(--test-bloki "$bloki")
   timeout "$LIMIT" xvfb-run -a ./node_modules/.bin/electron --no-sandbox --user-data-dir="$TMP/ud-$n" \
     --enable-logging=file --log-file="$TMP/$n.log" . "${opcje[@]}" --test-pdf "$arg" "$TMP/$n.pdf" 2>/dev/null | grep "^{" | tail -1 > "$TMP/$n.json"
-  python3 - "$n" "$TMP/$n.json" "$TMP/$n.log" <<'PY'
+  python3 - "$n" "$TMP/$n.json" "$TMP/$n.log" "$LIMIT" <<'PY'
 import json, sys, re
-n, plik, log = sys.argv[1:]
+n, plik, log, limit = sys.argv[1:]
 try: d = json.load(open(plik))
-except Exception: print(f"{n}: BRAK WYNIKU (test przerwany – limit LIMIT – albo zawieszony)"); sys.exit(1)
+except Exception: print(f"{n}: BRAK WYNIKU (test przerwany – limit {limit} s – albo zawieszony)"); sys.exit(1)
 zle = [k for k, v in d.items() if isinstance(v, dict) and v.get('ok') is False]
 bledy = [l.strip()[:160] for l in open(log, errors='ignore') if 'CONSOLE' in l and re.search(r'Uncaught|Error', l)]
 print(f"{n}: {'ok' if d.get('ok') else 'BŁĄD'} · {d.get('stan','')[:40]} · Uwagi: {d.get('uwagi') or '–'}"
