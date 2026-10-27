@@ -83,16 +83,20 @@ async function wybierzStrony(doc, indeksy, zasoby) {
 const plikCzesci = (plik, przyrostek) => !przyrostek ? plik
   : plik.replace(/(\.pdf)?$/i, '') + ' – ' + przyrostek + '.pdf';
 
+// Nazwy z profilu drukarni (#85, plan.nazwyCzesci – nazwy bez .pdf w kolejności plan.pliki): pierwsza część to plik
+// wybrany w oknie zapisu (domyślnie nazwa z profilu) albo ze zlecenia, kolejne – obok niego, z nazwami z profilu.
+const nazwaCzesci = (plik, plan, n) => (plan.nazwyCzesci && plan.nazwyCzesci[n]
+  ? (n === 0 ? plik : path.join(path.dirname(plik), plan.nazwyCzesci[n] + '.pdf')) : plikCzesci(plik, plan.pliki[n]));
 // Zwraca [{ plik, bufor, strony, indeksy }] (indeksy – numery stron planu w części; null = wszystkie) – jeden plik albo awersy i rewersy (strona N rewersów = rewers awersu N).
 async function przygotujDruk(buf, plan, plik, zasoby) {
   const { doc, bufor } = await ustawStrony(buf, plan, zasoby);
   const pliki = plan.pliki && plan.pliki.length ? plan.pliki : [''];
-  if (pliki.length === 1) return [{ plik: plikCzesci(plik, pliki[0]), bufor, strony: doc.getPageCount(), indeksy: null }];
+  if (pliki.length === 1) return [{ plik: plan.nazwyCzesci ? plik : plikCzesci(plik, pliki[0]), bufor, strony: doc.getPageCount(), indeksy: null }];
   const wynik = [];
   for (let n = 0; n < pliki.length; n++) {
     const indeksy = plan.strony.map((s, i) => (s.plik === n ? i : -1)).filter((i) => i >= 0);
     if (!indeksy.length) continue;
-    wynik.push({ plik: plikCzesci(plik, pliki[n]), bufor: await wybierzStrony(doc, indeksy, zasoby), strony: indeksy.length, indeksy });
+    wynik.push({ plik: nazwaCzesci(plik, plan, n), bufor: await wybierzStrony(doc, indeksy, zasoby), strony: indeksy.length, indeksy });
   }
   return wynik;
 }

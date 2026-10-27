@@ -12,6 +12,7 @@ const { utworzSerwer } = require('./serwer');
 const historia = require('./historia');
 const drukarnia = require('./drukarnia');
 const cmyk = require('./cmyk');
+const drukarnie = require('./drukarnie');
 const aktualizacje = require('./aktualizacje');
 
 // Kod aplikacji: z paczki albo z nakładki po aktualizacji (start.js, nakladka.js). Zasoby leżą obok kodu
@@ -414,23 +415,36 @@ async function pdfDoPliku(webContents, plik, druk) {
     const gs = cmyk.znajdzGs({ odswiez: true });
     if (!gs.ok) throw new Error(gs.powod);
     if (!druk.cmyk.plik) throw new Error('brak profilu CMYK');
-    raport = { profil: druk.cmyk.nazwa, ghostscript: gs.wersja, nadrukCzerni: druk.cmyk.nadruk !== false, czas: 0, pliki: [] };
+    raport = { profil: druk.cmyk.nazwa, ghostscript: gs.wersja, nadrukCzerni: druk.cmyk.nadruk !== false,
+      pdfx: druk.cmyk.pdfx === 'PDF/X-4' ? 'PDF/X-4' : null, limitTAC: druk.cmyk.tac || null, czas: 0, pliki: [] };
     const PDFLib = drukarnia.pdfLib(ZASOBY);
     for (const c of czesci) {
+      // PDF/X-4 (#85): po ramkach z planu – Output Intent z profilem konwersji, Info + XMP, PDF 1.6.
+      const pdfx = druk.cmyk.pdfx === 'PDF/X-4';
       const w = await cmyk.konwertujBufor(c.bufor, { gs, profil: druk.cmyk.plik, PDFLib, nadruk: druk.cmyk.nadruk !== false,
-        po: (b) => drukarnia.ustawRamki(b, druk, c.indeksy, ZASOBY) });
+        po: async (b) => {
+          b = await drukarnia.ustawRamki(b, druk, c.indeksy, ZASOBY);
+          return pdfx ? cmyk.pdfx4(b, { PDFLib, profil: druk.cmyk.plik, warunek: druk.cmyk.warunek, nazwa: druk.cmyk.nazwa,
+            tytul: path.basename(c.plik, '.pdf'), narzedzie: `KarKa ${WERSJA}` }) : b;
+        } });
       const k = w.kontrola, nazwa = path.basename(c.plik);
       if (k.strony !== c.strony) throw new Error(`${nazwa}: po konwersji ${k.strony} stron zamiast ${c.strony}`);
       const zle = [k.rgb && `${k.rgb}× kolor RGB w treści`, k.przestrzenieRgb && `${k.przestrzenieRgb}× przestrzeń barw RGB`,
         k.obrazki.inne.length && `obrazki nie w CMYK: ${[...new Set(k.obrazki.inne)].join(', ')}`, k.trimBox !== k.strony && 'brak TrimBox'].filter(Boolean);
       if (zle.length) throw new Error(`kontrola CMYK: ${nazwa} – ${zle.join('; ')}`);
       c.bufor = w.bufor;
+      // TAC po konwersji (#85): przekroczenie limitu profilu drukarni = ostrzeżenie, nie blokada.
+      const t = await cmyk.zmierzTAC(w.bufor, { gs, limit: raport.limitTAC });
       raport.czas += w.czas;
-      raport.pliki.push({ plik: c.plik, ...k, czas: w.czas });
+      raport.pliki.push({ plik: c.plik, ...k, maksTAC: t.maksTAC, stronPonadLimit: t.stronPonadLimit, tacStron: t.strony.map((x) => x.maks), czas: w.czas });
     }
   }
   for (const c of czesci) fs.writeFileSync(c.plik, c.bufor);
   const pliki = czesci.map((c) => c.plik);
+  if (raport) {
+    raport.maksTAC = Math.max(0, ...raport.pliki.map((x) => x.maksTAC));
+    if (raport.limitTAC) raport.stronPonadLimit = raport.pliki.reduce((a, x) => a + x.stronPonadLimit, 0);
+  }
   return raport ? { pliki, cmyk: raport } : pliki;
 }
 
@@ -439,6 +453,9 @@ async function pdfDoPliku(webContents, plik, druk) {
 // pytaj: okno PDF pyta przed pobraniem; zlecenie pobiera samo. null = użytkownik zrezygnował.
 const folderProfili = () => path.join(app.getPath('userData'), 'profile');
 async function profilDoDruku(profil, { pytaj, folder }) {
+  // Tylko tryb testowy (bez eci.org): KARKA_TEST_PROFIL_KLUCZA = plik .icc w miejsce każdego klucza (iso300, fogra39…) – profile drukarni w teście.
+  if (testowy && process.env.KARKA_TEST_PROFIL_KLUCZA && cmyk.czyKlucz(profil || cmyk.DOMYSLNY))
+    return { plik: process.env.KARKA_TEST_PROFIL_KLUCZA, nazwa: cmyk.PROFILE[profil || cmyk.DOMYSLNY].nazwa, klucz: profil || cmyk.DOMYSLNY };
   if (profil && !cmyk.czyKlucz(profil) && folder && !path.isAbsolute(profil)) profil = path.resolve(folder, profil);
   const r = cmyk.rozwiazProfil(profil, folderProfili());
   if (r.plik) return r;
@@ -455,6 +472,11 @@ async function profilDoDruku(profil, { pytaj, folder }) {
     return { plik, nazwa: opis.nazwa, klucz: r.brak };
   } finally { if (okno && !okno.isDestroyed()) okno.setProgressBar(-1); }
 }
+// Output Intent PDF/X: warunek druku znanego profilu (FOGRA39 / FOGRA51), własny plik .icc – „Custom”.
+const warunekProfilu = (prof) => (prof.klucz && cmyk.PROFILE[prof.klucz] && cmyk.PROFILE[prof.klucz].warunek) || 'Custom';
+// Profile drukarni (#85, etap 2): wbudowane z drukarnie/*.json obok kodu, „Własne ustawienia” w danych aplikacji.
+ipcMain.handle('drukarnie:lista', () => ({ wbudowane: drukarnie.wbudowane(), wlasne: drukarnie.wlasne(app.getPath('userData')) }));
+ipcMain.handle('drukarnie:zapiszWlasne', (e, p) => drukarnie.zapiszWlasne(app.getPath('userData'), p));
 // Stan do okna PDF dla drukarni: Ghostscript (opcja wyszarzona bez niego) i które profile są już pobrane.
 ipcMain.handle('cmyk:stan', () => ({ gs: cmyk.znajdzGs({ odswiez: true }),
   profile: Object.fromEntries(Object.entries(cmyk.PROFILE).map(([k, p]) => [k, { nazwa: p.nazwa, pobrany: !!cmyk.profilLokalny(k, folderProfili()), paczkaMB: p.paczkaMB }])) }));
@@ -544,7 +566,7 @@ ipcMain.handle('pdf:zapisz', async (e, nazwa, druk) => {
       if (!gs.ok) throw new Error(gs.powod);
       const prof = await profilDoDruku(druk.cmyk.profil, { pytaj: !testowy, folder: p.folder });
       if (!prof) return null;
-      druk = { ...druk, cmyk: { ...druk.cmyk, plik: prof.plik, nazwa: prof.nazwa } };
+      druk = { ...druk, cmyk: { ...druk.cmyk, plik: prof.plik, nazwa: prof.nazwa, warunek: warunekProfilu(prof) } };
     } catch (er) {
       if (!testowy) await dialog.showMessageBox(okno, { type: 'warning', message: 'PDF w CMYK nie powstał', detail: er.message });
       throw er;
@@ -688,7 +710,7 @@ ipcMain.handle('zlecenie:pdf', async (e, nazwa, druk) => {
     const gs = cmyk.znajdzGs({ odswiez: true });
     if (!gs.ok) throw new Error(gs.powod);
     const prof = await profilDoDruku(druk.cmyk.profil, { pytaj: false, folder: p.folder });
-    druk = { ...druk, cmyk: { ...druk.cmyk, plik: prof.plik, nazwa: prof.nazwa } };
+    druk = { ...druk, cmyk: { ...druk.cmyk, plik: prof.plik, nazwa: prof.nazwa, warunek: warunekProfilu(prof) } };
   }
   return pdfDoPliku(e.sender, cel, druk);
 });
@@ -1400,14 +1422,14 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       for (const [k, v] of Object.entries(OCZ)) if (dz[k] !== v) bledy.push(`zlecenie bez ustawień: ${k} = ${JSON.stringify(dz[k])}, oczekiwane ${JSON.stringify(v)}`);
       await js(`USTAWIENIA_OKIEN = { druk: ${JSON.stringify(DAWNE)} }; odswiezCmyk()`);
       // Stan otwartego okna: nazwy pól, przyciski, przycisk domyślny, wartości.
-      const POLA = ['uklad', 'ciecie', 'wspolne', 'przesuniecieX', 'przesuniecieY', 'szkic', 'spad', 'strony', 'cmyk', 'profil', 'nadrukCzerni', 'rewersy', 'ktore'];
+      const POLA = ['uklad', 'ciecie', 'wspolne', 'przesuniecieX', 'przesuniecieY', 'szkic', 'spad', 'strony', 'cmyk', 'profil', 'nadrukCzerni', 'rewersy', 'ktore', 'drukarnia', 'wlSpad'];
       const otworz = (rodzaj) => js(`(() => { window.__okno = otworzOkno('${rodzaj}'); const f = document.getElementById('oknoForm'), q = (n) => f.querySelector('[name=' + n + ']');
         const zazn = (n) => (f.querySelector('[name=' + n + ']:checked') || {}).value;
         return { tytul: document.getElementById('oknoTytul').textContent, pola: ${JSON.stringify(POLA)}.filter(q),
           przyciski: [...document.querySelectorAll('#oknoPrzyciski button')].map((b) => b.textContent), domyslny: document.querySelector('#oknoPrzyciski .domyslny').textContent,
           ciecie: zazn('ciecie'), wspolne: q('wspolne') && q('wspolne').checked, przesuniecieX: q('przesuniecieX') && q('przesuniecieX').value,
           szkic: q('szkic') && q('szkic').checked, rewersy: q('rewersy') && q('rewersy').checked, spad: zazn('spad'), spadWylaczony: !!q('spad') && q('spad').disabled,
-          strony: zazn('strony'), profil: q('profil') && q('profil').value, profilWylaczony: !!q('profil') && q('profil').disabled, nadruk: q('nadrukCzerni') && q('nadrukCzerni').checked };
+          strony: zazn('strony'), drukarnia: zazn('drukarnia'), wlSpad: q('wlSpad') && q('wlSpad').value, profil: q('profil') && q('profil').value, profilWylaczony: !!q('profil') && q('profil').disabled, nadruk: q('nadrukCzerni') && q('nadrukCzerni').checked };
       })()`);
       const zrzut = async (nazwa) => { await czekaj(300); fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-okno-' + nazwa + '.png', (await wc.capturePage()).toPNG()); };
       const klik = (akcja) => js(`(async () => { document.querySelector('#oknoPrzyciski [data-akcja="${akcja}"]').click(); return await window.__okno; })()`);
@@ -1429,16 +1451,17 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       // b) PDF dla drukarni
       const dr = oknaDruku.drukarnia = await otworz('drukarnia');
       await zrzut('drukarnia');
-      const spadSzablonu = await js("[...document.querySelectorAll('#podglad .talia')].every((t) => spadTalii(t.dataset.talia))");
+      // 0.7.0 (#85, etap 2): profil drukarni; dawne pola okna (0.6.x) → „Własne ustawienia” (wybrane, bo okno drukarni było używane).
       if (dr.tytul !== 'PDF dla drukarni') bledy.push('drukarnia: tytuł ' + dr.tytul);
-      if (dr.pola.join() !== 'spad,strony,cmyk,profil,nadrukCzerni,rewersy,ktore') bledy.push('drukarnia: pola ' + dr.pola.join());
+      if (dr.pola.join() !== 'strony,cmyk,profil,nadrukCzerni,rewersy,ktore,drukarnia,wlSpad') bledy.push('drukarnia: pola ' + dr.pola.join());
       if (dr.przyciski.join() !== 'Anuluj,Zapisz PDF' || dr.domyslny !== 'Zapisz PDF') bledy.push('drukarnia: przyciski ' + dr.przyciski.join());
-      if (dr.strony !== 'naprzemian' || dr.rewersy !== false || dr.nadruk !== false || (!spadSzablonu && dr.spad !== '2') || (spadSzablonu && !dr.spadWylaczony)
+      if (dr.drukarnia !== 'wlasne' || dr.wlSpad !== '2' || dr.strony !== 'naprzemian' || dr.rewersy !== false || dr.nadruk !== false
         || (!dr.profilWylaczony && dr.profil !== 'fogra51')) bledy.push('drukarnia: nie przeniesiono ustawień ' + JSON.stringify(dr));
       const rDr = oknaDruku.zapisDrukarnia = await klik('pdf');
-      const poDr = await js('({ druk: USTAWIENIA_OKIEN.druk, drukarnia: USTAWIENIA_OKIEN.drukarnia, zlecenie: opcjeZlecenia("pdf", {}).o, zlecA4: opcjeZlecenia("pdf", { uklad: "a4" }).o })');
-      if (!rDr || rDr.opcje.uklad !== 'drukarnia' || rDr.opcje.strony !== 'naprzemian') bledy.push('drukarnia: wynik okna ' + JSON.stringify(rDr));
-      if (!poDr.drukarnia || 'ciecie' in poDr.drukarnia || 'szkic' in poDr.drukarnia) bledy.push('drukarnia: zapamiętane ' + JSON.stringify(poDr.drukarnia));
+      const poDr = await js('({ druk: USTAWIENIA_OKIEN.druk, drukarnia: USTAWIENIA_OKIEN.drukarnia, wlasne: DRUKARNIE.wlasne, zlecenie: opcjeZlecenia("pdf", {}).o, zlecA4: opcjeZlecenia("pdf", { uklad: "a4" }).o })');
+      if (!rDr || rDr.opcje.uklad !== 'drukarnia' || rDr.opcje.strony !== 'naprzemian' || rDr.opcje.drukarnia !== 'wlasne' || rDr.opcje.spadProfilu !== 2) bledy.push('drukarnia: wynik okna ' + JSON.stringify(rDr && { ...rDr.opcje, profilDrukarni: undefined }));
+      if (!poDr.drukarnia || poDr.drukarnia.drukarnia !== 'wlasne' || 'ciecie' in poDr.drukarnia || 'szkic' in poDr.drukarnia) bledy.push('drukarnia: zapamiętane ' + JSON.stringify(poDr.drukarnia));
+      if (!poDr.wlasne || poDr.wlasne.spad !== 2 || poDr.wlasne.strony !== 'naprzemian' || !fs.existsSync(drukarnie.plikWlasnych(app.getPath('userData')))) bledy.push('drukarnia: Własne ustawienia nie zapisane ' + JSON.stringify(poDr.wlasne));
       const zDr = poDr.zlecenie, zA4 = poDr.zlecA4;
       if (poDr.druk.uklad !== 'drukarnia' || zDr.uklad !== 'drukarnia' || zDr.strony !== 'naprzemian' || zDr.rewersy !== false || zDr.szkic !== false || zDr.ciecie !== 'znaczniki' || zDr.przesuniecieX !== 0)
         bledy.push('drukarnia: zlecenie po zapisie (ukryte pola A4 nie mogą przeciec) ' + JSON.stringify(zDr));
@@ -1471,8 +1494,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       if (m.a4 !== 'CmdOrCtrl+P' || m.drukarnia !== 'Shift+CmdOrCtrl+S' || m.dawne) bledy.push('menu: ' + JSON.stringify(m));
     } catch (e) { bledy.push('wyjątek: ' + ((e && e.message) || e)); }
     finally {
+      fs.rmSync(drukarnie.plikWlasnych(app.getPath('userData')), { force: true });     // Własne ustawienia z testu – nie dla kolejnych bloków
       await js(`(async () => { if (document.getElementById('okno').open) document.getElementById('okno').dispatchEvent(new Event('cancel'));
-        USTAWIENIA_OKIEN = ${ustPrzed}; try { await window.generatorApp.zapiszEksportUstawienia(USTAWIENIA_OKIEN); } catch (e) {} })()`);
+        USTAWIENIA_OKIEN = ${ustPrzed}; DRUKARNIE.wlasne = null; try { await window.generatorApp.zapiszEksportUstawienia(USTAWIENIA_OKIEN); } catch (e) {} })()`);
     }
     oknaDruku.ok = !bledy.length;
   }
@@ -1781,13 +1805,14 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         if (!zSpadem.length && (plan.spad !== 2 || plan.spadZSzablonu || plan.bezSpadu.length !== talie.length || plan.ostrzezenia.length !== 1 || !/nie deklaruje spadu/.test(plan.ostrzezenia[0]))) b.push('plan bez deklaracji ' + JSON.stringify(r.plan));
         if (zSpadem.length && (plan.spad !== Math.max(...zSpadem.map(spadTalii)) || !plan.spadZSzablonu || plan.bezSpadu.length !== bez.length)) b.push('plan z deklaracją ' + JSON.stringify(r.plan));
         buildPrint({ uklad: 'a4', karty });
-        // okno PDF dla drukarni: ostrzeżenie przy braku deklaracji, przy pełnej deklaracji pole spadu nieaktywne
+        // okno PDF dla drukarni (0.7.0 – profil LongPack, spad 3 mm): ostrzeżenie przy braku deklaracji, przy pełnej – spad z szablonu
+        // (równy, przycięty albo za mały – opis w podsumowaniu profilu), bez ostrzeżenia o dorabianiu.
         const pOkno = otworzOkno('drukarnia'), f = document.getElementById('oknoForm');
-        r.okno = { ostrzezenie: !!f.querySelector('.ostrzezenie-spadu'), wylaczone: [...f.querySelectorAll('[name=spad]')].every((x) => x.disabled), zSzablonu: /Spad z szablonu/.test(f.innerHTML),
-          zaznaczony: (f.querySelector('[name=spad]:checked') || {}).value };
+        const panel = f.querySelector('.profil-drukarni[data-id=longpack] .spad-profilu');
+        r.okno = { ostrzezenie: !!(panel && panel.querySelector('.ostrzezenie-spadu')), tekst: panel ? panel.textContent : null };
         document.getElementById('okno').dispatchEvent(new Event('cancel')); await pOkno;
         if (bez.length && !r.okno.ostrzezenie) b.push('okno: brak ostrzeżenia');
-        if (!bez.length && (r.okno.ostrzezenie || !r.okno.wylaczone || !r.okno.zSzablonu || r.okno.zaznaczony !== String(Math.max(...zSpadem.map(spadTalii))))) b.push('okno: ' + JSON.stringify(r.okno));
+        if (!bez.length && (r.okno.ostrzezenie || !/Spad z szablonu|przycięty|PDF nie powstanie/.test(r.okno.tekst || ''))) b.push('okno: ' + JSON.stringify(r.okno));
         // talie mieszane (sztuczne wpisy w TALIE): spad = największy zadeklarowany, ostrzeżenia dla talii bez spadu i z mniejszym
         TALIE.push({ nazwa: '__bez', spad: 0 }, { nazwa: '__dwa', spad: 2 }, { nazwa: '__trzy', spad: 3 });
         try {
@@ -1896,7 +1921,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         } finally { if (przed) USTAWIENIA_OKIEN.druk = przed; else delete USTAWIENIA_OKIEN.druk; if (przedD) USTAWIENIA_OKIEN.drukarnia = przedD; else delete USTAWIENIA_OKIEN.drukarnia; }
       })()`);
       const ow = cmykTest.okno;
-      ow.ok = ow.gs && ow.cmyk && ow.wlaczony && ow.zaznaczony && ow.profil && ow.opcje.join() === 'fogra39,fogra51,__inny' && ow.wybrany === 'fogra39' && ow.nadruk;
+      ow.ok = ow.gs && ow.cmyk && ow.wlaczony && ow.zaznaczony && ow.profil && ow.opcje.join() === 'iso300,fogra39,fogra51,__inny' && ow.wybrany === 'fogra39' && ow.nadruk;
       if (!ow.ok) bledy.push('okno: ' + JSON.stringify(ow));
       // b) PDF: awersy i rewersy (spad 3) w CMYK.
       const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'gk-cmyk-'));
@@ -1944,6 +1969,125 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       finally { fs.rmSync(tmp, { recursive: true, force: true }); }
       cmykTest.bledy = bledy;
       cmykTest.ok = !bledy.length;
+    }
+  }
+  // Profile drukarni (#85, etap 2, 0.7.0; --test-edytor, poza przykładami, Ghostscript): zlecenia pdf z drukarnia = longpack | printnet |
+  // wlasne. Profil ICC: KARKA_TEST_PROFIL_KLUCZA (domyślnie default_cmyk.icc Ghostscripta; prawdziwy ISO Coated v2 300 % → sprawdzane maksTAC ≤ 300).
+  // Każdy plik: PDF/X-4 (pdfinfo, Output Intent z profilem, Info + XMP, PDF 1.6, bez ArtBox), MediaBox = karta + 2 × spad profilu, TrimBox = karta;
+  // LongPack – dwa pliki z nazwami z profilu, rewersy w osobnym pliku; Printnet – jeden plik, awers i rewers na zmianę (2 × liczba kart),
+  // spad z szablonu przycięty do 2 mm (informacje); pdfx = nie – bez metadanych PDF/X; spad szablonu mniejszy niż profil – ok: false.
+  // Okno: trzy profile, podsumowanie wybranego, zrzut -okno-printnet.png.
+  let profileDr = null;
+  if (testBloku('profileDrukarni') && !jestPrzykladem(szablon)) {
+    const js = (k) => wc.executeJavaScript(k);
+    const gs = cmyk.znajdzGs({ odswiez: true });
+    const kat = gs.ok && cmyk.katalogIccGs(gs);
+    const icc = process.env.KARKA_TEST_PROFIL_KLUCZA || (kat && path.join(kat, 'default_cmyk.icc'));
+    if (!gs.ok || !icc || !fs.existsSync(icc)) profileDr = process.env.GITHUB_ACTIONS ? { ok: false, blad: 'w CI wymagany Ghostscript: ' + gs.powod } : { pominiety: gs.ok ? 'brak profilu testowego' : gs.powod };
+    else {
+      const bledy = [], zEnv = process.env.KARKA_TEST_PROFIL_KLUCZA;
+      process.env.KARKA_TEST_PROFIL_KLUCZA = icc;
+      const prawdziwy300 = cmyk.sha256(fs.readFileSync(icc)) === cmyk.PROFILE.iso300.sha256;
+      profileDr = { profil: path.basename(icc), prawdziwy300, bledy };
+      const zl = path.join(projekt, ...FOLDER_ZLECEN);
+      fs.mkdirSync(zl, { recursive: true });
+      const czytaj = (p) => { try { return JSON.parse(fs.readFileSync(path.join(zl, `wynik-${p}.json`), 'utf8')); } catch (e) { return null; } };
+      const zlec = async (tresc) => { fs.rmSync(path.join(zl, 'wynik-pdf.json'), { force: true }); fs.writeFileSync(path.join(zl, 'pdf'), tresc);
+        let w = null; for (let i = 0; i < 240 && !w; i++) { await czekaj(500); w = czytaj('pdf'); } return w; };
+      const { PDFDocument, PDFName } = require('./drukarnia').pdfLib(ZASOBY);
+      const MMpt = 72 / 25.4, bliskie = (a, b) => Math.abs(a - b) <= 0.02;
+      const stan = await js(`(() => { const k = [...document.querySelectorAll('#podglad .siatka .karta:not(.rewers)')];
+        return { kopie: k.length, projekt: PROJEKT, wersja: WERSJA, karta: cardMm(k[0]), spad: spadTalii(k[0].dataset.talia) }; })()`);
+      profileDr.stan = stan;
+      const pdfinfo = (f) => { const r = require('child_process').spawnSync('pdfinfo', [f], { encoding: 'utf8' }); return r.error || r.status ? null : r.stdout; };
+      // Plik PDF/X-4: Output Intent (profil osadzony = plik konwersji), Info i XMP zgodne, PDF 1.6, bez ArtBox; ramki wg spadu.
+      const sprawdzPlik = async (f, spad, opis) => {
+        const buf = fs.readFileSync(f), surowy = buf.toString('latin1'), doc = await PDFDocument.load(buf, { updateMetadata: false });
+        const w = { plik: path.basename(f), stron: doc.getPageCount(), naglowek: surowy.slice(0, 8) };
+        const oi = doc.catalog.lookup(PDFName.of('OutputIntents'));
+        const intent = oi && oi.lookup(0);
+        const prof = intent && intent.lookup(PDFName.of('DestOutputProfile'));
+        w.outputIntent = !!prof && Buffer.from(prof.contents).length > 0;
+        const info = doc.getInfoDict();
+        w.info = { pdfx: String(info.get(PDFName.of('GTS_PDFXVersion')) || ''), trapped: String(info.get(PDFName.of('Trapped')) || '') };
+        const xmpS = doc.catalog.lookup(PDFName.of('Metadata')), xmp = xmpS ? Buffer.from(xmpS.contents).toString('utf8') : '';
+        w.xmp = { pdfx: /<pdfxid:GTS_PDFXVersion>PDF\/X-4</.test(xmp), trapped: /<pdf:Trapped>False</.test(xmp), docId: /<xmpMM:DocumentID>uuid:/.test(xmp) };
+        w.artBox = doc.getPages().some((s) => s.node.get(PDFName.of('ArtBox')));
+        const pi = pdfinfo(f);
+        w.pdfinfo = pi ? (pi.match(/PDF subtype:\s*(.*)/) || [])[1] || '' : 'brak pdfinfo';
+        if (w.naglowek !== '%PDF-1.6' || !w.outputIntent || w.info.pdfx !== '(PDF/X-4)' || w.info.trapped !== '/False' || !w.xmp.pdfx || !w.xmp.trapped || !w.xmp.docId || w.artBox
+          || (pi && !/PDF\/X-4/.test(w.pdfinfo))) bledy.push(`${opis}: ${w.plik} nie jest PDF/X-4: ` + JSON.stringify(w));
+        const [kw, kh] = stan.karta, W = (kw + 2 * spad) * MMpt, H = (kh + 2 * spad) * MMpt;
+        doc.getPages().forEach((s, i) => {
+          const mb = s.getMediaBox(), bb = s.getBleedBox(), tb = s.getTrimBox();
+          if (!bliskie(mb.width, W) || !bliskie(mb.height, H) || !bliskie(bb.width, W) || !bliskie(tb.width, kw * MMpt) || !bliskie(tb.height, kh * MMpt) || !bliskie(tb.x, spad * MMpt))
+            bledy.push(`${opis}: ${w.plik} str. ${i + 1}: ramki ${[mb.width, mb.height, tb.x, tb.width, tb.height].map((x) => (x / MMpt).toFixed(2)).join(' / ')} mm`);
+        });
+        return w;
+      };
+      try {
+        // a) LongPack: dwa pliki z nazwami z profilu, rewersy osobno (wspólny rewers – plik z jedną stroną); spad = 2 pominięty z ostrzeżeniem.
+        const lp = await zlec('drukarnia = longpack\nspad = 2\n');
+        const nazwa = (st) => [stan.projekt, 'Playingcards', st, 'PL', stan.wersja].filter(Boolean).join('_') + '.pdf';
+        profileDr.longpack = lp && { ok: lp.ok, blad: lp.blad, pliki: lp.pliki, drukarnia: lp.drukarnia, spad: lp.spad, ostrzezenia: lp.ostrzezenia, cmyk: lp.cmyk && { pdfx: lp.cmyk.pdfx, maksTAC: lp.cmyk.maksTAC, limitTAC: lp.cmyk.limitTAC, pliki: lp.cmyk.pliki.map((k) => k.maksTAC) } };
+        if (!lp || !lp.ok) bledy.push('longpack: ' + JSON.stringify(lp && lp.blad));
+        else {
+          if (lp.pliki.join() !== [nazwa('Front'), nazwa('Back')].join() || lp.drukarnia !== 'longpack' || lp.spad !== 3) bledy.push('longpack: pliki/spad ' + JSON.stringify(profileDr.longpack));
+          if (!(lp.ostrzezenia || []).some((x) => /spad.*ustala profil drukarni LongPack/.test(x))) bledy.push('longpack: brak ostrzeżenia o pominiętym kluczu spad');
+          if (lp.cmyk.pdfx !== 'PDF/X-4' || lp.cmyk.limitTAC !== 300 || !Number.isFinite(lp.cmyk.maksTAC) || profileDr.longpack.cmyk.pliki.some((x) => !Number.isFinite(x))) bledy.push('longpack: cmyk ' + JSON.stringify(profileDr.longpack.cmyk));
+          if (prawdziwy300 && lp.cmyk.maksTAC > 300) bledy.push('longpack: maksTAC ' + lp.cmyk.maksTAC + ' > 300 przy ISO Coated v2 300 %');
+          const pf = await sprawdzPlik(path.join(projekt, lp.pliki[0]), 3, 'longpack'), pb = await sprawdzPlik(path.join(projekt, lp.pliki[1]), 3, 'longpack');
+          profileDr.longpack.stron = [pf.stron, pb.stron];
+          if (pf.stron !== stan.kopie || pb.stron !== 1) bledy.push(`longpack: stron ${pf.stron} + ${pb.stron}, oczekiwane ${stan.kopie} + 1`);
+        }
+        // b) Printnet: jeden plik, awers/rewers na zmianę, spad 2 mm (szablon 3 mm – przycięty, informacje).
+        const pn = await zlec('drukarnia = printnet\n');
+        profileDr.printnet = pn && { ok: pn.ok, blad: pn.blad, pliki: pn.pliki, spad: pn.spad, informacje: pn.informacje, strona: pn.strona };
+        if (!pn || !pn.ok) bledy.push('printnet: ' + JSON.stringify(pn && pn.blad));
+        else {
+          if (pn.pliki.length !== 1 || pn.pliki[0] !== stan.projekt + ' – printnet.pdf' || pn.spad !== 2) bledy.push('printnet: ' + JSON.stringify(profileDr.printnet));
+          if (stan.spad > 2 && !(pn.informacje || []).some((x) => /przycięty do 2 mm/.test(x))) bledy.push('printnet: brak informacji o przycięciu spadu');
+          const w = await sprawdzPlik(path.join(projekt, pn.pliki[0]), 2, 'printnet');
+          profileDr.printnet.stron = w.stron;
+          // Kolejność stron z arkuszy druku: awers, rewers, awers, rewers…
+          const rewersy = await js("[...document.querySelectorAll('#druk .arkusz')].map((a) => !!a.querySelector('.karta.rewers'))");
+          profileDr.printnet.kolejnosc = rewersy.map((r) => (r ? 'R' : 'A')).join('');
+          if (w.stron !== 2 * stan.kopie || rewersy.length !== w.stron) bledy.push(`printnet: stron ${w.stron}, arkuszy ${rewersy.length}, oczekiwane ${2 * stan.kopie}`);
+          if (rewersy.some((r, i) => r !== (i % 2 === 1))) bledy.push('printnet: strony nie są na przemian awers / rewers: ' + profileDr.printnet.kolejnosc);
+        }
+        // c) Własne ustawienia: pdfx = nie – bez PDF/X (jak 0.6.8); spad 5 mm > szablon → ok: false.
+        const wl = await zlec('drukarnia = wlasne\nprofil = iso300\npdfx = nie\nplik = Export/wlasne-bez-pdfx.pdf\n');
+        profileDr.wlasneBezPdfx = wl && { ok: wl.ok, blad: wl.blad, pliki: wl.pliki, pdfx: wl.cmyk && wl.cmyk.pdfx };
+        if (!wl || !wl.ok || wl.cmyk.pdfx !== null) bledy.push('wlasne pdfx = nie: ' + JSON.stringify(profileDr.wlasneBezPdfx));
+        else for (const p of wl.pliki) {
+          const t = fs.readFileSync(path.join(projekt, p)).toString('latin1');
+          if (/OutputIntents|GTS_PDFXVersion/.test(t)) bledy.push('wlasne pdfx = nie: w pliku metadane PDF/X ' + p);
+        }
+        const za = await zlec(`drukarnia = wlasne\nspad = ${stan.spad + 2}\nprofil = iso300\nplik = Export/za-maly.pdf\n`);
+        profileDr.zaMalySpad = za && { ok: za.ok, blad: za.blad, plik: fs.existsSync(path.join(projekt, 'Export', 'za-maly.pdf')) };
+        if (stan.spad && (!za || za.ok !== false || !/spad/.test(za.blad || '') || profileDr.zaMalySpad.plik)) bledy.push('za mały spad szablonu: ' + JSON.stringify(profileDr.zaMalySpad));
+        const zly = await zlec('drukarnia = drukarnia-x\n');
+        if (!zly || zly.ok !== false || !/drukarnia/.test(zly.blad || '')) bledy.push('nieznana drukarnia: ' + JSON.stringify(zly));
+        // d) Okno: trzy profile, wybór Printnet pokazuje jego podsumowanie z nazwą pliku.
+        profileDr.okno = await js(`(async () => { await odswiezCmyk(); await odswiezDrukarnie(); const p = otworzOkno('drukarnia'); const f = document.getElementById('oknoForm');
+          const r = f.querySelector('[name=drukarnia][value=printnet]'); r.checked = true; r.dispatchEvent(new Event('change'));
+          const widoczne = [...f.querySelectorAll('.profil-drukarni')].filter((d) => !d.hidden).map((d) => d.dataset.id);
+          return { profile: [...f.querySelectorAll('[name=drukarnia]')].map((x) => x.value), widoczne,
+            tekst: (f.querySelector('.profil-drukarni[data-id=printnet]') || {}).textContent || '' }; })()`);
+        await czekaj(300);
+        fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-okno-printnet.png', (await wc.capturePage()).toPNG());
+        profileDr.okno.wlasne = await js(`(() => { const f = document.getElementById('oknoForm'), r = f.querySelector('[name=drukarnia][value=wlasne]');
+          r.checked = true; r.dispatchEvent(new Event('change'));
+          return ['wlSpad', 'strony', 'cmyk', 'profil', 'wlPdfx', 'wlTac', 'rewersy', 'wlWzor'].filter((n) => f.querySelector('.profil-drukarni[data-id=wlasne]:not([hidden]) [name=' + n + ']')); })()`);
+        await czekaj(300);
+        fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-okno-wlasne.png', (await wc.capturePage()).toPNG());
+        await js("document.getElementById('okno').dispatchEvent(new Event('cancel'))");
+        const ok = profileDr.okno;
+        if (ok.wlasne.length !== 8) bledy.push('okno: pola Własnych ustawień ' + ok.wlasne.join());
+        if (ok.profile.join() !== 'longpack,printnet,wlasne' || ok.widoczne.join() !== 'printnet' || !ok.tekst.includes(stan.projekt + ' – printnet.pdf') || !/Spad 2 mm/.test(ok.tekst)) bledy.push('okno: ' + JSON.stringify(ok));
+      } catch (e) { bledy.push('wyjątek: ' + ((e && e.message) || e)); }
+      finally { if (zEnv === undefined) delete process.env.KARKA_TEST_PROFIL_KLUCZA; else process.env.KARKA_TEST_PROFIL_KLUCZA = zEnv; }
+      profileDr.ok = !bledy.length;
     }
   }
   // Katalog (--test-edytor, poza przykładami): A – Export/katalog; B – zlecenie z pliku → wynik.json.
@@ -2943,9 +3087,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     && Menu.getApplicationMenu().items[0].submenu.items.some((i) => i.label === 'Sprawdź aktualizacje…');
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
-    && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
+    && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

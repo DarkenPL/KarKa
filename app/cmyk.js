@@ -15,11 +15,14 @@ const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
 
 const ADRES_ECI = 'https://eci.org/lib/exe/';
+// warunek – OutputConditionIdentifier w Output Intent PDF/X (#85: ISO Coated v2 300 % to ten sam warunek druku co Fogra39).
 const PROFILE = {
+  iso300: { nazwa: 'ISO Coated v2 300 % (ECI)', paczka: 'eci_offset_2009.zip', wZip: 'ECI_Offset_2009/ISOcoated_v2_300_eci.icc',
+    plik: 'ISOcoated_v2_300_eci.icc', sha256: 'c6b4b62f0726243742eced8b9669476a6be89e581f50a7600ed8b6fcbb9cdab8', rozmiar: 1829093, paczkaMB: 17, warunek: 'FOGRA39' },
   fogra39: { nazwa: 'ISO Coated v2 (ECI) – Fogra39', paczka: 'eci_offset_2009.zip', wZip: 'ECI_Offset_2009/ISOcoated_v2_eci.icc',
-    plik: 'ISOcoated_v2_eci.icc', sha256: '128dc02f7246cc3807af0323695379f64151a8f27a587736acc59f8b6ce894b8', rozmiar: 1829077, paczkaMB: 17 },
+    plik: 'ISOcoated_v2_eci.icc', sha256: '128dc02f7246cc3807af0323695379f64151a8f27a587736acc59f8b6ce894b8', rozmiar: 1829077, paczkaMB: 17, warunek: 'FOGRA39' },
   fogra51: { nazwa: 'PSO Coated v3 – Fogra51', paczka: 'pso-coated_v3.zip', wZip: 'PSOcoated_v3.icc',
-    plik: 'PSOcoated_v3.icc', sha256: 'c30ad2c01e8f93135ec7682c535e0a81bc2d177c301e196376c5f5838b5c8e86', rozmiar: 2195228, paczkaMB: 2 },
+    plik: 'PSOcoated_v3.icc', sha256: 'c30ad2c01e8f93135ec7682c535e0a81bc2d177c301e196376c5f5838b5c8e86', rozmiar: 2195228, paczkaMB: 2, warunek: 'FOGRA51' },
 };
 const DOMYSLNY = 'fogra39';
 const MIN_WERSJA_GS = 10;
@@ -234,7 +237,7 @@ async function pobierzProfil(klucz, folder, { fetch = globalThis.fetch, zasoby, 
   return cel;
 }
 
-// profil: klucz (fogra39 / fogra51) albo ścieżka do pliku .icc → { plik, nazwa, klucz } albo { brak: klucz } (do pobrania).
+// profil: klucz (iso300 / fogra39 / fogra51) albo ścieżka do pliku .icc → { plik, nazwa, klucz } albo { brak: klucz } (do pobrania).
 function rozwiazProfil(profil, folder) {
   profil = profil || DOMYSLNY;
   if (czyKlucz(profil)) {
@@ -613,6 +616,115 @@ async function konwertujBufor(buf, { gs, profil, sygnal, PDFLib, po, nadruk = tr
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 
+// ── PDF/X-4 (#85, decyzja 26.10.2026) ───────────────────────────────────────
+// Po konwersji (i ramkach z planu): Output Intent z osadzonym profilem użytym do konwersji, Info i XMP zgodne
+// (GTS_PDFXVersion, Trapped = False, tytuł, daty, identyfikatory), TrimBox bez ArtBox, nagłówek PDF 1.6, /ID w trailerze.
+// Przezroczystość zostaje (PDF/X-4 ją dopuszcza). profil: plik .icc; warunek: OutputConditionIdentifier; nazwa: opis warunku.
+const xmlTekst = (t) => String(t).replace(/[<>&"]/g, (z) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[z]));
+const uuid = () => 'uuid:' + crypto.randomUUID();
+function dataXmp(d) {
+  const z = -d.getTimezoneOffset(), dw = (n) => String(Math.floor(Math.abs(n))).padStart(2, '0');
+  return `${d.getFullYear()}-${dw(d.getMonth() + 1)}-${dw(d.getDate())}T${dw(d.getHours())}:${dw(d.getMinutes())}:${dw(d.getSeconds())}` +
+    (z >= 0 ? '+' : '-') + dw(z / 60) + ':' + dw(z % 60);
+}
+async function pdfx4(buf, { PDFLib, profil, warunek = 'Custom', nazwa, tytul = 'Karty', narzedzie = 'KarKa', data = new Date() } = {}) {
+  const { PDFDocument, PDFName, PDFString, PDFHexString } = PDFLib;
+  const doc = await PDFDocument.load(buf, { updateMetadata: false });
+  const ctx = doc.context;
+  nazwa = nazwa || path.basename(profil);
+  const icc = ctx.register(ctx.flateStream(fs.readFileSync(profil), { N: 4 }));
+  const oi = ctx.register(ctx.obj({ Type: 'OutputIntent', S: 'GTS_PDFX', OutputConditionIdentifier: PDFString.of(warunek),
+    OutputCondition: PDFString.of(nazwa), Info: PDFString.of(nazwa), RegistryName: PDFString.of('http://www.color.org'), DestOutputProfile: icc }));
+  doc.catalog.set(PDFName.of('OutputIntents'), ctx.obj([oi]));
+  for (const s of doc.getPages()) s.node.delete(PDFName.of('ArtBox'));
+  doc.setTitle(tytul); doc.setCreator(narzedzie); doc.setProducer(narzedzie);
+  doc.setCreationDate(data); doc.setModificationDate(data);
+  const info = doc.getInfoDict();
+  info.set(PDFName.of('GTS_PDFXVersion'), PDFString.of('PDF/X-4'));
+  info.set(PDFName.of('Trapped'), PDFName.of('False'));
+  const d = dataXmp(data), idDok = uuid();
+  const xmp = `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+    xmlns:pdf="http://ns.adobe.com/pdf/1.3/" xmlns:pdfxid="http://www.npes.org/pdfx/ns/id/" xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/">
+   <dc:format>application/pdf</dc:format>
+   <dc:title><rdf:Alt><rdf:li xml:lang="x-default">${xmlTekst(tytul)}</rdf:li></rdf:Alt></dc:title>
+   <xmp:CreatorTool>${xmlTekst(narzedzie)}</xmp:CreatorTool>
+   <xmp:CreateDate>${d}</xmp:CreateDate>
+   <xmp:ModifyDate>${d}</xmp:ModifyDate>
+   <xmp:MetadataDate>${d}</xmp:MetadataDate>
+   <pdf:Producer>${xmlTekst(narzedzie)}</pdf:Producer>
+   <pdf:Trapped>False</pdf:Trapped>
+   <pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>
+   <xmpMM:DocumentID>${idDok}</xmpMM:DocumentID>
+   <xmpMM:InstanceID>${uuid()}</xmpMM:InstanceID>
+   <xmpMM:VersionID>1</xmpMM:VersionID>
+   <xmpMM:RenditionClass>default</xmpMM:RenditionClass>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>`;
+  doc.catalog.set(PDFName.of('Metadata'), ctx.register(ctx.stream(new Uint8Array(Buffer.from(xmp, 'utf8')), { Type: 'Metadata', Subtype: 'XML' })));
+  const id = PDFHexString.of(idDok.slice(5).replace(/-/g, ''));
+  ctx.trailerInfo.ID = ctx.obj([id, id]);
+  // pdf-lib zawsze zapisuje „%PDF-1.7” – nagłówek tej samej długości podmieniany na 1.6 (przesunięcia xref bez zmian).
+  const wynik = Buffer.from(await doc.save({ useObjectStreams: false, updateFieldAppearances: false }));
+  if (wynik.toString('latin1', 0, 8) !== '%PDF-1.7') throw new Error('PDF/X-4: nieoczekiwany nagłówek z pdf-lib');
+  wynik.write('%PDF-1.6', 0, 'latin1');
+  return wynik;
+}
+
+// ── TAC – całkowite pokrycie farbą (#85) ────────────────────────────────────
+// Render CMYK Ghostscriptem (tiff32nc, nadruk symulowany – jak Podgląd wyjściowy w Acrobacie), suma C+M+Y+K na piksel.
+// → { maksTAC (%), strony: [{ maks, ponad (% powierzchni powyżej limitu) }], stronPonadLimit (z limitem), dpi }.
+function pikseleTiff(buf) {
+  const le = buf.toString('latin1', 0, 2) === 'II';
+  const u16 = (o) => (le ? buf.readUInt16LE(o) : buf.readUInt16BE(o)), u32 = (o) => (le ? buf.readUInt32LE(o) : buf.readUInt32BE(o));
+  const ifd = u32(4), n = u16(ifd), tagi = {};
+  for (let i = 0; i < n; i++) {
+    const e = ifd + 2 + i * 12, tag = u16(e), typ = u16(e + 2), ile = u32(e + 4);
+    const roz = typ === 3 ? 2 : 4, czytaj = (o) => (typ === 3 ? u16(o) : u32(o));
+    const start = ile * roz > 4 ? u32(e + 8) : e + 8;
+    tagi[tag] = Array.from({ length: ile }, (_, j) => czytaj(start + j * roz));
+  }
+  const [w] = tagi[256], [h] = tagi[257], spp = (tagi[277] || [1])[0], kompresja = (tagi[259] || [1])[0];
+  if (spp !== 4 || kompresja !== 1 || (tagi[258] || [8])[0] !== 8) throw new Error('nieoczekiwany TIFF z Ghostscripta');
+  return { w, h, czesci: tagi[273].map((o, i) => buf.subarray(o, o + tagi[279][i])) };
+}
+async function zmierzTAC(buf, { gs, dpi = 150, limit = null, limitCzasu = 5 * 60 * 1000 } = {}) {
+  gs = gs || znajdzGs();
+  if (!gs.ok) throw new Error(gs.powod);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'karka-tac-'));
+  try {
+    const we = path.join(tmp, 'we.pdf');
+    fs.writeFileSync(we, buf);
+    await new Promise((ok, blad) => {
+      const proc = spawn(gs.sciezka, ['-dSAFER', '-dBATCH', '-dNOPAUSE', '-dQUIET', '-sDEVICE=tiff32nc', `-r${dpi}`, '-dOverprint=/simulate',
+        `-sOutputFile=${path.join(tmp, 's%04d.tif')}`, we], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let log = '';
+      proc.stdout.on('data', (c) => { log = (log + c).slice(-5000); });
+      proc.stderr.on('data', (c) => { log = (log + c).slice(-5000); });
+      const zegar = setTimeout(() => proc.kill('SIGKILL'), limitCzasu);
+      proc.on('error', (e) => { clearTimeout(zegar); blad(e); });
+      proc.on('close', (kod) => { clearTimeout(zegar); kod === 0 ? ok() : blad(new Error(`pomiar TAC: Ghostscript (kod ${kod}): ${opisBleduGs(log)}`)); });
+    });
+    const prog = limit ? limit * 2.55 : Infinity;
+    const strony = fs.readdirSync(tmp).filter((f) => f.endsWith('.tif')).sort().map((f) => {
+      const { w, h, czesci } = pikseleTiff(fs.readFileSync(path.join(tmp, f)));
+      let maks = 0, ponad = 0;
+      for (const c of czesci) for (let i = 0; i + 3 < c.length; i += 4) {
+        const s = c[i] + c[i + 1] + c[i + 2] + c[i + 3];
+        if (s > maks) maks = s;
+        if (s > prog) ponad++;
+      }
+      return { maks: Math.round(maks / 2.55), ponad: Math.round((ponad / (w * h)) * 10000) / 100 };
+    });
+    const maksTAC = Math.max(0, ...strony.map((s) => s.maks));
+    return { maksTAC, dpi, limit, strony, stronPonadLimit: limit ? strony.filter((s) => s.maks > limit).length : null };
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+
 module.exports = { PROFILE, DOMYSLNY, PODPOWIEDZ_GS, MIN_WERSJA_GS, znajdzGs, argumentyGs, konwertuj, opisBleduGs,
   sprawdzPlikIcc, profilLokalny, pobierzProfil, rozwiazProfil, adresPaczki, czyKlucz, sprawdzPdf, konwertujBufor, sha256,
-  czernK100, grupyCmyk, nadrukCzerni, nadrukWStrumieniu, katalogIccGs, wypakujProfileGs, sprawdzProfilGs };
+  czernK100, grupyCmyk, nadrukCzerni, nadrukWStrumieniu, katalogIccGs, wypakujProfileGs, sprawdzProfilGs, pdfx4, zmierzTAC, pikseleTiff };
