@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Testy przykładów w CI (#88): plan uruchomień zależny od trybu, kilka procesów naraz, czasy w podsumowaniu przebiegu.
-//   node scripts/testy-ci.js <tryb> --bin "<polecenie aplikacji>" --tmp <katalog> [--razem 3] [--limit 600]
-// tryb: pr    – 07-gildie w dwóch procesach (lista ciężkich bloków i jej dopełnienie = pełny --test-edytor),
+//   node scripts/testy-ci.js <tryb> --bin "<polecenie aplikacji>" --tmp <katalog> [--razem 4] [--limit 600]
+// tryb: pr    – 07-gildie w trzech procesach (grupy z scripts/grupy-testow.js, ostatnia = dopełnienie; razem pełny
+//               --test-edytor),
 //               08-wieze – blok spadSzablonu, pozostałe przykłady --test-pdf (renderowanie, PDF, eksport);
 //       pelny – --test-edytor na każdym przykładzie (jak do 0.6.2).
 // --bin: w CI ścieżka do KarKa w .app; lokalnie np. "xvfb-run -a ./node_modules/.bin/electron --no-sandbox ."
@@ -17,32 +18,31 @@ const arg = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? proce
 const tryb = process.argv[2];
 const bin = (arg('--bin') || '').split(' ').filter(Boolean);
 const tmp = path.resolve(arg('--tmp', path.join(require('os').tmpdir(), 'karka-ci')));
-const razem = Math.max(1, +arg('--razem', 3) || 3);
+const razem = Math.max(1, +arg('--razem', 4) || 4);
 const PRZYKLADY = path.join(__dirname, '..', '..', 'przyklady');
 const PROG_S = 180;                                     // ostrzeżenie
 const LIMIT_S = +arg('--limit', 600) || 600;            // przerwanie uruchomienia (s)
 if (!['pr', 'pelny'].includes(tryb) || !bin.length) {
-  console.error('Użycie: node scripts/testy-ci.js pr|pelny --bin "<polecenie>" --tmp <katalog> [--razem 3]');
+  console.error('Użycie: node scripts/testy-ci.js pr|pelny --bin "<polecenie>" --tmp <katalog> [--razem 4]');
   process.exit(2);
 }
 
-// Ciężkie bloki 07-gildie (pomiar 26.10.2026, lokalnie: zakladki 52 s, hist 48, drukarniaPdf 44, spadTest 24 –
-// razem ~170 s; reszta z zlecenia 68 s i katalogiem 46 s – ~160 s). Drugi proces dostaje dopełnienie (-nazwy), więc nowy blok zawsze się wykona.
-const CIEZKIE_07 = ['zakladki', 'hist', 'drukarniaPdf', 'spadTest'];
+// 07-gildie w trzech procesach (#101, A0): grupy w scripts/grupy-testow.js (wspólne z scripts/testuj.sh) – zlecenia
+// razem z zmienione i cmykTest, osobno zakladki, reszta jako dopełnienie (-nazwy), więc nowy blok zawsze się wykona.
+const { GRUPY_07 } = require('./grupy-testow');
 
 function plan() {
   const przyklady = fs.readdirSync(PRZYKLADY).filter((n) => fs.statSync(path.join(PRZYKLADY, n)).isDirectory()).sort();
-  if (tryb === 'pelny') return przyklady.map((n) => ({ nazwa: n, przyklad: n, opcje: ['--test-edytor'] }));
+  if (tryb === 'pelny') return przyklady.map((n) => ({ nazwa: n, przyklad: n, opcje: ['--test-edytor'], waga: 1 }));
   const lista = [];
   for (const n of przyklady) {
-    if (n === '07-gildie') {
-      lista.push({ nazwa: n + '-a', przyklad: n, opcje: ['--test-edytor', '--test-bloki', CIEZKIE_07.map((b) => '-' + b).join(',')] });
-      lista.push({ nazwa: n + '-b', przyklad: n, opcje: ['--test-edytor', '--test-bloki', CIEZKIE_07.join(',')] });
-    } else if (n === '08-wieze') lista.push({ nazwa: n, przyklad: n, opcje: ['--test-edytor', '--test-bloki', 'spadSzablonu'] });
-    else lista.push({ nazwa: n, przyklad: n, opcje: [] });
+    if (n === '07-gildie') for (const g of GRUPY_07)
+      lista.push({ nazwa: n + '-' + g.nazwa, przyklad: n, opcje: ['--test-edytor', '--test-bloki', g.bloki], waga: 2 });
+    else if (n === '08-wieze') lista.push({ nazwa: n, przyklad: n, opcje: ['--test-edytor', '--test-bloki', 'spadSzablonu'], waga: 1 });
+    else lista.push({ nazwa: n, przyklad: n, opcje: [], waga: 0 });
   }
-  // Najdłuższe najpierw – krótkie wypełniają wolne miejsca.
-  return lista.sort((a, b) => b.opcje.length - a.opcje.length);
+  // Najdłuższe najpierw (grupy 07) – krótkie wypełniają wolne miejsca.
+  return lista.sort((a, b) => b.waga - a.waga);
 }
 
 function uruchom(u) {
