@@ -97,6 +97,8 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 .talia-tytul { margin: 18px 16px 0; font-size: 15px; color: #4a453f; }
 /* Podgląd rewersów (#47): awersy chowane bez display:none – karty zachowują układ (dopasowanie tekstu, eksport, katalog). */
 #podglad.schowany { height: 0; overflow: hidden; }
+/* Pomiar i eksport wszystkich talii (#114): zakrywa display:none z filtra podglądu (applyFilter), pole filtra bez zmian. */
+#podglad.wszystkie-talie .talia { display: block !important; }
 #podgladRewersy .brak-rewersu { cursor: default; background: repeating-linear-gradient(45deg, #f4f1ec 0 6px, #e6e1da 6px 12px); box-shadow: none; outline: 1px dashed #b8b1a7; }
 .rewers-podglad { position: relative; }        /* zajmuje dokładnie miejsce karty – siatka się nie rozjeżdża */
 .rewers-podglad .etykieta {
@@ -1737,57 +1739,54 @@ function raportDrukarni() {
   return p;
 }
 async function raportDrukarniTeraz() {
-  const praca = async () => {
-    const filtr = $('filtr').value; $('filtr').value = ''; applyFilter();      // odfiltrowane talie też
-    try {
-      let karty = [...$('podglad').querySelectorAll('.talia .karta')];
+  const praca = () => zWszystkimiTaliami(async () => {      // odfiltrowane talie też (#114)
+    let karty = [...$('podglad').querySelectorAll('.talia .karta')];
+    await ukladDoPomiaru(karty);
+    // Karta, której nie dało się zmierzyć (odpięta przez przebudowę, bez wymiarów), nie może dać fałszywego „OK” (#111):
+    // jeszcze raz z kartami z podglądu, a gdy nadal – lista „niezmierzone” w wyniku i błąd w sekcji odstępu.
+    // (Bez czekania na KOLEJKA_BUDOWY – jesteśmy na wyłączność, przebudowa zaczęta po nas czeka na nasz koniec.)
+    const bezWymiarow = (k) => { const r = k.getBoundingClientRect(); return !k.isConnected || !r.width || !r.height; };
+    if (!karty.length || karty.some(bezWymiarow)) {
+      karty = [...$('podglad').querySelectorAll('.talia .karta')];
       await ukladDoPomiaru(karty);
-      // Karta, której nie dało się zmierzyć (odpięta przez przebudowę, bez wymiarów), nie może dać fałszywego „OK” (#111):
-      // jeszcze raz z kartami z podglądu, a gdy nadal – lista „niezmierzone” w wyniku i błąd w sekcji odstępu.
-      // (Bez czekania na KOLEJKA_BUDOWY – jesteśmy na wyłączność, przebudowa zaczęta po nas czeka na nasz koniec.)
-      const bezWymiarow = (k) => { const r = k.getBoundingClientRect(); return !k.isConnected || !r.width || !r.height; };
-      if (!karty.length || karty.some(bezWymiarow)) {
-        karty = [...$('podglad').querySelectorAll('.talia .karta')];
-        await ukladDoPomiaru(karty);
+    }
+    const odstep = [], bezPomiaru = [], czern = new Map(), pasy = new Map(), spad = [], pliki = [], zmiesc = [], widziane = new Set();
+    for (const k of karty) {
+      const rewers = k.classList.contains('rewers');
+      const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' + nrRewersu(k) : k.dataset.row);
+      const pierwsza = !widziane.has(klucz); widziane.add(klucz);
+      const o = odstepyKarty(k);
+      if (o && o.niezmierzona) { if (!bezPomiaru.includes(opisKarty(k))) bezPomiaru.push(opisKarty(k)); continue; }
+      if (o && o.odstep < MARGINES_DRUKARNI - 0.005) {
+        const byla = odstep.find((x) => x.klucz === klucz);
+        if (!byla) odstep.push({ klucz, karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...o, odstep: Math.round(o.odstep * 100) / 100 });
+        else if (o.odstep < byla.odstep) Object.assign(byla, o, { odstep: Math.round(o.odstep * 100) / 100 });
       }
-      const odstep = [], bezPomiaru = [], czern = new Map(), pasy = new Map(), spad = [], pliki = [], zmiesc = [], widziane = new Set();
-      for (const k of karty) {
-        const rewers = k.classList.contains('rewers');
-        const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' + nrRewersu(k) : k.dataset.row);
-        const pierwsza = !widziane.has(klucz); widziane.add(klucz);
-        const o = odstepyKarty(k);
-        if (o && o.niezmierzona) { if (!bezPomiaru.includes(opisKarty(k))) bezPomiaru.push(opisKarty(k)); continue; }
-        if (o && o.odstep < MARGINES_DRUKARNI - 0.005) {
-          const byla = odstep.find((x) => x.klucz === klucz);
-          if (!byla) odstep.push({ klucz, karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...o, odstep: Math.round(o.odstep * 100) / 100 });
-          else if (o.odstep < byla.odstep) Object.assign(byla, o, { odstep: Math.round(o.odstep * 100) / 100 });
-        }
-        if (!pierwsza) continue;                                   // kopie tej samej karty – raz
-        for (const { rgb, rodzaj } of await koloryKarty(k)) {
-          if (!prawieCzarny(rgb)) continue;
-          const kolor = hexZRgb(rgb), kk = kolor + '|' + rodzaj;
-          const x = czern.get(kk) || { kolor, rodzaj, jasnosc: Math.round(labZRgb(rgb)[0]), karty: [] };
-          if (!x.karty.includes(opisKarty(k))) x.karty.push(opisKarty(k));
-          czern.set(kk, x);
-        }
-        for (const x of obrazkiBezSpadu(k)) spad.push({ karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...x });
-        for (const x of plikiZeSpadem(k)) pliki.push({ karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...x });
-        for (const x of plikiZmiesc(k)) zmiesc.push({ karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...x });
-        const p = await pasKarty(k);
-        if (p && !p.blad && ['czarny', 'ryzykowny'].includes(p.rodzaj)) {
-          const kk = k.dataset.talia + '|' + (rewers ? 'r' : 'a') + '|' + p.rodzaj + '|' + (p.odcien || '') + '|' + p.kolor;
-          const x = pasy.get(kk) || { talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', rodzaj: p.rodzaj, odcien: p.odcien, kolor: p.kolor, karty: [] };
-          x.karty.push(opisKarty(k)); pasy.set(kk, x);
-        }
+      if (!pierwsza) continue;                                   // kopie tej samej karty – raz
+      for (const { rgb, rodzaj } of await koloryKarty(k)) {
+        if (!prawieCzarny(rgb)) continue;
+        const kolor = hexZRgb(rgb), kk = kolor + '|' + rodzaj;
+        const x = czern.get(kk) || { kolor, rodzaj, jasnosc: Math.round(labZRgb(rgb)[0]), karty: [] };
+        if (!x.karty.includes(opisKarty(k))) x.karty.push(opisKarty(k));
+        czern.set(kk, x);
       }
-      odstep.sort((a, b) => a.odstep - b.odstep);
-      odstep.forEach((x) => delete x.klucz);
-      // Spad w szablonie (#84): talie bez deklaracji i pliki o proporcjach innych niż karta ze spadem.
-      const talie = [...$('podglad').querySelectorAll('.talia')].map((t) => t.dataset.talia);
-      const spadSzablonu = { talie: Object.fromEntries(talie.map((t) => [t, spadTalii(t)])), bez: talie.filter((t) => !spadTalii(t)), pliki, zmiesc };
-      return { margines: MARGINES_DRUKARNI, karty: karty.length, niezmierzone: bezPomiaru, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad, spadSzablonu };
-    } finally { $('filtr').value = filtr; applyFilter(); }
-  };
+      for (const x of obrazkiBezSpadu(k)) spad.push({ karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...x });
+      for (const x of plikiZeSpadem(k)) pliki.push({ karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...x });
+      for (const x of plikiZmiesc(k)) zmiesc.push({ karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...x });
+      const p = await pasKarty(k);
+      if (p && !p.blad && ['czarny', 'ryzykowny'].includes(p.rodzaj)) {
+        const kk = k.dataset.talia + '|' + (rewers ? 'r' : 'a') + '|' + p.rodzaj + '|' + (p.odcien || '') + '|' + p.kolor;
+        const x = pasy.get(kk) || { talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', rodzaj: p.rodzaj, odcien: p.odcien, kolor: p.kolor, karty: [] };
+        x.karty.push(opisKarty(k)); pasy.set(kk, x);
+      }
+    }
+    odstep.sort((a, b) => a.odstep - b.odstep);
+    odstep.forEach((x) => delete x.klucz);
+    // Spad w szablonie (#84): talie bez deklaracji i pliki o proporcjach innych niż karta ze spadem.
+    const talie = [...$('podglad').querySelectorAll('.talia')].map((t) => t.dataset.talia);
+    const spadSzablonu = { talie: Object.fromEntries(talie.map((t) => [t, spadTalii(t)])), bez: talie.filter((t) => !spadTalii(t)), pliki, zmiesc };
+    return { margines: MARGINES_DRUKARNI, karty: karty.length, niezmierzone: bezPomiaru, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad, spadSzablonu };
+  });
   // Obrazki kart (html-to-image) czytają podgląd – na wyłączność, chyba że eksport już trwa.
   return (OSTATNI_RAPORT_DRUKARNI = EKSPORT_TRWA ? await praca() : await naWylacznosc(praca));
 }
@@ -2184,6 +2183,15 @@ if (window.generatorApp && window.generatorApp.naZmianeHistorii)
 function applyFilter() {
   const f = $('filtr').value;
   for (const s of $('podglad').querySelectorAll('.talia')) s.style.display = (!f || s.dataset.talia === f) ? '' : 'none';
+}
+// Wszystkie talie na czas pomiaru i eksportu (raport drukarni, katalog, playingcards.io – #114): klasa na #podglad
+// pokazuje talie ukryte filtrem (CSS z !important), a pole #filtr i style talii zostają bez zmian. Zmiana filtra
+// w trakcie pracy nie chowa mierzonych kart i nie jest potem nadpisywana; licznik – prace zagnieżdżone (raport w eksporcie).
+let WSZYSTKIE_TALIE = 0;
+async function zWszystkimiTaliami(fn) {
+  if (WSZYSTKIE_TALIE++ === 0) $('podglad').classList.add('wszystkie-talie');
+  try { return await fn(); }
+  finally { if (--WSZYSTKIE_TALIE === 0) $('podglad').classList.remove('wszystkie-talie'); }
 }
 function visibleSections() {
   return [...$('podglad').querySelectorAll('.talia')].filter((s) => s.style.display !== 'none');
@@ -2702,7 +2710,8 @@ async function eksportObrazkow(o = {}) {
   const dpi = +o.dpi || CONFIG.jpgDpi, format = o.format === 'png' ? 'png' : 'jpg', FMT = format.toUpperCase();
   const karty = kartyEksportu(o);
   if (!karty.length) { status('Eksport obrazków: brak kart – sprawdź wybór kart i talii.'); return; }
-  return naWylacznosc(async () => {
+  // Talie ukryte filtrem podglądu też (#114) – karta w ukrytej talii nie ma wymiarów, html-to-image dawał błąd.
+  return naWylacznosc(() => zWszystkimiTaliami(async () => {
     try {
       const folder = await APP.eksportStart();
       if (!folder) { status('Eksport obrazków anulowany.'); return; }
@@ -2722,7 +2731,7 @@ async function eksportObrazkow(o = {}) {
       status('Eksport obrazków nie powiódł się: ' + ((e && e.message) || e));
       if (o.zlecenie) throw e;
     }
-  });
+  }));
 }
 window.eksportObrazkow = eksportObrazkow;
 async function jpegBlob(el) { return obrazKarty(el); }   // tryb testowy (podgląd JPG)
@@ -2741,8 +2750,7 @@ async function katalogPng(o = {}) {
   const tylkoTalie = new Set((o.talie || []).map(plain)), tylkoId = new Set((o.id || []).map((x) => plain(String(x))));
   const pomin = new Set(o.pominTalie || []);
   const wynik = [];
-  const filtr = $('filtr').value; $('filtr').value = ''; applyFilter();      // odfiltrowane talie też
-  try {
+  await zWszystkimiTaliami(async () => {      // odfiltrowane talie też (#114)
     for (const section of $('podglad').querySelectorAll('.talia')) {
       const talia = section.dataset.talia;
       if (pomin.has(talia) || (tylkoTalie.size && !tylkoTalie.has(plain(talia)))) continue;
@@ -2814,7 +2822,7 @@ async function katalogPng(o = {}) {
           rewersy: czesc.filter((x) => x.rewers).map((x) => x.podpis || 'Rewers'), zaDlugie });
       }
     }
-  } finally { $('filtr').value = filtr; applyFilter(); }
+  });
   return wynik;
 }
 
@@ -3133,8 +3141,7 @@ async function eksportujPcio(o = {}) {
   let z = 1, x = PCIO.margines, y = PCIO.margines, wysRzedu = 0;
 
   // Wszystkie talie, także odfiltrowane w podglądzie.
-  const filtr = $('filtr').value; $('filtr').value = ''; applyFilter();
-  try {
+  await zWszystkimiTaliami(async () => {
     // Karty jak w innych eksportach (pominTalie z okna, talie i id ze zlecenia – issue #32), stos na talię.
     const wybrane = new Set(kartyEksportu({ pominTalie: o.pominTalie, talie: o.talie, id: o.id }));
     for (const section of $('podglad').querySelectorAll('.talia')) {
@@ -3195,7 +3202,7 @@ async function eksportujPcio(o = {}) {
       report.push(`${nazwa}: ${cards.length} kart`);
       x += hw + PCIO.odstep; wysRzedu = Math.max(wysRzedu, hh);
     }
-  } finally { $('filtr').value = filtr; applyFilter(); }
+  });
   if (!widgets.length) { status('Eksport do playingcards.io: brak kart.'); return; }
 
   const zip = new JSZip();
