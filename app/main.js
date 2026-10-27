@@ -1380,7 +1380,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   }
   // Okna druku (#85, etap 1, --test-edytor, każdy projekt): „Druk domowy A4…” i „PDF dla drukarni…” – każde tylko ze swoimi
   // polami, „Drukuj…” tylko w A4; zapamiętane ustawienia dawnego okna „Druk i PDF” przeniesione (każde okno bierze swoje pola);
-  // zapis z okna dopisuje układ i pola do zestawu zlecenia pdf (pola drugiego okna zostają); zlecenie bez ustawień = wartości
+  // zapis z okna ustawia układ zlecenia pdf, a zlecenie bierze pola okna swojego układu (ukryte pola drugiego nie przeciekają); zlecenie bez ustawień = wartości
   // domyślne jak do 0.6.6; uklad = pojedyncze – działa z ostrzeżeniem; menu Plik – pozycje i skróty. Zrzuty -okno-a4.png i
   // -okno-drukarnia.png. Ustawienia okien na końcu jak przed blokiem (także w pliku ustawień projektu).
   let oknaDruku = null;
@@ -1419,10 +1419,13 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       if (a4.przyciski.join() !== 'Anuluj,Zapisz PDF,Drukuj…' || a4.domyslny !== 'Drukuj…') bledy.push('a4: przyciski ' + a4.przyciski.join() + ' / ' + a4.domyslny);
       if (a4.ciecie !== 'oba' || a4.wspolne !== false || a4.przesuniecieX !== '1.5' || a4.szkic !== true || a4.rewersy !== false) bledy.push('a4: nie przeniesiono ustawień ' + JSON.stringify(a4));
       const rA4 = oknaDruku.zapisA4 = await klik('pdf');
-      const poA4 = await js('({ a4: USTAWIENIA_OKIEN.a4, druk: USTAWIENIA_OKIEN.druk, zlecenie: opcjeZlecenia("pdf", {}).o })');
+      const poA4 = await js('({ a4: USTAWIENIA_OKIEN.a4, druk: USTAWIENIA_OKIEN.druk, zlecenie: opcjeZlecenia("pdf", {}).o, zlecDr: opcjeZlecenia("pdf", { uklad: "drukarnia" }).o })');
       if (!rA4 || rA4.akcja !== 'pdf' || rA4.opcje.uklad !== 'a4' || rA4.opcje.ciecie !== 'oba') bledy.push('a4: wynik okna ' + JSON.stringify(rA4));
       if (!poA4.a4 || 'uklad' in poA4.a4 || 'spad' in poA4.a4 || poA4.a4.ciecie !== 'oba') bledy.push('a4: zapamiętane ' + JSON.stringify(poA4.a4));
-      if (poA4.druk.uklad !== 'a4' || poA4.druk.spad !== 2 || poA4.druk.strony !== 'naprzemian' || poA4.zlecenie.uklad !== 'a4' || poA4.zlecenie.ciecie !== 'oba') bledy.push('a4: zestaw zlecenia ' + JSON.stringify(poA4.druk));
+      // zlecenie bez uklad – układ okna użytego ostatnio i jego pola; uklad = drukarnia – pola drukarni przeniesione z dawnego okna, szkic A4 nie przecieka
+      const zA = poA4.zlecenie, zD = poA4.zlecDr;
+      if (poA4.druk.uklad !== 'a4' || zA.uklad !== 'a4' || zA.ciecie !== 'oba' || zA.szkic !== true || zA.przesuniecieX !== 1.5) bledy.push('a4: zlecenie po zapisie ' + JSON.stringify(zA));
+      if (zD.uklad !== 'drukarnia' || zD.spad !== 2 || zD.strony !== 'naprzemian' || zD.szkic !== false || zD.ciecie !== 'znaczniki') bledy.push('a4: zlecenie drukarnia ' + JSON.stringify(zD));
       // b) PDF dla drukarni
       const dr = oknaDruku.drukarnia = await otworz('drukarnia');
       await zrzut('drukarnia');
@@ -1433,12 +1436,15 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       if (dr.strony !== 'naprzemian' || dr.rewersy !== false || dr.nadruk !== false || (!spadSzablonu && dr.spad !== '2') || (spadSzablonu && !dr.spadWylaczony)
         || (!dr.profilWylaczony && dr.profil !== 'fogra51')) bledy.push('drukarnia: nie przeniesiono ustawień ' + JSON.stringify(dr));
       const rDr = oknaDruku.zapisDrukarnia = await klik('pdf');
-      const poDr = await js('({ druk: USTAWIENIA_OKIEN.druk, drukarnia: USTAWIENIA_OKIEN.drukarnia })');
+      const poDr = await js('({ druk: USTAWIENIA_OKIEN.druk, drukarnia: USTAWIENIA_OKIEN.drukarnia, zlecenie: opcjeZlecenia("pdf", {}).o, zlecA4: opcjeZlecenia("pdf", { uklad: "a4" }).o })');
       if (!rDr || rDr.opcje.uklad !== 'drukarnia' || rDr.opcje.strony !== 'naprzemian') bledy.push('drukarnia: wynik okna ' + JSON.stringify(rDr));
       if (!poDr.drukarnia || 'ciecie' in poDr.drukarnia || 'szkic' in poDr.drukarnia) bledy.push('drukarnia: zapamiętane ' + JSON.stringify(poDr.drukarnia));
-      if (poDr.druk.uklad !== 'drukarnia' || poDr.druk.ciecie !== 'oba' || poDr.druk.strony !== 'naprzemian') bledy.push('drukarnia: zestaw zlecenia ' + JSON.stringify(poDr.druk));
+      const zDr = poDr.zlecenie, zA4 = poDr.zlecA4;
+      if (poDr.druk.uklad !== 'drukarnia' || zDr.uklad !== 'drukarnia' || zDr.strony !== 'naprzemian' || zDr.rewersy !== false || zDr.szkic !== false || zDr.ciecie !== 'znaczniki' || zDr.przesuniecieX !== 0)
+        bledy.push('drukarnia: zlecenie po zapisie (ukryte pola A4 nie mogą przeciec) ' + JSON.stringify(zDr));
+      if (zA4.uklad !== 'a4' || zA4.szkic !== true || zA4.ciecie !== 'oba' || 'strony' in zA4 && zA4.strony !== 'osobno') bledy.push('drukarnia: zlecenie a4 ' + JSON.stringify(zA4));
       // c) Okno z własnymi ustawieniami nie bierze już pól z zestawu zlecenia.
-      const wlasne = await js(`(() => { USTAWIENIA_OKIEN.druk = { ...USTAWIENIA_OKIEN.druk, ciecie: 'znaczniki' }; return ustawieniaOkna('a4').ciecie; })()`);
+      const wlasne = await js(`(() => { USTAWIENIA_OKIEN.druk = { ...USTAWIENIA_OKIEN.druk, ciecie: 'nozyczki' }; return ustawieniaOkna('a4').ciecie; })()`);
       if (wlasne !== 'oba') bledy.push('a4: własne ustawienia nadpisane zestawem zlecenia: ' + wlasne);
       // d) Zlecenie pdf: uklad = pojedyncze działa (zgodność) z ostrzeżeniem; inne układy bez niego.
       oknaDruku.pojedyncze = await js(`(() => { const z = (u) => opcjeZlecenia('pdf', { uklad: u });

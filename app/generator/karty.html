@@ -2819,7 +2819,8 @@ function opcjeZlecenia(polecenie, surowe = {}) {
     v[k] = String(wart).trim();
   }
   const okno = OKNO_ZLECENIA[polecenie];
-  const o = polecenie === 'pdf' ? ustawieniaDruku() : okno ? { ...OKNA[okno].domyslne, ...(USTAWIENIA_OKIEN[okno] || {}) } : {};
+  const ukladZlecenia = v.uklad !== undefined ? ({ osobne: 'pojedyncze' }[plain(v.uklad)] || plain(v.uklad)) : undefined;
+  const o = polecenie === 'pdf' ? ustawieniaDruku(ukladZlecenia) : okno ? { ...OKNA[okno].domyslne, ...(USTAWIENIA_OKIEN[okno] || {}) } : {};
   const lista = (x) => x.split(',').map((y) => y.trim()).filter(Boolean);
   const tak = (k) => {
     const x = plain(v[k]);
@@ -3325,9 +3326,9 @@ async function odswiezCmyk() {
 // Jedno okno dialogowe z zestawem pól zależnym od rodzaju. Ostatnie ustawienia są zapamiętywane
 // osobno dla każdego projektu (dane aplikacji: eksport/<szablon>.json). Enter = przycisk domyślny, Esc = anuluj.
 // Druk (#85, etap 1, od 0.6.7): dwa okna zamiast jednego „Druk i PDF” – „Druk domowy A4…” (a4) i „PDF dla drukarni…”
-// (drukarnia), każde tylko ze swoimi polami. USTAWIENIA_OKIEN.druk zostaje jako zestaw zlecenia pdf (brak klucza =
-// ostatnie ustawienie z okna): zapis z okna druku dopisuje tam swoje pola i uklad. Okno bez własnych ustawień bierze
-// swoje pola z USTAWIENIA_OKIEN.druk (zapamiętane dawnego okna – ustawieniaOkna).
+// (drukarnia), każde tylko ze swoimi polami. USTAWIENIA_OKIEN.druk – zapamiętane dawnego okna; zapis z okna druku
+// ustawia tam tylko uklad (okno użyte ostatnio – zlecenie pdf bez klucza uklad). Okno bez własnych ustawień bierze
+// swoje pola z USTAWIENIA_OKIEN.druk (ustawieniaOkna); zlecenie pdf – pola okna swojego układu (ustawieniaDruku).
 let USTAWIENIA_OKIEN = {};
 // Wartości domyślne zlecenia pdf – jak dawnego okna „Druk i PDF” (te same klucze i wartości co do 0.6.6).
 const DRUK_DOMYSLNE = { uklad: 'a4', ciecie: 'znaczniki', spad: SPAD_DRUKARNI, strony: 'osobno', cmyk: true, profil: 'fogra39', nadrukCzerni: true, rewersy: true, wspolne: true, przesuniecieX: 0, przesuniecieY: 0, szkic: false, ktore: 'wszystkie', pominTalie: [] };
@@ -3435,8 +3436,17 @@ function ustawieniaOkna(rodzaj) {
   const dawne = def.uklad && !wlasne ? wybierzKlucze(USTAWIENIA_OKIEN.druk || {}, Object.keys(def.domyslne)) : {};
   return { ...def.domyslne, ...dawne, ...(wlasne || {}) };
 }
-// Ustawienia zlecenia pdf (brak klucza = ostatnie ustawienie z okna druku albo domyślne jak do 0.6.6).
-const ustawieniaDruku = () => ({ ...DRUK_DOMYSLNE, ...(USTAWIENIA_OKIEN.druk || {}) });
+// Ustawienia zlecenia pdf (brak klucza = ostatnie ustawienie z okna albo domyślne jak do 0.6.6). uklad: z klucza
+// zlecenia, bez niego – układ okna druku użytego ostatnio (USTAWIENIA_OKIEN.druk.uklad). Pola bierze okno tego układu
+// (ustawieniaOkna – też przeniesione z dawnego okna); pól, których to okno nie ma (np. szkic przy drukarni), nie da się
+// w nim zobaczyć, więc mają wartości domyślne – ukryte ustawienie drugiego okna nie przecieka do zlecenia.
+function ustawieniaDruku(uklad) {
+  const baza = { ...DRUK_DOMYSLNE, ...(USTAWIENIA_OKIEN.druk || {}) };
+  const okno = { a4: 'a4', drukarnia: 'drukarnia' }[uklad || baza.uklad];
+  if (!okno) return baza;                                      // pojedyncze (tylko zlecenie) – jak do 0.6.6
+  const inne = Object.keys(DRUK_DOMYSLNE).filter((k) => k !== 'uklad' && !(k in OKNA[okno].domyslne));
+  return { ...baza, ...wybierzKlucze(DRUK_DOMYSLNE, inne), ...ustawieniaOkna(okno), uklad: baza.uklad };
+}
 // Zwraca { akcja, opcje } albo null (anulowano). domyslna: która akcja jest pod Enterem.
 function otworzOkno(rodzaj, domyslna) {
   const def = OKNA[rodzaj];
@@ -3479,8 +3489,8 @@ function otworzOkno(rodzaj, domyslna) {
       if (!b.dataset.akcja) return zamknij(null);
       const opcje = zbierz();
       USTAWIENIA_OKIEN[rodzaj] = opcje;
-      // Okno druku: zlecenie pdf bez klucza bierze ostatnie ustawienia – pola tego okna i jego układ (pola drugiego zostają).
-      if (def.uklad) USTAWIENIA_OKIEN.druk = { ...(USTAWIENIA_OKIEN.druk || {}), ...opcje, uklad: def.uklad };
+      // Okno druku: zlecenie pdf bez klucza uklad bierze układ okna użytego ostatnio (pola – z okna tego układu).
+      if (def.uklad) USTAWIENIA_OKIEN.druk = { ...(USTAWIENIA_OKIEN.druk || {}), uklad: def.uklad };
       try { await APP.zapiszEksportUstawienia(USTAWIENIA_OKIEN); } catch (e) { /* bez zapamiętania */ }
       zamknij({ akcja: b.dataset.akcja, opcje: def.uklad ? { ...opcje, uklad: def.uklad } : opcje });
     };
