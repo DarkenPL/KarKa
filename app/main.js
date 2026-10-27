@@ -1106,8 +1106,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const panel = /Nie zmierzono/.test(panelHtml) || !/Drukarnia: tekst/.test(panelHtml);
       await pokazRaport(false);
       // Przebudowa przy widocznym panelu Raport sama uruchamia jeszcze jeden raport (zbudujTeraz → pokazRaport(true), bez
-      // czekania) – trwa on dalej po Promise.all i do końca ma pusty filtr. Pod obciążeniem (CI, 4 procesy naraz) test
-      // czytał filtr w jego trakcie, a potem ten raport przywracał filtr testu kolejnym blokom. Czekamy, aż kolejki ustaną.
+      // czekania) – trwa on dalej po Promise.all. Do 0.7.1 miał do końca pusty filtr i pod obciążeniem (CI, 4 procesy naraz)
+      // przywracał potem filtr testu kolejnym blokom (od 0.7.2 filtr bez zmian – #114). Czekamy, aż kolejki ustaną.
       for (let r = null, b = null; r !== KOLEJKA_RAPORTU_DRUKARNI || b !== KOLEJKA_BUDOWY;) {
         r = KOLEJKA_RAPORTU_DRUKARNI; b = KOLEJKA_BUDOWY; await Promise.all([r, b]);
       }
@@ -2153,6 +2153,56 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       profileDr.ok = !bledy.length;
     }
   }
+  // Filtr talii zmieniony w trakcie raportu drukarni, katalogu i eksportu pcio (#114): praca na wszystkich taliach mimo
+  // filtra, wybór użytkownika zostaje po końcu, żadna karta niezmierzona. Także raport w trakcie pcio (zagnieżdżenie)
+  // i z włączonym „Pokaż rewersy kart” (#podglad.schowany). Projekt z co najmniej dwiema taliami; pcio – poza przykładami.
+  let filtrWTrakcie = null;
+  if (testBloku('filtrWTrakcie')) {
+    filtrWTrakcie = await wc.executeJavaScript(`(async () => {
+      const talie = [...$('filtr').options].map((o) => o.value).filter(Boolean);
+      if (talie.length < 2) return { pominiety: true };
+      const [A, B] = talie, wszystkie = document.querySelectorAll('#podglad .talia .karta').length;
+      const sekcje = document.querySelectorAll('#podglad .talia').length, awersy = document.querySelectorAll('#podglad .karta:not(.rewers)').length;
+      const ustaw = (v) => { $('filtr').value = v; $('filtr').dispatchEvent(new Event('change')); };
+      const widoczne = () => visibleSections().map((s) => s.dataset.talia).join('|');
+      // Start pracy = klasa na #podglad (przed #114: wyczyszczone pole filtra) – dopiero wtedy zmiana filtra „w trakcie”.
+      const wTrakcie = async () => { for (let i = 0; i < 2000; i++) { if ($('podglad').classList.contains('wszystkie-talie') || !$('filtr').value) return true; await new Promise((r) => setTimeout(r, 2)); } return false; };
+      const po = () => ({ filtr: $('filtr').value === B, widoczne: widoczne() === B, bezKlasy: !$('podglad').classList.contains('wszystkie-talie') });
+      const raportOk = (r) => !!r && !r.blad && r.karty === wszystkie && r.niezmierzone.length === 0;
+      const blad = (e) => ({ blad: String((e && (e.message || e.type)) || e) });
+      const w = {}, start = { filtr: $('filtr').value, rewersy: POKAZ_REWERSY };   // stan strony – przywracany na końcu
+      try {
+        ustaw(A); let p = raportDrukarni().catch(blad); w.raportStart = await wTrakcie(); ustaw(B);
+        let r = await p; w.raport = { karty: r.karty, wszystkie, niezmierzone: r.niezmierzone && r.niezmierzone.length, blad: r.blad, ...po() };
+        w.raport.ok = w.raportStart && raportOk(r) && w.raport.filtr && w.raport.widoczne && w.raport.bezKlasy;
+        ustaw(A); p = katalogPng({}).catch(blad); w.katalogStart = await wTrakcie(); ustaw(B);
+        const k0 = await p, k = Array.isArray(k0) ? k0 : [], talieKat = [...new Set(k.map((x) => x.talia))];
+        w.katalog = { blad: k0 && k0.blad, talie: talieKat.length, oczekiwane: talie.length, puste: k.filter((x) => !x.blob || x.blob.size < 1000).length, ...po() };
+        w.katalog.ok = w.katalogStart && talieKat.length === talie.length && w.katalog.puste === 0 && w.katalog.filtr && w.katalog.widoczne && w.katalog.bezKlasy;
+        pokazRewersyKart(true);
+        ustaw(A); p = raportDrukarni().catch(blad); w.rewersyStart = await wTrakcie(); ustaw(B);
+        r = await p; pokazRewersyKart(false);
+        w.rewersy = { karty: r.karty, niezmierzone: r.niezmierzone && r.niezmierzone.length, blad: r.blad, ...po() };
+        w.rewersy.ok = w.rewersyStart && raportOk(r) && w.rewersy.filtr && w.rewersy.bezKlasy;
+        if (${!jestPrzykladem(szablon)}) {
+          ustaw(A); p = exportPcio().catch(blad); w.pcioStart = await wTrakcie();
+          const q = raportDrukarni().catch(blad);                          // w trakcie eksportu – bez kolejki (EKSPORT_TRWA)
+          ustaw(B);
+          const [x, rz] = await Promise.all([p, q]);
+          w.pcio = { blad: (x && x.blad) || (rz && rz.blad), holdery: x && x.holdery, sekcje, karty: x && x.karty, awersy, raport: rz && rz.karty, niezmierzone: rz && rz.niezmierzone && rz.niezmierzone.length, ...po() };
+          w.pcio.ok = w.pcioStart && !!x && x.holdery === sekcje && x.karty === awersy && raportOk(rz) && w.pcio.filtr && w.pcio.widoczne && w.pcio.bezKlasy;
+          // Eksport obrazków (JPG) przy filtrze na jedną talię: karty talii ukrytych filtrem też (html-to-image – karta z wymiarami).
+          ustaw(A); p = eksportObrazkow({ zlecenie: true, rewersy: false }).catch(blad); w.obrazkiStart = await wTrakcie(); ustaw(B);
+          const o = await p;
+          w.obrazki = { blad: o && o.blad, pliki: o && o.pliki, awersy, ...po() };
+          w.obrazki.ok = w.obrazkiStart && !!o && !o.blad && o.pliki === awersy && w.obrazki.filtr && w.obrazki.widoczne && w.obrazki.bezKlasy;
+        }
+        return w;
+      } finally { ustaw(start.filtr); pokazRewersyKart(start.rewersy); }
+    })()`);
+    const f = filtrWTrakcie;
+    f.ok = !!f.pominiety || !!(f.raport.ok && f.katalog.ok && f.rewersy.ok && (!f.pcio || (f.pcio.ok && f.obrazki.ok)));
+  }
   // Katalog (--test-edytor, poza przykładami): A – Export/katalog; B – zlecenie z pliku → wynik.json.
   let katalog = null;
   if (testBloku('katalog') && !jestPrzykladem(szablon)) {
@@ -3150,9 +3200,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     && Menu.getApplicationMenu().items[0].submenu.items.some((i) => i.label === 'Sprawdź aktualizacje…');
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
-    && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
+    && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!filtrWTrakcie || filtrWTrakcie.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
