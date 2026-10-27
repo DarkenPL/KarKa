@@ -71,6 +71,8 @@ Człony wzoru: `{projekt}` (`PROJEKT =` z szablonu, bez niego nazwa folderu), `{
 | `{projekt} – printnet{dopiski}` (Printnet, tylko zaznaczone) | `Wieże – printnet – wybrane.pdf` |
 | `{projekt} – drukarnia{dopiski} – {strona}` (Własne – domyślnie, jak do 0.6.8) | `Wieże – drukarnia.pdf` albo `… – awersy.pdf` / `… – rewersy.pdf` |
 
+Przy `strony = dwapliki` bez rewersów (żadna talia nie ma `[REWERS]` albo rewersy wyłączone) powstaje jeden plik z członem `{strona}` = `awersy` (LongPack: `…_Front_PL.pdf`).
+
 W oknie zapisu pierwszy plik ma nazwę z profilu – można ją zmienić; drugi plik (rewersy) powstaje obok, z nazwą z profilu. Zlecenie z kluczem `plik` używa podanej nazwy (drugi plik: `<plik> – rewersy.pdf`).
 
 ### Spad z profilu a spad w szablonie

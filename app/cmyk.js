@@ -684,7 +684,8 @@ function pikseleTiff(buf) {
   const ifd = u32(4), n = u16(ifd), tagi = {};
   for (let i = 0; i < n; i++) {
     const e = ifd + 2 + i * 12, tag = u16(e), typ = u16(e + 2), ile = u32(e + 4);
-    const roz = typ === 3 ? 2 : 4, czytaj = (o) => (typ === 3 ? u16(o) : u32(o));
+    if (![256, 257, 258, 259, 273, 277, 279].includes(tag)) continue;     // tylko potrzebne pola (inne typy, np. ASCII, pomijane)
+    const roz = { 1: 1, 2: 1, 3: 2, 4: 4 }[typ] || 8, czytaj = (o) => (typ === 3 ? u16(o) : u32(o));
     const start = ile * roz > 4 ? u32(e + 8) : e + 8;
     tagi[tag] = Array.from({ length: ile }, (_, j) => czytaj(start + j * roz));
   }

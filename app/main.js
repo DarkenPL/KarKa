@@ -1587,24 +1587,26 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     drukarniaPdf.osobno = await przebieg('osobno', { spad: 3, strony: 'osobno' }, sp(3), osobnoStrony, o.szer + 2 * sp(3), o.wys + 2 * sp(3));
     drukarniaPdf.naprzemian = await przebieg('naprzemian', { spad: 2, strony: 'naprzemian' }, sp(2), [o.karty + o.zRewersem], o.szer + 2 * sp(2), o.wys + 2 * sp(2));
     drukarniaPdf.bezRewersow = await przebieg('bez-rewersow', { spad: 3, strony: 'osobno', rewersy: false }, sp(3), [o.karty], o.szer + 2 * sp(3), o.wys + 2 * sp(3));
-    // d) okno Druk i PDF: domyślnie spad 3 i strony „osobno”; zapamiętany spad 2,5 jako trzecia pozycja.
+    // d) okno PDF dla drukarni (0.7.0 – „Własne ustawienia” bez zapisanego pliku): domyślnie spad 3 i strony „osobno”;
+    //    zapamiętany w oknie 0.6.x spad 2,5 → wybrane Własne ustawienia ze spadem 2,5.
     drukarniaPdf.okno = await js(`(async () => {
       const przed = USTAWIENIA_OKIEN.druk, przedD = USTAWIENIA_OKIEN.drukarnia, f = () => document.getElementById('oknoForm');
       const stan = async (ust) => {
         if (ust) USTAWIENIA_OKIEN.drukarnia = ust; else delete USTAWIENIA_OKIEN.drukarnia;
         delete USTAWIENIA_OKIEN.druk;
         const p = otworzOkno('drukarnia');
-        const r = { spady: [...f().querySelectorAll('[name=spad]')].map((x) => x.value), spad: (f().querySelector('[name=spad]:checked') || {}).value,
+        const r = { drukarnia: (f().querySelector('[name=drukarnia]:checked') || {}).value, spad: (f().querySelector('[name=wlSpad]') || {}).value,
           strony: [...f().querySelectorAll('[name=strony]')].map((x) => x.value), stronyWybrane: (f().querySelector('[name=strony]:checked') || {}).value };
         document.getElementById('okno').dispatchEvent(new Event('cancel')); await p;
         return r;
       };
+      const wl = DRUKARNIE.wlasne; DRUKARNIE.wlasne = null;
       try { return { domyslnie: await stan(null), zapamietane: await stan({ spad: 2.5 }) }; }
-      finally { if (przed) USTAWIENIA_OKIEN.druk = przed; else delete USTAWIENIA_OKIEN.druk; if (przedD) USTAWIENIA_OKIEN.drukarnia = przedD; else delete USTAWIENIA_OKIEN.drukarnia; }
+      finally { DRUKARNIE.wlasne = wl; if (przed) USTAWIENIA_OKIEN.druk = przed; else delete USTAWIENIA_OKIEN.druk; if (przedD) USTAWIENIA_OKIEN.drukarnia = przedD; else delete USTAWIENIA_OKIEN.drukarnia; }
     })()`);
     const ow = drukarniaPdf.okno;
-    drukarniaPdf.okno.ok = ow.domyslnie.spad === '3' && ow.domyslnie.spady.join() === '3,2' && ow.domyslnie.strony.join() === 'osobno,naprzemian' && ow.domyslnie.stronyWybrane === 'osobno'
-      && ow.zapamietane.spad === (o.zad ? String(o.zad) : '2.5') &&   /* spad z szablonu (#84): zaznaczony spad szablonu */ ow.zapamietane.spady.length === 3 && ow.zapamietane.spady.includes('2.5');
+    drukarniaPdf.okno.ok = ow.domyslnie.spad === '3' && ow.domyslnie.strony.join() === 'osobno,dwapliki,naprzemian' && ow.domyslnie.stronyWybrane === 'osobno'
+      && ow.zapamietane.drukarnia === 'wlasne' && ow.zapamietane.spad === '2.5';
     if (!ow.ok) bledy.push('okno: ' + JSON.stringify(ow));
     // e) raport drukarni: sekcje tylko z drukarnia: true.
     const sekcje = await js(`(async () => ({ z: (await raportJson({ drukarnia: true })).map((x) => x.tytul), bez: (await raportJson({})).map((x) => x.tytul) }))()`);
@@ -1997,11 +1999,15 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const { PDFDocument, PDFName } = require('./drukarnia').pdfLib(ZASOBY);
       const MMpt = 72 / 25.4, bliskie = (a, b) => Math.abs(a - b) <= 0.02;
       const stan = await js(`(() => { const k = [...document.querySelectorAll('#podglad .siatka .karta:not(.rewers)')];
-        return { kopie: k.length, projekt: PROJEKT, wersja: WERSJA, karta: cardMm(k[0]), spad: spadTalii(k[0].dataset.talia) }; })()`);
+        const r = k.map((x) => cardMm(x).slice().sort((a, b) => a - b).join('x'));
+        return { kopie: k.length, projekt: PROJEKT || null, wersja: WERSJA, karta: cardMm(k[0]), jedenRozmiar: new Set(r).size === 1,
+          spad: Math.min(...[...document.querySelectorAll('#podglad .talia')].map((t) => spadTalii(t.dataset.talia))),
+          zRewersem: kartyEksportu({}).filter((x) => rewersKarty(x)).length }; })()`);
+      if (!stan.projekt) stan.projekt = await js('APP.info().then((i) => i.nazwa)');     // bez PROJEKT = – nazwa projektu
       profileDr.stan = stan;
       const pdfinfo = (f) => { const r = require('child_process').spawnSync('pdfinfo', [f], { encoding: 'utf8' }); return r.error || r.status ? null : r.stdout; };
       // Plik PDF/X-4: Output Intent (profil osadzony = plik konwersji), Info i XMP zgodne, PDF 1.6, bez ArtBox; ramki wg spadu.
-      const sprawdzPlik = async (f, spad, opis) => {
+      const sprawdzPlik = async (f, spad, opis, strona) => {
         const buf = fs.readFileSync(f), surowy = buf.toString('latin1'), doc = await PDFDocument.load(buf, { updateMetadata: false });
         const w = { plik: path.basename(f), stron: doc.getPageCount(), naglowek: surowy.slice(0, 8) };
         const oi = doc.catalog.lookup(PDFName.of('OutputIntents'));
@@ -2017,10 +2023,12 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         w.pdfinfo = pi ? (pi.match(/PDF subtype:\s*(.*)/) || [])[1] || '' : 'brak pdfinfo';
         if (w.naglowek !== '%PDF-1.6' || !w.outputIntent || w.info.pdfx !== '(PDF/X-4)' || w.info.trapped !== '/False' || !w.xmp.pdfx || !w.xmp.trapped || !w.xmp.docId || w.artBox
           || (pi && !/PDF\/X-4/.test(w.pdfinfo))) bledy.push(`${opis}: ${w.plik} nie jest PDF/X-4: ` + JSON.stringify(w));
-        const [kw, kh] = stan.karta, W = (kw + 2 * spad) * MMpt, H = (kh + 2 * spad) * MMpt;
+        // Strona z wyniku zlecenia (największa karta + 2 × spad profilu); TrimBox = karta, co najmniej spad od krawędzi strony.
+        const W = strona[0] * MMpt, H = strona[1] * MMpt, sp = spad * MMpt;
         doc.getPages().forEach((s, i) => {
           const mb = s.getMediaBox(), bb = s.getBleedBox(), tb = s.getTrimBox();
-          if (!bliskie(mb.width, W) || !bliskie(mb.height, H) || !bliskie(bb.width, W) || !bliskie(tb.width, kw * MMpt) || !bliskie(tb.height, kh * MMpt) || !bliskie(tb.x, spad * MMpt))
+          if (!bliskie(mb.width, W) || !bliskie(mb.height, H) || !bliskie(bb.width, W) || !bliskie(bb.height, H) || tb.x < sp - 0.02 || tb.y < sp - 0.02
+            || tb.x + tb.width > W - sp + 0.02 || tb.y + tb.height > H - sp + 0.02 || (stan.jedenRozmiar && (!bliskie(tb.x, sp) || !bliskie(tb.y, sp))))
             bledy.push(`${opis}: ${w.plik} str. ${i + 1}: ramki ${[mb.width, mb.height, tb.x, tb.width, tb.height].map((x) => (x / MMpt).toFixed(2)).join(' / ')} mm`);
         });
         return w;
@@ -2029,16 +2037,20 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         // a) LongPack: dwa pliki z nazwami z profilu, rewersy osobno (wspólny rewers – plik z jedną stroną); spad = 2 pominięty z ostrzeżeniem.
         const lp = await zlec('drukarnia = longpack\nspad = 2\n');
         const nazwa = (st) => [stan.projekt, 'Playingcards', st, 'PL', stan.wersja].filter(Boolean).join('_') + '.pdf';
-        profileDr.longpack = lp && { ok: lp.ok, blad: lp.blad, pliki: lp.pliki, drukarnia: lp.drukarnia, spad: lp.spad, ostrzezenia: lp.ostrzezenia, cmyk: lp.cmyk && { pdfx: lp.cmyk.pdfx, maksTAC: lp.cmyk.maksTAC, limitTAC: lp.cmyk.limitTAC, pliki: lp.cmyk.pliki.map((k) => k.maksTAC) } };
+        profileDr.longpack = lp && { ok: lp.ok, blad: lp.blad, pliki: lp.pliki, drukarnia: lp.drukarnia, spad: lp.spad, strona: lp.strona, ostrzezenia: lp.ostrzezenia, cmyk: lp.cmyk && { pdfx: lp.cmyk.pdfx, maksTAC: lp.cmyk.maksTAC, limitTAC: lp.cmyk.limitTAC, pliki: lp.cmyk.pliki.map((k) => k.maksTAC) } };
         if (!lp || !lp.ok) bledy.push('longpack: ' + JSON.stringify(lp && lp.blad));
         else {
-          if (lp.pliki.join() !== [nazwa('Front'), nazwa('Back')].join() || lp.drukarnia !== 'longpack' || lp.spad !== 3) bledy.push('longpack: pliki/spad ' + JSON.stringify(profileDr.longpack));
+          const plikiLp = stan.zRewersem ? [nazwa('Front'), nazwa('Back')] : [nazwa('Front')];
+          if (lp.pliki.join() !== plikiLp.join() || lp.drukarnia !== 'longpack' || lp.spad !== 3) bledy.push('longpack: pliki/spad ' + JSON.stringify(profileDr.longpack));
           if (!(lp.ostrzezenia || []).some((x) => /spad.*ustala profil drukarni LongPack/.test(x))) bledy.push('longpack: brak ostrzeżenia o pominiętym kluczu spad');
           if (lp.cmyk.pdfx !== 'PDF/X-4' || lp.cmyk.limitTAC !== 300 || !Number.isFinite(lp.cmyk.maksTAC) || profileDr.longpack.cmyk.pliki.some((x) => !Number.isFinite(x))) bledy.push('longpack: cmyk ' + JSON.stringify(profileDr.longpack.cmyk));
           if (prawdziwy300 && lp.cmyk.maksTAC > 300) bledy.push('longpack: maksTAC ' + lp.cmyk.maksTAC + ' > 300 przy ISO Coated v2 300 %');
-          const pf = await sprawdzPlik(path.join(projekt, lp.pliki[0]), 3, 'longpack'), pb = await sprawdzPlik(path.join(projekt, lp.pliki[1]), 3, 'longpack');
+          const pf = await sprawdzPlik(path.join(projekt, lp.pliki[0]), 3, 'longpack', lp.strona);
+          const pb = lp.pliki[1] ? await sprawdzPlik(path.join(projekt, lp.pliki[1]), 3, 'longpack', lp.strona) : { stron: 0 };
           profileDr.longpack.stron = [pf.stron, pb.stron];
-          if (pf.stron !== stan.kopie || pb.stron !== 1) bledy.push(`longpack: stron ${pf.stron} + ${pb.stron}, oczekiwane ${stan.kopie} + 1`);
+          // Wspólny rewers – plik rewersów z jedną stroną, różne rewersy – strona na kartę (plan druku: strony pliku 1).
+          const rewersowWPlanie = await js('PLAN_DRUKU.strony.filter((s) => s.plik === 1).length');
+          if (pf.stron !== stan.kopie || pb.stron !== rewersowWPlanie || !(pb.stron === 1 || pb.stron === stan.kopie || !stan.zRewersem)) bledy.push(`longpack: stron ${pf.stron} + ${pb.stron}, oczekiwane ${stan.kopie} + 1 albo ${stan.kopie}`);
         }
         // b) Printnet: jeden plik, awers/rewers na zmianę, spad 2 mm (szablon 3 mm – przycięty, informacje).
         const pn = await zlec('drukarnia = printnet\n');
@@ -2047,13 +2059,15 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         else {
           if (pn.pliki.length !== 1 || pn.pliki[0] !== stan.projekt + ' – printnet.pdf' || pn.spad !== 2) bledy.push('printnet: ' + JSON.stringify(profileDr.printnet));
           if (stan.spad > 2 && !(pn.informacje || []).some((x) => /przycięty do 2 mm/.test(x))) bledy.push('printnet: brak informacji o przycięciu spadu');
-          const w = await sprawdzPlik(path.join(projekt, pn.pliki[0]), 2, 'printnet');
+          const w = await sprawdzPlik(path.join(projekt, pn.pliki[0]), 2, 'printnet', pn.strona);
           profileDr.printnet.stron = w.stron;
           // Kolejność stron z arkuszy druku: awers, rewers, awers, rewers…
           const rewersy = await js("[...document.querySelectorAll('#druk .arkusz')].map((a) => !!a.querySelector('.karta.rewers'))");
           profileDr.printnet.kolejnosc = rewersy.map((r) => (r ? 'R' : 'A')).join('');
-          if (w.stron !== 2 * stan.kopie || rewersy.length !== w.stron) bledy.push(`printnet: stron ${w.stron}, arkuszy ${rewersy.length}, oczekiwane ${2 * stan.kopie}`);
-          if (rewersy.some((r, i) => r !== (i % 2 === 1))) bledy.push('printnet: strony nie są na przemian awers / rewers: ' + profileDr.printnet.kolejnosc);
+          // Każdy awers z rewersem ma go na następnej stronie; talia bez [REWERS] – same awersy.
+          if (w.stron !== stan.kopie + stan.zRewersem || rewersy.length !== w.stron) bledy.push(`printnet: stron ${w.stron}, arkuszy ${rewersy.length}, oczekiwane ${stan.kopie + stan.zRewersem}`);
+          const k = profileDr.printnet.kolejnosc;
+          if (!/^(AR?)+$/.test(k) || (k.match(/R/g) || []).length !== stan.zRewersem) bledy.push('printnet: strony nie są na przemian awers / rewers: ' + k);
         }
         // c) Własne ustawienia: pdfx = nie – bez PDF/X (jak 0.6.8); spad 5 mm > szablon → ok: false.
         const wl = await zlec('drukarnia = wlasne\nprofil = iso300\npdfx = nie\nplik = Export/wlasne-bez-pdfx.pdf\n');

@@ -3350,7 +3350,8 @@ async function zapiszPdf(o = {}) {
   let nazwa = (PROJEKT || info.nazwa || 'karty') + ({ pojedyncze: ' – karty pojedynczo', drukarnia: ' – drukarnia' }[o.uklad] || ' – karty A4') + dopiski;
   // Profil drukarni: nazwy plików z wzoru profilu (bez klucza plik w zleceniu – plik wskazany ręcznie ma pierwszeństwo).
   if (druk && o.profilDrukarni && !(o.zlecenie && o.plik)) {
-    druk.nazwyCzesci = plan.pliki.map((cz) => nazwaPlikuDrukarni(o.profilDrukarni, plan.pliki.length > 1 ? cz : 'razem', dopiski, info.nazwa));
+    // dwapliki bez rewersów (żadna talia nie ma [REWERS] albo rewersy wyłączone) – jeden plik awersów („Front”).
+    druk.nazwyCzesci = plan.pliki.map((cz) => nazwaPlikuDrukarni(o.profilDrukarni, plan.pliki.length > 1 ? cz : o.strony === 'dwapliki' ? 'awersy' : 'razem', dopiski, info.nazwa));
     nazwa = druk.nazwyCzesci[0];
   }
   status('Zapisywanie PDF…');
