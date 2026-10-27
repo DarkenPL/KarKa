@@ -2,13 +2,15 @@
 # - każda zmiana w main → wydanie v<wersja z app/package.json> z DMG, oznaczone jako najnowsze
 #   (link w README: releases/latest/download/KarKa.dmg); wersja już wydana → tylko ostrzeżenie,
 # - tag v* albo wydanie opublikowane ręcznie na GitHubie → plik dołączony do tego wydania,
-# - pull request → tylko budowanie i testy (plik w Artifacts).
-# Testy przykładów (#88) – tryb zależy od zdarzenia (krok „Tryb testów”):
-# - pr (pull request): pełny --test-edytor tylko na 07-gildie (dwa równoległe procesy: ciężkie bloki i reszta),
-#   08-wieze – blok spadSzablonu, pozostałe przykłady --test-pdf; do 3 procesów naraz (app/scripts/testy-ci.js);
+# - pull request → tylko budowanie i testy (bez DMG; w Artifacts tylko wyniki-testow).
+# Testy przykładów (#88, #101) – tryb zależy od zdarzenia (krok „Tryb testów”):
+# - pr (pull request): pełny --test-edytor tylko na 07-gildie, w trzech procesach (grupy z app/scripts/grupy-testow.js:
+#   zlecenia + zmienione + cmykTest, zakladki, reszta = dopełnienie), 08-wieze – blok spadSzablonu, pozostałe przykłady
+#   --test-pdf; do 4 procesów naraz (app/scripts/testy-ci.js);
 # - main (push do main po scaleniu przetestowanego PR-a): bez testów przykładów, tylko start, nowy projekt i nakładka;
 # - pelny (ręcznie – workflow_dispatch, tag v*, wydanie opublikowane na GitHubie): --test-edytor na wszystkich przykładach
-#   (też do 3 naraz).
+#   (też do 4 naraz).
+# DMG, „Sprawdzenie DMG”, pliki aktualizacji i artefakt KarKa – tylko przy wydaniu (wszystko poza pull_request, #101).
 # Czasy uruchomień (i najdłuższe bloki) trafiają do podsumowania przebiegu (Summary); ostrzeżenie przy uruchomieniu > 3 min
 # i przebiegu PR > 10 min.
 # Do wydania trafiają też pliki aktualizacji (app/aktualizacje.js): aktualizacja.json, kod.zip, KarKa.zip.
@@ -28,9 +30,11 @@ on:
 permissions:
   contents: write
 
+# Nowy commit w PR przerywa poprzedni przebieg tego PR-a. Przebiegi na main, tagach i wydaniach nie są przerywane –
+# anulowane przebiegi z 25–26.10.2026 zgubiły wydania v0.5.14 i v0.5.16 (#101); czekają w kolejce grupy.
 concurrency:
   group: aplikacja-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   mac:
@@ -98,8 +102,8 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/test"
           bin="dist/mac-arm64/KarKa.app/Contents/MacOS/KarKa"
-          # pr / pelny: plan uruchomień, 3 procesy naraz, czasy w Summary (scripts/testy-ci.js); main – bez przykładów.
-          if [ "$TRYB" != main ]; then node scripts/testy-ci.js "$TRYB" --bin "$bin" --tmp "$RUNNER_TEMP" --razem 3; fi
+          # pr / pelny: plan uruchomień, 4 procesy naraz, czasy w Summary (scripts/testy-ci.js); main – bez przykładów.
+          if [ "$TRYB" != main ]; then node scripts/testy-ci.js "$TRYB" --bin "$bin" --tmp "$RUNNER_TEMP" --razem 4; fi
           "$bin" --user-data-dir="$RUNNER_TEMP/ud" --test-pdf - "$RUNNER_TEMP/test/start.pdf"
           # Nowy projekt z szablonu startowego (nazwa z polskimi znakami, przecinkiem i cudzysłowem)
           "$bin" --user-data-dir="$RUNNER_TEMP/ud" --test-nowy "$RUNNER_TEMP/Złota Wyprawa, \"edycja\"" --test-pdf - "$RUNNER_TEMP/test/nowy.pdf" | tee "$RUNNER_TEMP/test/nowy.json"
@@ -119,12 +123,15 @@ jobs:
           test ! -e "$ud/kod/start-99.0.0"
           codesign --verify --deep --strict "dist/mac-arm64/KarKa.app"   # paczka nietknięta
 
+      # Od tego miejsca do artefaktu KarKa – tylko przy wydaniu (main, tag v*, wydanie opublikowane, ręcznie; #101).
       - name: DMG (okno „przeciągnij do Programów”)
+        if: github.event_name != 'pull_request'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npx electron-builder --mac dmg --arm64 --prepackaged "dist/mac-arm64/KarKa.app"
 
       - name: Sprawdzenie DMG
+        if: github.event_name != 'pull_request'
         run: |
           ls -la dist/*.dmg
           hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" dist/KarKa.dmg
@@ -134,6 +141,7 @@ jobs:
           hdiutil detach "$RUNNER_TEMP/dmg"
 
       - name: Pliki aktualizacji (kod.zip, KarKa.zip, aktualizacja.json)
+        if: github.event_name != 'pull_request'
         run: |
           ditto -c -k --sequesterRsrc --keepParent "dist/mac-arm64/KarKa.app" dist/KarKa.zip
           node scripts/paczka-kodu.js dist
@@ -143,6 +151,7 @@ jobs:
           codesign --verify --deep --strict "$RUNNER_TEMP/rozpak/KarKa.app"
 
       - uses: actions/upload-artifact@v6
+        if: github.event_name != 'pull_request'
         with:
           name: KarKa
           path: |

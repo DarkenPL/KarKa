@@ -3,9 +3,10 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: /app
+    # Raz w miesiącu (#101): każdy PR Dependabota to pełny przebieg na macOS, a każda zmiana Electrona (także drobna)
+    # = pełna aktualizacja aplikacji u użytkowników (ok. 123 MB zamiast nakładki kodu).
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     open-pull-requests-limit: 5
     groups:
       # Electron osobno – to on niesie poprawki bezpieczeństwa silnika Chrome.
@@ -18,6 +19,9 @@ updates:
       - dependency-name: html-to-image
       - dependency-name: jszip
       - dependency-name: xlsx
+      # Duże wersje Electrona (np. 44 → 45) – ręcznie, w zaplanowanej sesji z pełnymi testami (decyzja właściciela 27.10.2026).
+      - dependency-name: electron
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule:
