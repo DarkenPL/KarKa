@@ -83,6 +83,7 @@ class Projekt {
     this.widok = null;
     this.tytul = '';              // PROJEKT = z szablonu (nazwa zakładki); pusty → nazwa folderu
     this.uzyty = Date.now();      // ostatnie pokazanie zakładki – do wyboru najdawniej używanej (limit, etap 3)
+    this.pokazRewersy = false;    // Widok → Pokaż rewersy kart (#47) – strona po wczytaniu zaczyna od awersów
   }
   get wc() { const w = this.widok && this.widok.webContents; return w && !w.isDestroyed() ? w : null; }
   get nazwa() { return this.folder ? path.basename(this.folder) : ''; }
@@ -120,6 +121,11 @@ class Projekt {
     });
     wc.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
     wc.once('did-finish-load', potwierdzStart);            // nowy kod z nakładki uruchomił się poprawnie
+    wc.on('did-finish-load', () => {                        // nowa strona = awersy; menu Widok bez zaznaczenia
+      if (!this.pokazRewersy) return;
+      this.pokazRewersy = false;
+      if (this === aktywny) zbudujMenu();
+    });
     projekty.push(this);
     return this;
   }
@@ -887,6 +893,12 @@ function zbudujMenu() {
       submenu: [
         { label: 'Edytor szablonu', accelerator: 'Alt+CmdOrCtrl+E', enabled: !!p.szablon, click: wStronie('window.przelaczEdytor && przelaczEdytor()') },
         { label: 'Raport projektu', enabled: !!p.folder, click: wStronie('window.pokazRaport && pokazRaport(true)') },
+        // #47: podgląd rewersów zamiast awersów – stan zakładki, bez zapisu (po wczytaniu strony od nowa wyłączony).
+        { label: 'Pokaż rewersy kart', type: 'checkbox', checked: !!p.pokazRewersy, enabled: !!p.szablon, click: (mi) => {
+          if (!aktywny) return;
+          aktywny.pokazRewersy = mi.checked;
+          wStronie(`window.pokazRewersyKart && pokazRewersyKart(${mi.checked})`)();
+        } },
         { type: 'separator' },
         { label: 'Odśwież karty', accelerator: 'CmdOrCtrl+R', click: wStronie('window.odswiezKarty && odswiezKarty()') },
         { label: 'Odświeżaj automatycznie', type: 'checkbox', checked: ustawienia().auto !== false, click: (mi) => {
@@ -2699,6 +2711,111 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       rewersy.ok = rewersy.ok && rewersy.pcio.ok;
     }
   }
+  // Dodatki #47 (--test-edytor, każdy projekt): stan (liczba rewersów talii), raport (sekcja tylko przy rewersie zależnym),
+  // podgląd „Pokaż rewersy kart” (menu Widok), nazwy plików eksportu obrazków; w 07-gildie także klony rewersów w podglądzie,
+  // katalog z wariantami (i przy filtrze id), rewersZmieniony w stanie, brakujące kolumny w raporcie. Zrzut -rewersy-kart.png.
+  let rewersyDodatki = null;
+  if (testBloku('rewersyDodatki')) {
+    rewersyDodatki = await wc.executeJavaScript(`(async () => { try {
+      const wyniki = {}, bledy = [], wynik = {};
+      const spr = (nazwa, warunek, opis) => { wyniki[nazwa] = !!warunek; if (!warunek) bledy.push(nazwa + (opis ? ': ' + opis : '')); };
+      const podglad = document.getElementById('podglad'), cel = document.getElementById('podgladRewersy');
+      const raport = async () => { const d = document.createElement('div'); d.innerHTML = await raportProjektu(); return d.innerText; };
+      // Stan: rewersy = warianty rewersu zależnego, 1 przy wspólnym, 0 bez [REWERS].
+      const st = stanKart();
+      wynik.stan = st.talie.map((t) => t.nazwa + ':' + t.rewersy);
+      spr('stanRewersy', st.talie.every((t) => REWERSY_KART.has(t.nazwa) ? t.rewersy === REWERSY_KART.get(t.nazwa).els.length : t.rewersy === (t.rewers ? 1 : 0)), wynik.stan.join());
+      const r0 = await raport();
+      spr('raportSekcja', /Rewersy zależne od karty/.test(r0) === REWERSY_KART.size > 0);
+      // Podgląd rewersów: klony poza #podglad, karty i eksport bez zmian.
+      const kartyPrzed = podglad.querySelectorAll('.siatka .karta').length, eksPrzed = kartyEksportu({}).length;
+      // Odciski kart (HTML po dopasowaniu tekstu) – przebudowa przy schowanym podglądzie musi dać te same karty.
+      const odciski = () => [...podglad.querySelectorAll('.siatka .karta')].map((k) => k.dataset.odcisk).join(), odcPrzed = odciski();
+      pokazRewersyKart(true);
+      const klony = [...cel.querySelectorAll('[data-dla]')];
+      const sekcje = [...cel.querySelectorAll('.talia')];
+      const zgodne = klony.filter((el) => {
+        const k = [...podglad.querySelectorAll('.siatka .karta:not(.rewers)')].find((x) => kluczKarty(x) === el.dataset.dla);
+        const b = k && rewersKarty(k);
+        return b ? el.innerHTML === b.innerHTML : el.classList.contains('brak-rewersu');
+      }).length;
+      spr('podglad', podglad.classList.contains('schowany') && podglad.getBoundingClientRect().height === 0 && getComputedStyle(cel).display !== 'none' && sekcje.length === visibleSections().length
+        && klony.length === visibleCards().length && zgodne === klony.length && klony.every((el) => el.getBoundingClientRect().width > 0),
+        sekcje.length + ' sekcji, ' + zgodne + '/' + klony.length + ' klonów');
+      spr('podgladBezSkutkow', podglad.querySelectorAll('.siatka .karta').length === kartyPrzed && kartyEksportu({}).length === eksPrzed
+        && !cel.querySelector('[data-odcisk]'));
+      await build();
+      spr('podgladPoPrzebudowie', cel.querySelectorAll('[data-dla]').length === klony.length && podglad.classList.contains('schowany')
+        && odciski() === odcPrzed, 'odciski kart po przebudowie przy schowanym podglądzie: ' + (odciski() === odcPrzed));
+      // Nazwy plików eksportu obrazków: wspólny rewers raz, rewers zależny – plik na kartę z jej ID.
+      const plan = planEksportuObrazkow(kartyEksportu({}), {}, 'jpg');
+      const wspolneRew = [...podglad.querySelectorAll('.siatka .karta.rewers')].filter((k) => !REWERSY_KART.has(k.dataset.talia)).length;
+      const zalKarty = kartyEksportu({}).filter((k) => REWERSY_KART.has(k.dataset.talia) && rewersKarty(k));
+      spr('eksportNazwy', plan.length === eksPrzed + wspolneRew + zalKarty.length && new Set(plan.map((x) => x.name)).size === plan.length
+        && planEksportuObrazkow(kartyEksportu({}), { rewersy: false }).length === eksPrzed, plan.length + ' plików');
+      if (PROJEKT === 'Gildie') {
+        const sek = cel.querySelector('.talia[data-talia="Magowie"]');
+        const ety = [...sek.querySelectorAll('.etykieta')].map((e) => e.textContent);
+        wynik.etykiety = ety;
+        spr('etykiety', JSON.stringify(ety) === JSON.stringify(['1 · Rewers 1', '2 · Rewers 2', '3 · Rewers 1', '4 · Rewers 3', '5 · Rewers 3', '6 · Rewers 3', '7 · Rewers 3']), JSON.stringify(ety));
+        const zl = cel.querySelector('.talia[data-talia="Złodzieje"]');
+        spr('bezRewersu', !!zl && zl.querySelectorAll('.brak-rewersu').length === zl.querySelectorAll('[data-dla]').length && zl.querySelectorAll('[data-dla]').length > 0);
+        const pm = planEksportuObrazkow(kartyEksportu({ talie: ['Magowie', 'Ratusz'] }));
+        const rew = pm.filter((x) => /_rewers\\.jpg$/.test(x.name)).map((x) => x.name);
+        wynik.eksport = rew;
+        const mag = kartyEksportu({ talie: ['Magowie'] });
+        spr('eksportMagowie', JSON.stringify(rew) === JSON.stringify(['Gildie_Ratusz_rewers.jpg', ...[1, 2, 3, 4, 5, 6, 7].map((n) => 'Gildie_Magowie_' + n + '_rewers.jpg')])
+          && pm.filter((x) => /Magowie_\\d+_rewers/.test(x.name)).every((x, n) => x.el === rewersKarty(mag[n])), JSON.stringify(rew));
+        // Katalog: wszystkie warianty; przy filtrze id – warianty wybranych kart; wspólny rewers przy filtrze id – pominięty (jak dotąd).
+        const kat = async (o) => (await katalogPng(o)).map((s) => s.talia + ':' + s.rewersy.join('|'));
+        wynik.katalog = [...await kat({ talie: ['Magowie', 'Ratusz'] }), ...await kat({ talie: ['Magowie', 'Ratusz'], id: ['1', '4'] })];
+        spr('katalog', JSON.stringify(wynik.katalog) === JSON.stringify(['Ratusz:Rewers', 'Magowie:Rewers 1 · ×2|Rewers 2 · ×1|Rewers 3 · ×4',
+          'Ratusz:', 'Magowie:Rewers 1 · ×1|Rewers 3 · ×1']), JSON.stringify(wynik.katalog));
+        spr('raportMagowie', /Talia Magowie: 3 warianty rewersu \\(×2, ×1, ×4\\)/.test(r0) && !/brak kolumn/.test(r0), r0.slice(r0.indexOf('Rewersy zależne'), r0.indexOf('Rewersy zależne') + 120));
+        // rewersZmieniony: zapis „PDF”, zmiana szkoły Astrologa (tylko rewers) → stan karty 3, potem powrót.
+        const przed = ODCISKI ? JSON.parse(JSON.stringify(ODCISKI)) : null;
+        await zapamietajDruk(kartyEksportu({}));
+        const tal = RAPORT.talie.find((t) => t.nazwa === 'Magowie'), nazwaPliku = tal.plik.replace(/#.*$/, ''), plik = files.get(nazwaPliku);
+        const tekst = await plik.text();
+        files.set(nazwaPliku, new File([tekst.replace(/^(3;Astrolog;[^;]*;)Runy/m, '$1Księgi')], plik.name, { lastModified: plik.lastModified }));
+        await build();
+        const s2 = stanKart(), m2 = s2.talie.find((t) => t.nazwa === 'Magowie');
+        wynik.rewersyZmienione = s2.rewersyZmienione;
+        spr('rewersZmieniony', JSON.stringify(s2.rewersyZmienione) === '["Magowie 3"]' && m2.lista.filter((k) => k.rewersZmieniony).map((k) => k.id).join() === '3'
+          && m2.lista.find((k) => k.id === '3').zmieniona === true, JSON.stringify(s2.rewersyZmienione));
+        // Brakująca kolumna rewersu w danych → raport ją podaje.
+        files.set(nazwaPliku, new File([tekst.replace(/^ID;Nazwa;Opis;Szkoła;/, 'ID;Nazwa;Opis;Szkola2;')], plik.name, { lastModified: plik.lastModified }));
+        await build();
+        const r1 = await raport();
+        spr('raportBrak', /brak kolumn: Szkoła/.test(r1), r1.slice(r1.indexOf('Rewersy zależne'), r1.indexOf('Rewersy zależne') + 160));
+        files.set(nazwaPliku, plik); await build();
+        await APP.zapiszOdciski(przed || { data: new Date().toISOString(), karty: {} }); await oznaczZmiany(podglad);
+        spr('powrot', stanKart().rewersyZmienione === null || stanKart().rewersyZmienione.length === 0);
+        const s = cel.querySelector('.talia[data-talia="Magowie"]');
+        s.scrollIntoView(); window.scrollBy(0, -(document.querySelector('.pasek') || { offsetHeight: 0 }).offsetHeight);
+        const rr = s.getBoundingClientRect();
+        wynik.rect = { x: 0, y: Math.max(0, Math.floor(rr.top)), width: Math.ceil(Math.min(rr.width, window.innerWidth)), height: Math.ceil(Math.min(rr.height, window.innerHeight - Math.max(0, rr.top))) };
+      }
+      return { ok: Object.values(wyniki).every(Boolean), wyniki, ...wynik, bledy };
+    } catch (e) { return { ok: false, bledy: ['wyjątek: ' + ((e && e.stack) || e)] }; } })()`);
+    if (rewersyDodatki.rect) {
+      await wc.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 300))))');
+      fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-rewersy-kart.png', (await wc.capturePage(rewersyDodatki.rect)).toPNG());
+      delete rewersyDodatki.rect;
+    }
+    await wc.executeJavaScript('pokazRewersyKart(false)');   // menu ma włączyć podgląd samo (przegląd #97)
+    // Menu Widok → Pokaż rewersy kart: przełącza stronę, stan zakładki; wyłączenie wraca do awersów.
+    const pozycja = Menu.getApplicationMenu()?.items.find((i) => i.label === 'Widok')?.submenu.items.find((i) => i.label === 'Pokaż rewersy kart');
+    const naStronie = () => wc.executeJavaScript("getComputedStyle(document.getElementById('podgladRewersy')).display !== 'none'");
+    let menuWl = null, menuWyl = null;
+    if (pozycja) {
+      pozycja.click(); await czekaj(300); menuWl = await naStronie() && aktywny.pokazRewersy === true;
+      const p2 = Menu.getApplicationMenu().items.find((i) => i.label === 'Widok').submenu.items.find((i) => i.label === 'Pokaż rewersy kart');
+      p2.click(); await czekaj(300); menuWyl = !(await naStronie()) && aktywny.pokazRewersy === false;
+    }
+    rewersyDodatki.menu = { jest: !!pozycja, wlacz: menuWl, wylacz: menuWyl };
+    rewersyDodatki.ok = rewersyDodatki.ok && !!pozycja && menuWl && menuWyl;
+  }
   CZASY_TESTU.push([null, Date.now()]);                  // koniec ostatniego bloku
   await wc.executeJavaScript('buildPrint()');
   await pdfDoPliku(wc, wynik);
@@ -2710,8 +2827,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok)
     && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

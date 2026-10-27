@@ -88,6 +88,9 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 .start h2 { margin-top: 0; }
 .start code { background: #f3f0eb; padding: 1px 5px; border-radius: 4px; }
 .talia-tytul { margin: 18px 16px 0; font-size: 15px; color: #4a453f; }
+/* Podgląd rewersów (#47): awersy chowane bez display:none – karty zachowują układ (dopasowanie tekstu, eksport, katalog). */
+#podglad.schowany { height: 0; overflow: hidden; }
+#podgladRewersy .brak-rewersu { cursor: default; background: repeating-linear-gradient(45deg, #f4f1ec 0 6px, #e6e1da 6px 12px); box-shadow: none; outline: 1px dashed #b8b1a7; }
 .rewers-podglad { position: relative; }        /* zajmuje dokładnie miejsce karty – siatka się nie rozjeżdża */
 .rewers-podglad .etykieta {
   position: absolute; left: 50%; bottom: 7mm; transform: translateX(-50%); pointer-events: none;
@@ -179,7 +182,7 @@ button.wlaczony { background: #4a453f; border-color: #4a453f; color: #fff; }
    ═══════════════════════════════════════════════════════════════════════════ */
 @media print {
   body { background: #fff; }
-  .pasek, .uwagi, #podglad, .start, #edytor { display: none !important; }
+  .pasek, .uwagi, #podglad, #podgladRewersy, .start, #edytor { display: none !important; }
   #druk { display: block; }
   .arkusz { position: relative; break-after: page; overflow: hidden; margin: 0; }
   html, body { margin: 0 !important; padding: 0 !important; }
@@ -231,6 +234,7 @@ button.wlaczony { background: #4a453f; border-color: #4a453f; color: #fff; }
 <div class="start" id="start"><p>Wczytywanie…</p></div>
 
 <div id="podglad"></div>
+<div id="podgladRewersy" style="display:none"></div>
 <div id="druk"></div>
 
 <script>
@@ -351,7 +355,7 @@ async function serverStamp() {
 let AUTO_ODSWIEZANIE = true;      // menu Widok → Odświeżaj automatycznie
 window.ustawAuto = (b) => { AUTO_ODSWIEZANIE = !!b; };
 window.odswiezKarty = () => loadFromServer();
-$('filtr').onchange = applyFilter;
+$('filtr').onchange = () => { applyFilter(); odswiezRewersyKart(); };
 
 // Automatyczne odświeżanie: co 1,5 s sprawdzamy daty zmian wczytanych plików (jedno sprawdzenie naraz).
 let SPRAWDZANIE = false;
@@ -1363,6 +1367,7 @@ async function zbudujTeraz() {
     status('Żadna talia nie ma pliku z kartami – sprawdź Uwagi.');
     view.innerHTML = '';
     REWERSY_KART = new Map();
+    odswiezRewersyKart();
   } else {
     view.innerHTML = html;
     for (const s of view.querySelectorAll('.talia')) {
@@ -1380,6 +1385,7 @@ async function zbudujTeraz() {
       TALIE.filter((t) => view.querySelector(`[data-talia="${CSS.escape(t.nazwa)}"]`)).map((t) => `<option>${esc(t.nazwa)}</option>`).join('');
     sel.value = [...sel.options].some((o) => o.value === current) ? current : '';
     applyFilter();
+    odswiezRewersyKart();
 
     $('start').style.display = 'none';
     ['obrazkiPrzycisk', 'raportPrzycisk', 'historiaPrzycisk'].forEach((id) => $(id).disabled = false);
@@ -1790,6 +1796,21 @@ async function raportProjektu(o = {}) {
     lista(`Talia ${nazwa}`, el, '');
   }
 
+  // Rewersy zależne od karty (#47): liczba wariantów i kolumny z [REWERS], których brak w danych.
+  // Sekcja tylko w projektach z takim rewersem – inne raporty bez zmian.
+  const zalezne = RAPORT.talie.filter(({ nazwa }) => REWERSY_KART.has(nazwa));
+  if (zalezne.length) {
+    lista('Rewersy zależne od karty', zalezne.map(({ nazwa, rows }) => {
+      const z = REWERSY_KART.get(nazwa), t = TALIE.find((x) => x.nazwa === nazwa);
+      const kolumny = new Set((rows.length ? Object.keys(rows[0]) : []).map((k) => plain(k).toLowerCase()));
+      const wart = t ? [...t.rewers.flatMap((c) => [...c.args, ...Object.values(c.opt)]), ...Object.values(t.kartaRewers || {})] : [];
+      const w = wart.flatMap((v) => [...String(v ?? '').matchAll(/\[([^\[\]]+)\]/g)].map((m) => m[1].trim())).filter((k) => !/^[=_]/.test(k));
+      const brak = [...new Set(w)].filter((k) => !kolumny.has(plain(k).toLowerCase()));
+      return `Talia <b>${esc(nazwa)}</b>: ${z.lista.length} ${odmianaWariant(z.lista.length)} rewersu (` + z.lista.map((x) => '×' + x.ile).join(', ') + ')'
+        + (brak.length ? ` · <b>brak kolumn:</b> ${esc(brak.join(', '))}` : '');
+    }), '');
+  }
+
   // Formatowanie z danych (**…**, ~~…~~, <b>…) – od 0.5.5 działa; lista do sprawdzenia wyglądu.
   const fmt = [...RAPORT.formatowanie];
   lista('Formatowanie z danych', fmt.length ? [esc(skrot(fmt))] : [], 'dane nie zawierają formatowania (**…**, ~~…~~, <b>, <i>, <u>, <s>…)');
@@ -1864,9 +1885,12 @@ function skrot(t) {                                     // cyrb53 – szybki skr
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
+// Karty (kluczDruku), których rewers zależny zmienił się od ostatniego PDF – pole rewersZmieniony w zleceniu stan (#47).
+let ZMIENIONE_REWERSY = new Set();
 async function oznaczZmiany(view) {
   ODCISKI = APP && APP.odciski ? await APP.odciski().catch(() => null) : null;
   let zm = 0, nowe = 0;
+  const zmRewersy = new Set();
   const wszystkie = [...view.querySelectorAll('.siatka .karta')];
   for (const k of wszystkie) k.dataset.odcisk = skrot(htmlKarty(k));      // najpierw wszystkie – rewersy też
   for (const k of wszystkie) {
@@ -1879,8 +1903,10 @@ async function oznaczZmiany(view) {
     const zmienionyRewers = !!stary && !rewers && 'r' in stary && (stary.r ?? null) !== odciskRewersuKarty(k);
     const jestNowa = !!ODCISKI && !stary, zmieniona = !!stary && (stary.h !== h || zmienionyRewers);
     k.classList.toggle('nowa', jestNowa); k.classList.toggle('zmieniona', zmieniona);
+    if (zmienionyRewers) zmRewersy.add(kluczDruku(k));
     if (!rewers) { zm += zmieniona; nowe += jestNowa; }
   }
+  ZMIENIONE_REWERSY = zmRewersy;
   $('zmiany').hidden = !ODCISKI;
   if (ODCISKI) {
     $('zmLiczba').textContent = zm; $('noweLiczba').textContent = nowe;
@@ -2105,6 +2131,53 @@ function odciskRewersuKarty(k) {
   return b ? b.dataset.odcisk || skrot(htmlKarty(b)) : null;
 }
 window.rewersKarty = rewersKarty;
+const odmianaWariant = (n) => n === 1 ? 'wariant' : [2, 3, 4].includes(n % 10) && (n % 100 < 10 || n % 100 >= 20) ? 'warianty' : 'wariantów';
+// Numer wariantu rewersu zależnego (0, 1…) albo -1 – talia ze wspólnym rewersem albo karta bez rewersu.
+function wariantRewersu(k) {
+  const z = REWERSY_KART.get(k.dataset.talia), b = z && rewersKarty(k);
+  return b ? z.els.indexOf(b) : -1;
+}
+// Podgląd „Pokaż rewersy kart” (#47; menu Widok, bez zapisu): zamiast awersów siatka z klonów rewersKarty(k)
+// w kolejności widocznych kart, podpis = ID karty (i wariant rewersu). Klony leżą w #podgladRewersy, poza #podglad,
+// więc nie wchodzą w odciski, wybór, druk, eksport ani raport. Odtwarzany po każdej przebudowie i zmianie filtra.
+let POKAZ_REWERSY = false;
+function pokazRewersyKart(b = !POKAZ_REWERSY) { POKAZ_REWERSY = !!b; odswiezRewersyKart(); return POKAZ_REWERSY; }
+window.pokazRewersyKart = pokazRewersyKart;
+function odswiezRewersyKart() {
+  const cel = $('podgladRewersy');
+  cel.textContent = '';
+  cel.style.display = POKAZ_REWERSY ? '' : 'none';
+  $('podglad').classList.toggle('schowany', POKAZ_REWERSY);
+  if (!POKAZ_REWERSY) return;
+  for (const s of visibleSections()) {
+    const talia = s.dataset.talia, z = REWERSY_KART.get(talia), wiele = !!z && z.els.length > 1;
+    const karty = [...s.querySelectorAll('.siatka .karta:not(.rewers)')];
+    const sekcja = document.createElement('section'), siatka = document.createElement('div');
+    sekcja.className = 'talia'; sekcja.dataset.talia = talia; siatka.className = 'siatka';
+    const h = document.createElement('h2'); h.className = 'talia-tytul';
+    h.textContent = `${talia} · rewersy ${karty.length} kart` + (z ? ` · ${z.els.length} ${odmianaWariant(z.els.length)}` : '');
+    for (const k of karty) {
+      const b = rewersKarty(k), opak = document.createElement('div'), et = document.createElement('span');
+      opak.className = 'rewers-podglad';
+      let el;
+      if (b) {
+        el = b.cloneNode(true);
+        el.classList.remove('wybrana', 'zmieniona', 'nowa', 'za-dlugi');
+        delete el.dataset.odcisk;
+      } else {
+        const [w, hh] = cardMm(k);
+        el = document.createElement('div'); el.className = 'karta brak-rewersu';
+        el.style.width = w + 'mm'; el.style.height = hh + 'mm';
+      }
+      el.dataset.dla = kluczKarty(k);
+      et.className = 'etykieta';
+      et.textContent = (k.dataset.id || '?') + (k.dataset.kopia > 1 ? ' · kopia ' + k.dataset.kopia : '')
+        + (!b ? ' · bez rewersu' : wiele ? ` · Rewers ${wariantRewersu(k) + 1}` : '');
+      opak.append(el, et); siatka.append(opak);
+    }
+    sekcja.append(h, siatka); cel.append(sekcja);
+  }
+}
 function status(t) { $('status').textContent = t; }
 
 // ── Zaznaczanie kart do druku ────────────────────────────────────────────────
@@ -2496,6 +2569,33 @@ async function obrazKarty(el, { dpi = CONFIG.jpgDpi, format = 'jpg' } = {}) {
 
 // Każda karta jako osobny obrazek w folderze Export projektu (zapisuje aplikacja).
 // o: { dpi: 150 | 300, format: 'jpg' | 'png', ktore, pominTalie, rewersy }
+// Lista plików eksportu obrazków: [{ el, name }] – awersy wybranych kart, potem rewersy (bez zapisu; test #47).
+function planEksportuObrazkow(karty, o = {}, format = 'jpg') {
+  const talie = new Set(karty.map((k) => k.dataset.talia));
+  // Wspólny rewers talii – jeden plik jak dotąd. Rewers zależny od karty (#47, decyzja 3 z 26.10.2026) – plik na
+  // wiersz wybranej karty (na kopię przy rewersie per kopia): { el: rewers, dla: karta }.
+  const rewersy = [];
+  if (o.rewersy !== false) {
+    for (const k of $('podglad').querySelectorAll('.siatka .karta.rewers'))
+      if (talie.has(k.dataset.talia) && !REWERSY_KART.has(k.dataset.talia)) rewersy.push({ el: k });
+    const byly = new Set();
+    for (const k of karty) {
+      const z = REWERSY_KART.get(k.dataset.talia), b = z && rewersKarty(k);
+      const klucz = z && k.dataset.talia + '|' + k.dataset.row + (z.perKopia ? '|' + k.dataset.kopia : '');
+      if (!b || byly.has(klucz)) continue;
+      byly.add(klucz); rewersy.push({ el: b, dla: k, perKopia: z.perKopia });
+    }
+  }
+  // NazwaProjektu_NazwaTalii_NumerKarty_NumerKopii.jpg, rewers: NazwaProjektu_NazwaTalii_rewers.jpg,
+  // rewers zależny: NazwaProjektu_NazwaTalii_NumerKarty_rewers.jpg (per kopia: …_NumerKarty_NumerKopii_rewers.jpg)
+  const bezZnakow = (t) => String(t).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l').replace(/Ł/g, 'L');
+  const slowo = (t) => bezZnakow(t).split(/[^A-Za-z0-9]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join('') || 'X';
+  const numer = (t) => bezZnakow(t).replace(/[^\w-]+/g, '_').replace(/^_+|_+$/g, '') || 'X';
+  return karty.map((k) => ({ el: k })).concat(rewersy).map(({ el, dla, perKopia }) => ({ el, name: slowo(PROJEKT) + '_' + slowo(el.dataset.talia) + '_'
+    + (dla ? numer(dla.dataset.id) + (perKopia ? '_' + (dla.dataset.kopia || 1) : '') + '_rewers'
+      : el.classList.contains('rewers') ? 'rewers' : numer(el.dataset.id) + '_' + (el.dataset.kopia || 1)) + '.' + format }));
+}
+window.planEksportuObrazkow = planEksportuObrazkow;
 async function eksportObrazkow(o = {}) {
   const dpi = +o.dpi || CONFIG.jpgDpi, format = o.format === 'png' ? 'png' : 'jpg', FMT = format.toUpperCase();
   const karty = kartyEksportu(o);
@@ -2504,19 +2604,10 @@ async function eksportObrazkow(o = {}) {
     try {
       const folder = await APP.eksportStart();
       if (!folder) { status('Eksport obrazków anulowany.'); return; }
-      const talie = new Set(karty.map((k) => k.dataset.talia));
-      const rewersy = o.rewersy === false ? [] : [...$('podglad').querySelectorAll('.siatka .karta.rewers')].filter((k) => talie.has(k.dataset.talia));
-      const els = karty.concat(rewersy), nazwy = [];
-      // NazwaProjektu_NazwaTalii_NumerKarty_NumerKopii.jpg, rewers: NazwaProjektu_NazwaTalii_rewers.jpg
-      const bezZnakow = (t) => String(t).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l').replace(/Ł/g, 'L');
-      const slowo = (t) => bezZnakow(t).split(/[^A-Za-z0-9]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join('') || 'X';
-      const numer = (t) => bezZnakow(t).replace(/[^\w-]+/g, '_').replace(/^_+|_+$/g, '') || 'X';
+      const els = planEksportuObrazkow(karty, o, format), nazwy = [];
       for (let i = 0; i < els.length; i++) {
         status(`Eksport ${FMT}: ${i + 1}/${els.length}…`);
-        const el = els[i];
-        const przed = slowo(PROJEKT) + '_' + slowo(el.dataset.talia) + '_';
-        // Rewersy zależne od karty (#47): tymczasowo rewers, rewers_2… (nazwy z ID karty – następny PR, decyzja 3).
-        const name = przed + (el.classList.contains('rewers') ? 'rewers' + (+nrRewersu(el) > 0 ? '_' + (+nrRewersu(el) + 1) : '') : numer(el.dataset.id) + '_' + (el.dataset.kopia || 1)) + '.' + format;
+        const { el, name } = els[i];
         const blob = await obrazKarty(el, { dpi, format });
         await APP.eksportPlik(name, new Uint8Array(await blob.arrayBuffer()));
         nazwy.push(name);
@@ -2561,8 +2652,23 @@ async function katalogPng(o = {}) {
       }
       const lista = [...wiersze.values()];
       if (!lista.length) continue;
-      const rewers = section.querySelector('.karta.rewers');
-      if (rewers && !tylkoId.size) lista.unshift({ karta: rewers, kopie: 1, rewers: true });   // rewers na początku
+      const z = REWERSY_KART.get(talia);
+      if (z) {
+        // Rewers zależny od karty (#47): każdy wariant raz, z liczbą kart (z kopiami); przy filtrze id – tylko
+        // warianty wybranych kart i ich liczba wśród nich.
+        const ile = new Map();
+        for (const k of section.querySelectorAll('.karta:not(.rewers)')) {
+          if (tylkoId.size && !tylkoId.has(plain(k.dataset.id || ''))) continue;
+          const b = rewersKarty(k);
+          if (b) ile.set(b, (ile.get(b) || 0) + 1);
+        }
+        const warianty = z.els.filter((b) => ile.has(b));
+        lista.unshift(...warianty.map((b) => ({ karta: b, kopie: ile.get(b), rewers: true,
+          podpis: z.els.length > 1 ? `Rewers ${z.els.indexOf(b) + 1} · ×${ile.get(b)}` : 'Rewers' })));
+      } else {
+        const rewers = section.querySelector('.karta.rewers');
+        if (rewers && !tylkoId.size) lista.unshift({ karta: rewers, kopie: 1, rewers: true });   // rewers na początku
+      }
       // Rozmiar miniatury i siatka strony.
       const [wmm, hmm] = cardMm(lista[0].karta);
       const tw = Math.round(wmm / 25.4 * KATALOG.dpi), th = Math.round(hmm / 25.4 * KATALOG.dpi);
@@ -2586,7 +2692,7 @@ async function katalogPng(o = {}) {
         g.fillStyle = '#6b6560'; g.font = `18px ${SANS}`;
         g.fillText(`${awersy.length} kart, ${awersy.reduce((a, x) => a + x.kopie, 0)} z kopiami · ${wmm}×${hmm} mm`, KATALOG.margines, KATALOG.margines + 36);
         for (let i = 0; i < czesc.length; i++) {
-          const { karta, kopie, rewers: jestRewers } = czesc[i];
+          const { karta, kopie, rewers: jestRewers, podpis } = czesc[i];
           status(`Katalog ${talia}: ${s * naStrone + i + 1}/${lista.length}…`);
           const x = KATALOG.margines + (i % kol) * kom, y = KATALOG.margines + KATALOG.naglowek + Math.floor(i / kol) * rz;
           const bmp = await createImageBitmap(await obrazKarty(karta, { dpi: KATALOG.dpi * 2, format: 'jpg' }));
@@ -2596,13 +2702,14 @@ async function katalogPng(o = {}) {
           if (karta.classList.contains('za-dlugi')) { g.strokeStyle = '#d00'; g.lineWidth = 4; g.strokeRect(x - 2, y - 2, tw + 4, th + 4); }
           if (jestRewers) { g.strokeStyle = '#2f6fd6'; g.lineWidth = 4; g.strokeRect(x - 3, y - 3, tw + 6, th + 6); }
           // Podpis: „ID Nazwa” (z tytułu karty, bez nazwy talii) i liczba kopii; przycięty do szerokości miniatury.
-          let t = jestRewers ? 'Rewers' : (karta.title || '').replace(talia + ' ', '') + (kopie > 1 ? ` ×${kopie}` : '');
+          let t = jestRewers ? podpis || 'Rewers' : (karta.title || '').replace(talia + ' ', '') + (kopie > 1 ? ` ×${kopie}` : '');
           g.fillStyle = jestRewers ? '#2f6fd6' : karta.classList.contains('za-dlugi') ? '#c00' : '#1d1b19'; g.font = `600 17px ${SANS}`;
           while (t.length > 1 && g.measureText(t).width > tw) t = t.slice(0, -2) + '…';
           g.fillText(t, x, y + th + 8);
         }
         const nazwa = slowoPliku(PROJEKT) + '_' + slowoPliku(talia) + (stron > 1 ? '_' + (s + 1) : '') + '.jpg';
-        wynik.push({ nazwa, blob: await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.9)), talia, karty: czesc.filter((x) => !x.rewers).length, zaDlugie });
+        wynik.push({ nazwa, blob: await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.9)), talia, karty: czesc.filter((x) => !x.rewers).length,
+          rewersy: czesc.filter((x) => x.rewers).map((x) => x.podpis || 'Rewers'), zaDlugie });
       }
     }
   } finally { $('filtr').value = filtr; applyFilter(); }
@@ -2621,8 +2728,8 @@ async function zapiszKatalog(o = {}, cel = 'katalog') {
     if (cel === 'katalog') { APP.eksportKoniec(); punktHistorii('katalog talii'); }
     const talie = new Map();
     for (const s of strony) {
-      const t = talie.get(s.talia) || talie.set(s.talia, { nazwa: s.talia, pliki: [], karty: 0, zaDlugie: s.zaDlugie }).get(s.talia);
-      t.pliki.push(s.nazwa); t.karty += s.karty;
+      const t = talie.get(s.talia) || talie.set(s.talia, { nazwa: s.talia, pliki: [], karty: 0, rewersy: 0, zaDlugie: s.zaDlugie }).get(s.talia);
+      t.pliki.push(s.nazwa); t.karty += s.karty; t.rewersy += s.rewersy.length;     // rewersy – kafelki rewersów (#47)
     }
     return { folder, pliki: strony.map((s) => s.nazwa), talie: [...talie.values()] };
   });
@@ -2755,16 +2862,20 @@ function stanKart() {
       }
       w.kopie++;
       if (k.classList.contains('zmieniona')) w.zmieniona = true;
+      if (ZMIENIONE_REWERSY.has(kluczDruku(k))) w.rewersZmieniony = true;     // #47 – zmienił się rewers tej karty
       if (k.classList.contains('nowa')) w.nowa = true;
       if (k.classList.contains('za-dlugi')) w.zaDluga = true;
     }
     const karty = [...wiersze.values()];
-    return { nazwa, rewers: !!s.querySelector('.karta.rewers'), karty: karty.length, kopie: karty.reduce((a, k) => a + k.kopie, 0), lista: karty };
+    // rewersy – liczba różnych rewersów talii (#47): wariantów rewersu zależnego, 1 przy wspólnym, 0 bez [REWERS].
+    const z = REWERSY_KART.get(nazwa);
+    return { nazwa, rewers: !!s.querySelector('.karta.rewers'), rewersy: z ? z.els.length : s.querySelector('.karta.rewers') ? 1 : 0, karty: karty.length, kopie: karty.reduce((a, k) => a + k.kopie, 0), lista: karty };
   });
   const jakie = (cecha) => talie.flatMap((t) => t.lista.filter((k) => k[cecha]).map((k) => `${t.nazwa} ${k.id}`));
   return { projekt: PROJEKT, wersja: WERSJA || null, ostatniPdf: ODCISKI ? ODCISKI.data : null,
     karty: talie.reduce((a, t) => a + t.karty, 0), kopie: talie.reduce((a, t) => a + t.kopie, 0),
-    zmienione: ODCISKI ? jakie('zmieniona') : null, nowe: ODCISKI ? jakie('nowa') : null, talie };
+    zmienione: ODCISKI ? jakie('zmieniona') : null, rewersyZmienione: ODCISKI ? jakie('rewersZmieniony') : null,
+    nowe: ODCISKI ? jakie('nowa') : null, talie };
 }
 
 // Raport projektu (to samo co panel Raport) jako lista sekcji z pozycjami tekstowymi.
