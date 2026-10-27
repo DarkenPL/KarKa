@@ -1685,7 +1685,9 @@ function plikiZmiesc(k) {
     if (!img || !img.naturalWidth || !img.naturalHeight || img.style.objectFit !== 'contain' || /translate/.test(img.style.transform)) continue;
     const g = krawedzieSpadu(el, w, h);
     if (!g) continue;
-    const rw = g.ew + (g.lewo ? sp : 0) + (g.prawo ? sp : 0), rh = g.eh + (g.gora ? sp : 0) + (g.dol ? sp : 0);
+    // Ramka ze spadem jak w renderCard (wypełnij przy krawędzi): sięga co najmniej krawędzi spadu po dotykanych stronach.
+    const rw = (g.prawo ? Math.max(g.x + g.ew, w + sp) : g.x + g.ew) - (g.lewo ? Math.min(g.x, -sp) : g.x);
+    const rh = (g.dol ? Math.max(g.y + g.eh, h + sp) : g.y + g.eh) - (g.gora ? Math.min(g.y, -sp) : g.y);
     const prop = img.naturalWidth / img.naturalHeight;
     if (Math.abs(prop / (rw / rh) - 1) > 0.01 || Math.abs(prop / (g.ew / g.eh) - 1) <= 0.01) continue;
     const r2 = (v) => Math.round(v * 100) / 100;
@@ -2384,11 +2386,16 @@ function spadDruku(karty, spadOkna) {
   if (bez.length && s) ostrzezenia.push((bez.length === talie.length ? 'projekt nie deklaruje spadu w szablonie' : 'talie bez spadu w szablonie: ' + bez.join(', '))
     + ` – spad ${mmTxt(s)} jest w PDF dorabiany (tło powiększone, obrazki przy krawędzi przedłużone). Do druku w drukarni dopisz spad w szablonie (np. KARTA = 63, 88, spad=3) i przygotuj tło i obrazki przy krawędzi ze spadem`);
   // Pliki talii mają spad x < s: tło i obrazki zostają w miejscu, więc pozostały pas spadu wypełnia tylko kolor tła karty.
-  // #94: pliki ze spadem w ramce „zmieść” – raz na plik i talię (awersy i ich rewersy).
-  const zm = new Map();
-  for (const k of new Set(karty.filter((k) => k && k.nodeType === 1).flatMap((k) => [k, rewersKarty(k)]).filter(Boolean)))
-    for (const x of plikiZmiesc(k)) { const kl = k.dataset.talia + '|' + x.plik; if (!zm.has(kl)) zm.set(kl, { ...x, talia: k.dataset.talia, karty: 0 }); zm.get(kl).karty++; }
-  for (const x of zm.values()) ostrzezenia.push(`talia ${x.talia}: ${x.plik} (${x.karty} ${x.karty === 1 ? 'karta' : [2, 3, 4].includes(x.karty % 10) && (x.karty % 100 < 10 || x.karty % 100 >= 20) ? 'karty' : 'kart'}) – ${opisZmiesc(x)}`);
+  // #94: pliki ze spadem w ramce „zmieść” – raz na plik i talię; liczba kart drukowanych z tym plikiem na awersie albo rewersie.
+  const zm = new Map(), wyniki = new Map(), zmiesc = (el) => (wyniki.has(el) ? wyniki : wyniki.set(el, plikiZmiesc(el))).get(el);
+  for (const k of karty.filter((k) => k && k.nodeType === 1))
+    for (const el of [k, rewersKarty(k)].filter(Boolean)) for (const x of zmiesc(el)) {
+      const kl = k.dataset.talia + '|' + x.plik;
+      if (!zm.has(kl)) zm.set(kl, { ...x, talia: k.dataset.talia, karty: new Set() });
+      zm.get(kl).karty.add(k);
+    }
+  const ileKart = (n) => n + ' ' + (n === 1 ? 'karta' : [2, 3, 4].includes(n % 10) && (n % 100 < 10 || n % 100 >= 20) ? 'karty' : 'kart');
+  for (const x of zm.values()) ostrzezenia.push(`talia ${x.talia}: ${x.plik} (${ileKart(x.karty.size)}) – ${opisZmiesc(x)}`);
   for (const [t, x] of talie) if (x && x !== s) ostrzezenia.push(`talia ${t}: spad w szablonie ${mmTxt(x)}, w PDF ${mmTxt(s)} – zewnętrzne ${mmTxt(s - x)} spadu tej talii będzie bez obrazu (tylko kolor tła karty)`);
   return { s, bez, ostrzezenia, zSzablonu: zadeklarowane.length > 0 };
 }
