@@ -1479,7 +1479,7 @@ async function obrazkiNiskiejRozdzielczosci(prog = 300) {
 const MARGINES_DRUKARNI = 3;          // mm od linii cięcia (tolerancja cięcia ±1 mm)
 const PROG_CZERNI = 20;               // L* (0–100); #000 ma 0, domyślny kolor tekstu #1d1b19 ≈ 10
 const DOMYSLNY_KOLOR_TEKSTU = 'rgb(29, 27, 25)';     // .karta { color: #1d1b19 }
-let OSTATNI_RAPORT_DRUKARNI = null;
+let OSTATNI_RAPORT_DRUKARNI = null;   // ostatni raport drukarni (podgląd w konsoli; zlecenie raport ma własny wynik – #111)
 const PASY_KART = new Map();          // odcisk karty → wynik analizy pasa (obrazek karty jest drogi)
 const KOLORY_SVG = new Map();         // adres ikony → lista kolorów z pliku SVG
 
@@ -1714,9 +1714,15 @@ const opisZmiesc = (x) => `plik ze spadem w ramce „zmieść” – zostanie po
 // na przeliczenie układu. Strona w tle nie dostaje klatek – po 100 ms idziemy dalej.
 async function ukladDoPomiaru(karty) {
   if (document.fonts) {
-    const fonty = new Set();
-    for (const k of karty) for (const el of k.querySelectorAll('.el.tekst, .el.tekst *')) fonty.add(getComputedStyle(el).font);
-    await Promise.all([...fonty].filter(Boolean).map((f) => document.fonts.load(f).catch(() => null)));
+    // Czcionka → znaki z tekstu: kroje są dzielone wg unicode-range (latin / latin-ext), a load(font) bez tekstu
+    // wczytuje tylko krój ze spacją – polskie znaki mogłyby zostać w czcionce zastępczej (z przeglądu PR).
+    const fonty = new Map();
+    for (const k of karty) for (const el of k.querySelectorAll('.el.tekst, .el.tekst *')) {
+      const st = getComputedStyle(el), f = `${st.fontStyle} ${st.fontWeight} ${st.fontSize} ${st.fontFamily}`;
+      if (!fonty.has(f)) fonty.set(f, new Set());
+      for (const z of el.textContent) fonty.get(f).add(z);
+    }
+    await Promise.all([...fonty].map(([f, z]) => document.fonts.load(f, [...z].join('') || ' ').catch(() => null)));
     await document.fonts.ready;
   }
   const klatka = () => new Promise((r) => { const t = setTimeout(r, 100); requestAnimationFrame(() => { clearTimeout(t); r(); }); });

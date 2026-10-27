@@ -1102,20 +1102,30 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const filtr = $('filtr').options[1] ? $('filtr').options[1].value : '';
       $('filtr').value = filtr; applyFilter();
       let bylo = null; try { bylo = localStorage.getItem('raportDrukarnia'); localStorage.setItem('raportDrukarnia', '1'); } catch (e) { /* bez zapisu */ }
-      const [, z] = await Promise.all([pokazRaport(true), wykonajZlecenie('raport', { drukarnia: 'tak' }), build()]);
-      const panel = /Nie zmierzono/.test($('raport').innerHTML);
+      const [panelHtml, z] = await Promise.all([raportProjektu(), wykonajZlecenie('raport', { drukarnia: 'tak' }), build(), pokazRaport(true)]);
+      const panel = /Nie zmierzono/.test(panelHtml) || !/Drukarnia: tekst/.test(panelHtml);
       await pokazRaport(false);
       try { if (bylo === null) localStorage.removeItem('raportDrukarnia'); else localStorage.setItem('raportDrukarnia', bylo); } catch (e) { /* bez zapisu */ }
       const filtrPo = $('filtr').value; $('filtr').value = ''; applyFilter();
-      await new Promise((r) => setTimeout(r, 1500));
+      await KOLEJKA_BUDOWY;
       const potem = await raportDrukarni();
       const odpieta = odstepyKarty(document.querySelector('#podglad .karta').cloneNode(true));
+      // Ścieżka błędu: wynik z kartami niezmierzonymi / bez kart → pozycja-błąd w sekcji odstępu zamiast ✓.
+      const oryg = window.raportDrukarni, sekcja = async (r) => {
+        window.raportDrukarni = async () => ({ margines: 3, odstep: [], czern: [], krawedz: [], spad: [], spadSzablonu: { talie: {}, bez: [], pliki: [], zmiesc: [] }, ...r });
+        try { const d = document.createElement('div'); d.innerHTML = await raportProjektu({ drukarnia: true });
+          const h = [...d.querySelectorAll('h3')].find((x) => /Drukarnia: tekst/.test(x.textContent));
+          return h && h.nextElementSibling ? h.nextElementSibling.textContent : ''; } finally { window.raportDrukarni = oryg; }
+      };
+      const bledy = { czesc: /Nie zmierzono 1 z 3 kart/.test(await sekcja({ karty: 3, niezmierzone: ['Próba 1'] })),
+        zadna: /Nie zmierzono żadnej karty/.test(await sekcja({ karty: 0, niezmierzone: [] })),
+        wszystkie: /✓/.test(await sekcja({ karty: 3, niezmierzone: [] })) };
       return { start: opis(start), naraz: opis(z.drukarnia), potem: opis(potem), filtr: filtrPo === filtr, panelBezBledu: !panel,
-        zgodne: lista(start) === lista(potem) && lista(z.drukarnia) === lista(potem), odpieta: !!(odpieta && odpieta.niezmierzona) };
+        zgodne: lista(start) === lista(potem) && lista(z.drukarnia) === lista(potem), odpieta: !!(odpieta && odpieta.niezmierzona), bledy };
     })()`);
     const r = raportStart, stopka = /"nr \[ID\]"/.test(fs.readFileSync(szablon, 'utf8'));
     r.ok = !!(r.start && r.naraz && r.potem) && [r.start, r.naraz, r.potem].every((x) => x.karty > 0 && x.niezmierzone === 0)
-      && r.zgodne && r.filtr && r.panelBezBledu && r.odpieta && (!stopka || r.start.odstep > 0);
+      && r.zgodne && r.filtr && r.panelBezBledu && r.odpieta && Object.values(r.bledy).every(Boolean) && (!stopka || r.start.odstep > 0);
   }
   let stan = '';
   for (let i = 0; folder !== '-' && i < 120; i++) {
