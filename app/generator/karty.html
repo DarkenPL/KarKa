@@ -1251,11 +1251,15 @@ function build() {
   return p;
 }
 // Eksport na wyłączność: najpierw kończą się trwające przebudowy, nowe czekają do końca eksportu.
+// Przebudowy czekamy PRZED zamknięciem bramy (KONIEC_EKSPORTU): przebudowa czekająca w kolejce na poprzednią czyta bramę
+// dopiero, gdy poprzednia się skończy – z bramą zamkniętą wcześniej czekała na nas, a my na nią (zawieszenie, #111).
+// Pętla: w trakcie czekania mogły dojść kolejne przebudowy.
 async function naWylacznosc(fn) {
+  for (let k = null; k !== KOLEJKA_BUDOWY;) { k = KOLEJKA_BUDOWY; await k; }
   let koniec;
   KONIEC_EKSPORTU = new Promise((r) => { koniec = r; });
   EKSPORT_TRWA = true;
-  try { await KOLEJKA_BUDOWY; return await fn(); }
+  try { return await fn(); }
   finally { EKSPORT_TRWA = false; koniec(); }
 }
 async function zbudujTeraz() {
@@ -1475,7 +1479,7 @@ async function obrazkiNiskiejRozdzielczosci(prog = 300) {
 const MARGINES_DRUKARNI = 3;          // mm od linii cięcia (tolerancja cięcia ±1 mm)
 const PROG_CZERNI = 20;               // L* (0–100); #000 ma 0, domyślny kolor tekstu #1d1b19 ≈ 10
 const DOMYSLNY_KOLOR_TEKSTU = 'rgb(29, 27, 25)';     // .karta { color: #1d1b19 }
-let OSTATNI_RAPORT_DRUKARNI = null;
+let OSTATNI_RAPORT_DRUKARNI = null;   // ostatni raport drukarni (podgląd w konsoli; zlecenie raport ma własny wynik – #111)
 const PASY_KART = new Map();          // odcisk karty → wynik analizy pasa (obrazek karty jest drogi)
 const KOLORY_SVG = new Map();         // adres ikony → lista kolorów z pliku SVG
 
@@ -1532,7 +1536,7 @@ function obwiedniaGlifow(el) {
 // Najmniejszy odstęp tekstu/ikon od krawędzi karty (linii cięcia) – w mm, z kierunkiem.
 function odstepyKarty(k) {
   const kr = k.getBoundingClientRect();
-  if (!kr.width) return null;
+  if (!k.isConnected || !kr.width || !kr.height) return { niezmierzona: true };   // karta odpięta albo ukryta (#111)
   const pxNaMm = kr.width / cardMm(k)[0];
   let naj = null;
   for (const el of k.querySelectorAll('.el.tekst, .el.ikony')) {
@@ -1705,17 +1709,54 @@ function plikiZmiesc(k) {
 }
 const opisZmiesc = (x) => `plik ze spadem w ramce „zmieść” – zostanie pomniejszony (×${String(x.skala).replace('.', ',')}) i rozjedzie się z tłem; dodaj dopasuj=wypełnij`;
 
-async function raportDrukarni() {
+// Układ gotowy do pomiaru (#111): wczytane czcionki użyte w kartach – także te, o które strona jeszcze nie poprosiła
+// (document.fonts.ready na nie nie czeka, a canvas w obwiedniaGlifow mierzy wtedy czcionką zastępczą) – i dwie klatki
+// na przeliczenie układu. Strona w tle nie dostaje klatek – po 100 ms idziemy dalej.
+async function ukladDoPomiaru(karty) {
+  if (document.fonts) {
+    // Czcionka → znaki z tekstu: kroje są dzielone wg unicode-range (latin / latin-ext), a load(font) bez tekstu
+    // wczytuje tylko krój ze spacją – polskie znaki mogłyby zostać w czcionce zastępczej (z przeglądu PR).
+    const fonty = new Map();
+    for (const k of karty) for (const el of k.querySelectorAll('.el.tekst, .el.tekst *')) {
+      const st = getComputedStyle(el), f = `${st.fontStyle} ${st.fontWeight} ${st.fontSize} ${st.fontFamily}`;
+      if (!fonty.has(f)) fonty.set(f, new Set());
+      for (const z of el.textContent) fonty.get(f).add(z);
+    }
+    await Promise.all([...fonty].map(([f, z]) => document.fonts.load(f, [...z].join('') || ' ').catch(() => null)));
+    await document.fonts.ready;
+  }
+  const klatka = () => new Promise((r) => { const t = setTimeout(r, 100); requestAnimationFrame(() => { clearTimeout(t); r(); }); });
+  await klatka(); await klatka();
+}
+
+// Raporty drukarni po kolei (panel Raport i zlecenie naraz zmieniały sobie filtr podglądu w trakcie pomiaru – #111).
+let KOLEJKA_RAPORTU_DRUKARNI = Promise.resolve();
+function raportDrukarni() {
+  const p = KOLEJKA_RAPORTU_DRUKARNI.then(raportDrukarniTeraz);
+  KOLEJKA_RAPORTU_DRUKARNI = p.catch(() => {});
+  return p;
+}
+async function raportDrukarniTeraz() {
   const praca = async () => {
     const filtr = $('filtr').value; $('filtr').value = ''; applyFilter();      // odfiltrowane talie też
     try {
-      const karty = [...$('podglad').querySelectorAll('.talia .karta')];
-      const odstep = [], czern = new Map(), pasy = new Map(), spad = [], pliki = [], zmiesc = [], widziane = new Set();
+      let karty = [...$('podglad').querySelectorAll('.talia .karta')];
+      await ukladDoPomiaru(karty);
+      // Karta, której nie dało się zmierzyć (odpięta przez przebudowę, bez wymiarów), nie może dać fałszywego „OK” (#111):
+      // jeszcze raz z kartami z podglądu, a gdy nadal – lista „niezmierzone” w wyniku i błąd w sekcji odstępu.
+      // (Bez czekania na KOLEJKA_BUDOWY – jesteśmy na wyłączność, przebudowa zaczęta po nas czeka na nasz koniec.)
+      const bezWymiarow = (k) => { const r = k.getBoundingClientRect(); return !k.isConnected || !r.width || !r.height; };
+      if (!karty.length || karty.some(bezWymiarow)) {
+        karty = [...$('podglad').querySelectorAll('.talia .karta')];
+        await ukladDoPomiaru(karty);
+      }
+      const odstep = [], bezPomiaru = [], czern = new Map(), pasy = new Map(), spad = [], pliki = [], zmiesc = [], widziane = new Set();
       for (const k of karty) {
         const rewers = k.classList.contains('rewers');
         const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' + nrRewersu(k) : k.dataset.row);
         const pierwsza = !widziane.has(klucz); widziane.add(klucz);
         const o = odstepyKarty(k);
+        if (o && o.niezmierzona) { if (!bezPomiaru.includes(opisKarty(k))) bezPomiaru.push(opisKarty(k)); continue; }
         if (o && o.odstep < MARGINES_DRUKARNI - 0.005) {
           const byla = odstep.find((x) => x.klucz === klucz);
           if (!byla) odstep.push({ klucz, karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...o, odstep: Math.round(o.odstep * 100) / 100 });
@@ -1744,7 +1785,7 @@ async function raportDrukarni() {
       // Spad w szablonie (#84): talie bez deklaracji i pliki o proporcjach innych niż karta ze spadem.
       const talie = [...$('podglad').querySelectorAll('.talia')].map((t) => t.dataset.talia);
       const spadSzablonu = { talie: Object.fromEntries(talie.map((t) => [t, spadTalii(t)])), bez: talie.filter((t) => !spadTalii(t)), pliki, zmiesc };
-      return { margines: MARGINES_DRUKARNI, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad, spadSzablonu };
+      return { margines: MARGINES_DRUKARNI, karty: karty.length, niezmierzone: bezPomiaru, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad, spadSzablonu };
     } finally { $('filtr').value = filtr; applyFilter(); }
   };
   // Obrazki kart (html-to-image) czytają podgląd – na wyłączność, chyba że eksport już trwa.
@@ -1752,8 +1793,9 @@ async function raportDrukarni() {
 }
 
 // Sekcje raportu dla trybu drukarni (ten sam kształt h3 + ul/div.ok – raportJson je odczyta).
-async function sekcjeDrukarni(lista) {
+async function sekcjeDrukarni(lista, o = {}) {
   const r = await raportDrukarni();
+  o.wynikDrukarni = r;                            // zlecenie raport – wynik tego raportu, nie ostatniego (#111)
   const mm = (v) => String(v.toFixed(1)).replace('.', ',') + ' mm';
   const ileKart = (a) => a.length > 6 ? a.slice(0, 6).map(esc).join(', ') + ` … (+${a.length - 6})` : a.map(esc).join(', ');
   const POKAZ = 25;
@@ -1767,9 +1809,11 @@ async function sekcjeDrukarni(lista) {
     .concat(ss.zmiesc.slice(0, POKAZ).map((x) => `${esc(x.karta)}: ${esc(x.plik)} – ${x.obraz[0]}×${x.obraz[1]} px, ${esc(opisZmiesc(x)).replace('dopasuj=wypełnij', '<code>dopasuj=wypełnij</code>')}`))
     .concat(ss.zmiesc.length > POKAZ ? [`… i ${ss.zmiesc.length - POKAZ} obrazków „zmieść” więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
     'wszystkie talie deklarują spad, a tło i obrazki przy krawędzi mają proporcje karty ze spadem');
-  lista(`Drukarnia: tekst bliżej niż ${MARGINES_DRUKARNI} mm od linii cięcia`, r.odstep.slice(0, POKAZ).map((x) =>
+  lista(`Drukarnia: tekst bliżej niż ${MARGINES_DRUKARNI} mm od linii cięcia`, (!r.karty ? ['Nie zmierzono żadnej karty – podgląd jest pusty; otwórz raport ponownie, gdy karty się pojawią']
+    : r.niezmierzone.length ? [`Nie zmierzono ${r.niezmierzone.length} z ${r.karty} kart (${ileKart(r.niezmierzone)}) – podgląd zmieniał się w trakcie raportu; otwórz raport ponownie`] : [])
+    .concat(r.odstep.slice(0, POKAZ).map((x) =>
     `<b>${mm(x.odstep)}</b> – ${esc(x.karta)}: ${x.element === 'IKONA' ? 'ikona' : '„' + esc(x.tekst) + '”'}, ${x.krawedz} krawędź`)
-    .concat(r.odstep.length > POKAZ ? [`… i ${r.odstep.length - POKAZ} kart więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
+    .concat(r.odstep.length > POKAZ ? [`… i ${r.odstep.length - POKAZ} kart więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : [])),
     `tekst i ikony są co najmniej ${MARGINES_DRUKARNI} mm od linii cięcia`);
   lista('Drukarnia: „prawie czerń” zamiast #000', r.czern.map((x) =>
     `<b>${esc(x.kolor)}</b> (jasność ${x.jasnosc}) – ${esc(x.rodzaj)}: ${ileKart(x.karty)}. Po konwersji do CMYK wyjdzie czerń czterokolorowa – drukarnie chcą tekstu i małych ikon w czystej czerni (K100): wpisz #000`),
@@ -1796,7 +1840,7 @@ async function raportProjektu(o = {}) {
   const sekcje = [];
   const lista = (tyt, el, pusto) => sekcje.push(`<h3>${esc(tyt)}</h3>` + (el.length
     ? '<ul>' + el.map((x) => '<li>' + x + '</li>').join('') + '</ul>' : `<div class="ok">✓ ${esc(pusto)}</div>`));
-  if (o.drukarnia ?? raportDrukarniWlaczony()) await sekcjeDrukarni(lista);
+  if (o.drukarnia ?? raportDrukarniWlaczony()) await sekcjeDrukarni(lista, o);
   const tekst = RAPORT.tekst, tl = tekst.toLowerCase();
   const uzytaKolumna = (k) => tl.includes('[' + k.trim().toLowerCase() + ']');
   const SPECJALNE = ['ilosc', 'id', 'nazwa'];
@@ -2965,9 +3009,11 @@ function stanKart() {
 }
 
 // Raport projektu (to samo co panel Raport) jako lista sekcji z pozycjami tekstowymi.
-async function raportJson(o = {}) {
+async function raportJson(o = {}, wyjscie = {}) {
   const d = document.createElement('div');
-  d.innerHTML = await raportProjektu({ drukarnia: !!o.drukarnia });     // zlecenie: tryb drukarni tylko z kluczem
+  const opcje = { drukarnia: !!o.drukarnia };                             // zlecenie: tryb drukarni tylko z kluczem
+  d.innerHTML = await raportProjektu(opcje);
+  wyjscie.drukarnia = opcje.wynikDrukarni || null;
   return [...d.querySelectorAll('h3')].map((h) => {
     const nast = h.nextElementSibling;
     const pozycje = nast && nast.tagName === 'UL' ? [...nast.querySelectorAll('li')].map((li) => li.textContent.trim()) : [];
@@ -2982,8 +3028,8 @@ const ZADANIA_ZLECEN = {
   },
   async stan() { return { ok: true, ...stanKart() }; },
   async raport(o) {
-    const wynik = { ok: true, raport: await raportJson(o) };
-    if (o.drukarnia) wynik.drukarnia = OSTATNI_RAPORT_DRUKARNI;     // pełne listy (w raporcie – skrót)
+    const w = {}, wynik = { ok: true, raport: await raportJson(o, w) };
+    if (o.drukarnia) wynik.drukarnia = w.drukarnia;     // pełne listy (w raporcie – skrót); wynik tego raportu (#111)
     return wynik;
   },
   async pdf(o) {

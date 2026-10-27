@@ -1088,6 +1088,51 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const P = aktywny, wc = P.wc, szablon = P.szablon, projekt = P.folder;   // projekt testowy = aktywna zakładka
   const czekaj = (ms) => new Promise((r) => setTimeout(r, ms));
   wybraneBlokiTestu();                                    // sprawdzenie nazw od razu (błąd → { ok: false, blad })
+  // Raport drukarni zaraz po starcie (#111): zlecenie raport (drukarnia = tak), gdy tylko strona przyjmuje zlecenia
+  // (warunek jak w wykonajPlikZlecenia), potem panel Raport, zlecenie i przebudowa naraz z filtrem podglądu, na końcu
+  // raport po ustaleniu się strony. Te same pozycje odstępu, żadnej karty niezmierzonej, filtr bez zmian; karta odpięta
+  // od strony = niezmierzona (nie „OK”). 05-zaklecia ma stopkę „nr [ID]” 2,15 mm od dolnej krawędzi – tam pozycje muszą być.
+  let raportStart = null;
+  if (testBloku('raportStart') && folder !== '-') {
+    for (let i = 0; i < 2400 && !(await wc.executeJavaScript('!!(window.wykonajZlecenie && window.zbudowano)').catch(() => false)); i++) await czekaj(25);
+    raportStart = await wc.executeJavaScript(`(async () => {
+      const lista = (d) => d ? d.odstep.map((x) => x.karta + ' ' + x.odstep).join('|') : null;
+      const opis = (d) => d && { karty: d.karty, odstep: d.odstep.length, niezmierzone: d.niezmierzone.length };
+      const start = (await wykonajZlecenie('raport', { drukarnia: 'tak' })).drukarnia;
+      const filtr = $('filtr').options[1] ? $('filtr').options[1].value : '';
+      $('filtr').value = filtr; applyFilter();
+      let bylo = null; try { bylo = localStorage.getItem('raportDrukarnia'); localStorage.setItem('raportDrukarnia', '1'); } catch (e) { /* bez zapisu */ }
+      const [panelHtml, z] = await Promise.all([raportProjektu(), wykonajZlecenie('raport', { drukarnia: 'tak' }), build(), pokazRaport(true)]);
+      const panel = /Nie zmierzono/.test(panelHtml) || !/Drukarnia: tekst/.test(panelHtml);
+      await pokazRaport(false);
+      // Przebudowa przy widocznym panelu Raport sama uruchamia jeszcze jeden raport (zbudujTeraz → pokazRaport(true), bez
+      // czekania) – trwa on dalej po Promise.all i do końca ma pusty filtr. Pod obciążeniem (CI, 4 procesy naraz) test
+      // czytał filtr w jego trakcie, a potem ten raport przywracał filtr testu kolejnym blokom. Czekamy, aż kolejki ustaną.
+      for (let r = null, b = null; r !== KOLEJKA_RAPORTU_DRUKARNI || b !== KOLEJKA_BUDOWY;) {
+        r = KOLEJKA_RAPORTU_DRUKARNI; b = KOLEJKA_BUDOWY; await Promise.all([r, b]);
+      }
+      try { if (bylo === null) localStorage.removeItem('raportDrukarnia'); else localStorage.setItem('raportDrukarnia', bylo); } catch (e) { /* bez zapisu */ }
+      const filtrPo = $('filtr').value; $('filtr').value = ''; applyFilter();
+      await KOLEJKA_BUDOWY;
+      const potem = await raportDrukarni();
+      const odpieta = odstepyKarty(document.querySelector('#podglad .karta').cloneNode(true));
+      // Ścieżka błędu: wynik z kartami niezmierzonymi / bez kart → pozycja-błąd w sekcji odstępu zamiast ✓.
+      const oryg = window.raportDrukarni, sekcja = async (r) => {
+        window.raportDrukarni = async () => ({ margines: 3, odstep: [], czern: [], krawedz: [], spad: [], spadSzablonu: { talie: {}, bez: [], pliki: [], zmiesc: [] }, ...r });
+        try { const d = document.createElement('div'); d.innerHTML = await raportProjektu({ drukarnia: true });
+          const h = [...d.querySelectorAll('h3')].find((x) => /Drukarnia: tekst/.test(x.textContent));
+          return h && h.nextElementSibling ? h.nextElementSibling.textContent : ''; } finally { window.raportDrukarni = oryg; }
+      };
+      const bledy = { czesc: /Nie zmierzono 1 z 3 kart/.test(await sekcja({ karty: 3, niezmierzone: ['Próba 1'] })),
+        zadna: /Nie zmierzono żadnej karty/.test(await sekcja({ karty: 0, niezmierzone: [] })),
+        wszystkie: /✓/.test(await sekcja({ karty: 3, niezmierzone: [] })) };
+      return { start: opis(start), naraz: opis(z.drukarnia), potem: opis(potem), filtr: filtrPo === filtr, panelBezBledu: !panel,
+        zgodne: lista(start) === lista(potem) && lista(z.drukarnia) === lista(potem), odpieta: !!(odpieta && odpieta.niezmierzona), bledy };
+    })()`);
+    const r = raportStart, stopka = /"nr \[ID\]"/.test(fs.readFileSync(szablon, 'utf8'));
+    r.ok = !!(r.start && r.naraz && r.potem) && [r.start, r.naraz, r.potem].every((x) => x.karty > 0 && x.niezmierzone === 0)
+      && r.zgodne && r.filtr && r.panelBezBledu && r.odpieta && Object.values(r.bledy).every(Boolean) && (!stopka || r.start.odstep > 0);
+  }
   let stan = '';
   for (let i = 0; folder !== '-' && i < 120; i++) {
     await czekaj(500);
@@ -1202,7 +1247,11 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     // się nie zmienia; „tak” – najdawniej używana zamknięta, nowa otwarta). Potem zamknięcie dodatkowych.
     const puste = [];
     while (projekty.length < LIMIT_ZAKLADEK) { const n = await nowaZakladka(); if (!n) break; puste.push(n); }
-    const limit = { liczba: projekty.length, pasekPlus: await pasek.webContents.executeJavaScript("document.getElementById('nowa').classList.contains('ukryty')") };
+    // Stan paska dochodzi osobnym komunikatem (zakladki:stan) – pod obciążeniem (CI, kilka procesów) jeszcze go nie było.
+    const plusUkryty = () => pasek.webContents.executeJavaScript("document.getElementById('nowa').classList.contains('ukryty')");
+    let pasekPlus = false;
+    for (let i = 0; i < 40 && !(pasekPlus = await plusUkryty()); i++) await czekaj(50);
+    const limit = { liczba: projekty.length, pasekPlus };
     projekty.forEach((x) => { x.zmiany = true; }); TEST.limit = null;
     limit.odmowa = { wynik: await nowaZakladka(), test: TEST.limit, liczba: projekty.length };
     projekty.forEach((x) => { x.zmiany = false; });
@@ -3101,9 +3150,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     && Menu.getApplicationMenu().items[0].submenu.items.some((i) => i.label === 'Sprawdź aktualizacje…');
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
-    && (!drukarnia || drukarnia.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
+    && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

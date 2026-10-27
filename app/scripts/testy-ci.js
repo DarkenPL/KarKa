@@ -38,6 +38,7 @@ function plan() {
   for (const n of przyklady) {
     if (n === '07-gildie') for (const g of GRUPY_07)
       lista.push({ nazwa: n + '-' + g.nazwa, przyklad: n, opcje: ['--test-edytor', '--test-bloki', g.bloki], waga: 2 });
+    else if (n === '05-zaklecia') lista.push({ nazwa: n, przyklad: n, opcje: ['--test-edytor', '--test-bloki', 'raportStart'], waga: 1 });   // #111
     else if (n === '08-wieze') lista.push({ nazwa: n, przyklad: n, opcje: ['--test-edytor', '--test-bloki', 'spadSzablonu,profileDrukarni'], waga: 1 });
     else lista.push({ nazwa: n, przyklad: n, opcje: [], waga: 0 });
   }
