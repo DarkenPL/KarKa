@@ -1731,7 +1731,8 @@ async function ukladDoPomiaru(karty) {
   await klatka(); await klatka();
 }
 
-// Raporty drukarni po kolei (panel Raport i zlecenie naraz zmieniały sobie filtr podglądu w trakcie pomiaru – #111).
+// Raporty drukarni po kolei (panel Raport i zlecenie naraz mierzyły te same karty i zmieniały sobie filtr podglądu – #111;
+// od 0.7.2 filtr bez zmian – zWszystkimiTaliami, #114).
 let KOLEJKA_RAPORTU_DRUKARNI = Promise.resolve();
 function raportDrukarni() {
   const p = KOLEJKA_RAPORTU_DRUKARNI.then(raportDrukarniTeraz);

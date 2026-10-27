@@ -1106,8 +1106,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const panel = /Nie zmierzono/.test(panelHtml) || !/Drukarnia: tekst/.test(panelHtml);
       await pokazRaport(false);
       // Przebudowa przy widocznym panelu Raport sama uruchamia jeszcze jeden raport (zbudujTeraz → pokazRaport(true), bez
-      // czekania) – trwa on dalej po Promise.all i do końca ma pusty filtr. Pod obciążeniem (CI, 4 procesy naraz) test
-      // czytał filtr w jego trakcie, a potem ten raport przywracał filtr testu kolejnym blokom. Czekamy, aż kolejki ustaną.
+      // czekania) – trwa on dalej po Promise.all. Do 0.7.1 miał do końca pusty filtr i pod obciążeniem (CI, 4 procesy naraz)
+      // przywracał potem filtr testu kolejnym blokom (od 0.7.2 filtr bez zmian – #114). Czekamy, aż kolejki ustaną.
       for (let r = null, b = null; r !== KOLEJKA_RAPORTU_DRUKARNI || b !== KOLEJKA_BUDOWY;) {
         r = KOLEJKA_RAPORTU_DRUKARNI; b = KOLEJKA_BUDOWY; await Promise.all([r, b]);
       }
@@ -2170,34 +2170,35 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const po = () => ({ filtr: $('filtr').value === B, widoczne: widoczne() === B, bezKlasy: !$('podglad').classList.contains('wszystkie-talie') });
       const raportOk = (r) => !!r && !r.blad && r.karty === wszystkie && r.niezmierzone.length === 0;
       const blad = (e) => ({ blad: String((e && (e.message || e.type)) || e) });
-      const w = {};
-      ustaw(A); let p = raportDrukarni().catch(blad); w.raportStart = await wTrakcie(); ustaw(B);
-      let r = await p; w.raport = { karty: r.karty, wszystkie, niezmierzone: r.niezmierzone && r.niezmierzone.length, blad: r.blad, ...po() };
-      w.raport.ok = w.raportStart && raportOk(r) && w.raport.filtr && w.raport.widoczne && w.raport.bezKlasy;
-      ustaw(A); p = katalogPng({}).catch(blad); w.katalogStart = await wTrakcie(); ustaw(B);
-      const k0 = await p, k = Array.isArray(k0) ? k0 : [], talieKat = [...new Set(k.map((x) => x.talia))];
-      w.katalog = { blad: k0 && k0.blad, talie: talieKat.length, oczekiwane: talie.length, puste: k.filter((x) => !x.blob || x.blob.size < 1000).length, ...po() };
-      w.katalog.ok = w.katalogStart && talieKat.length === talie.length && w.katalog.puste === 0 && w.katalog.filtr && w.katalog.widoczne && w.katalog.bezKlasy;
-      pokazRewersyKart(true);
-      ustaw(A); p = raportDrukarni().catch(blad); w.rewersyStart = await wTrakcie(); ustaw(B);
-      r = await p; pokazRewersyKart(false);
-      w.rewersy = { karty: r.karty, niezmierzone: r.niezmierzone && r.niezmierzone.length, blad: r.blad, ...po() };
-      w.rewersy.ok = w.rewersyStart && raportOk(r) && w.rewersy.filtr && w.rewersy.bezKlasy;
-      if (${!jestPrzykladem(szablon)}) {
-        ustaw(A); p = exportPcio().catch(blad); w.pcioStart = await wTrakcie();
-        const q = raportDrukarni().catch(blad);                          // w trakcie eksportu – bez kolejki (EKSPORT_TRWA)
-        ustaw(B);
-        const [x, rz] = await Promise.all([p, q]);
-        w.pcio = { blad: (x && x.blad) || (rz && rz.blad), holdery: x && x.holdery, sekcje, karty: x && x.karty, awersy, raport: rz && rz.karty, niezmierzone: rz && rz.niezmierzone && rz.niezmierzone.length, ...po() };
-        w.pcio.ok = w.pcioStart && !!x && x.holdery === sekcje && x.karty === awersy && raportOk(rz) && w.pcio.filtr && w.pcio.widoczne && w.pcio.bezKlasy;
-        // Eksport obrazków (JPG) przy filtrze na jedną talię: karty talii ukrytych filtrem też (html-to-image – karta z wymiarami).
-        ustaw(A); p = eksportObrazkow({ zlecenie: true, rewersy: false }).catch(blad); w.obrazkiStart = await wTrakcie(); ustaw(B);
-        const o = await p;
-        w.obrazki = { blad: o && o.blad, pliki: o && o.pliki, awersy, ...po() };
-        w.obrazki.ok = w.obrazkiStart && !!o && !o.blad && o.pliki === awersy && w.obrazki.filtr && w.obrazki.widoczne && w.obrazki.bezKlasy;
-      }
-      ustaw('');
-      return w;
+      const w = {}, start = { filtr: $('filtr').value, rewersy: POKAZ_REWERSY };   // stan strony – przywracany na końcu
+      try {
+        ustaw(A); let p = raportDrukarni().catch(blad); w.raportStart = await wTrakcie(); ustaw(B);
+        let r = await p; w.raport = { karty: r.karty, wszystkie, niezmierzone: r.niezmierzone && r.niezmierzone.length, blad: r.blad, ...po() };
+        w.raport.ok = w.raportStart && raportOk(r) && w.raport.filtr && w.raport.widoczne && w.raport.bezKlasy;
+        ustaw(A); p = katalogPng({}).catch(blad); w.katalogStart = await wTrakcie(); ustaw(B);
+        const k0 = await p, k = Array.isArray(k0) ? k0 : [], talieKat = [...new Set(k.map((x) => x.talia))];
+        w.katalog = { blad: k0 && k0.blad, talie: talieKat.length, oczekiwane: talie.length, puste: k.filter((x) => !x.blob || x.blob.size < 1000).length, ...po() };
+        w.katalog.ok = w.katalogStart && talieKat.length === talie.length && w.katalog.puste === 0 && w.katalog.filtr && w.katalog.widoczne && w.katalog.bezKlasy;
+        pokazRewersyKart(true);
+        ustaw(A); p = raportDrukarni().catch(blad); w.rewersyStart = await wTrakcie(); ustaw(B);
+        r = await p; pokazRewersyKart(false);
+        w.rewersy = { karty: r.karty, niezmierzone: r.niezmierzone && r.niezmierzone.length, blad: r.blad, ...po() };
+        w.rewersy.ok = w.rewersyStart && raportOk(r) && w.rewersy.filtr && w.rewersy.bezKlasy;
+        if (${!jestPrzykladem(szablon)}) {
+          ustaw(A); p = exportPcio().catch(blad); w.pcioStart = await wTrakcie();
+          const q = raportDrukarni().catch(blad);                          // w trakcie eksportu – bez kolejki (EKSPORT_TRWA)
+          ustaw(B);
+          const [x, rz] = await Promise.all([p, q]);
+          w.pcio = { blad: (x && x.blad) || (rz && rz.blad), holdery: x && x.holdery, sekcje, karty: x && x.karty, awersy, raport: rz && rz.karty, niezmierzone: rz && rz.niezmierzone && rz.niezmierzone.length, ...po() };
+          w.pcio.ok = w.pcioStart && !!x && x.holdery === sekcje && x.karty === awersy && raportOk(rz) && w.pcio.filtr && w.pcio.widoczne && w.pcio.bezKlasy;
+          // Eksport obrazków (JPG) przy filtrze na jedną talię: karty talii ukrytych filtrem też (html-to-image – karta z wymiarami).
+          ustaw(A); p = eksportObrazkow({ zlecenie: true, rewersy: false }).catch(blad); w.obrazkiStart = await wTrakcie(); ustaw(B);
+          const o = await p;
+          w.obrazki = { blad: o && o.blad, pliki: o && o.pliki, awersy, ...po() };
+          w.obrazki.ok = w.obrazkiStart && !!o && !o.blad && o.pliki === awersy && w.obrazki.filtr && w.obrazki.widoczne && w.obrazki.bezKlasy;
+        }
+        return w;
+      } finally { ustaw(start.filtr); pokazRewersyKart(start.rewersy); }
     })()`);
     const f = filtrWTrakcie;
     f.ok = !!f.pominiety || !!(f.raport.ok && f.katalog.ok && f.rewersy.ok && (!f.pcio || (f.pcio.ok && f.obrazki.ok)));
