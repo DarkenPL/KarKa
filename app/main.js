@@ -1697,8 +1697,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         } finally { TALIE.splice(-3); }
         // raport drukarni
         const rap = await raportDrukarni(), ss = rap.spadSzablonu;
-        r.raport = { bez: ss.bez, pliki: ss.pliki.length };
-        if (ss.bez.join() !== bez.join() || ss.pliki.length) b.push('raport ' + JSON.stringify(r.raport));
+        r.raport = { bez: ss.bez, pliki: ss.pliki.length, zmiesc: ss.zmiesc.length };
+        if (ss.bez.join() !== bez.join() || ss.pliki.length || ss.zmiesc.length) b.push('raport ' + JSON.stringify(r.raport));
         // b) z deklaracją: geometria tła i nakładki
         for (const t of zSpadem) {
           const s = spadTalii(t), k = document.querySelector('#podglad .talia[data-talia=' + JSON.stringify(t) + '] .karta:not(.rewers)');
@@ -1730,6 +1730,23 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
             r[t].bezSpaduWykryty = zle.map((x) => ({ tlo: x.tlo, bezSpadu: x.bezSpadu }));
             if (!zle.some((x) => x.tlo && x.bezSpadu)) b.push(t + ': plik tła bez spadu niezgłoszony ' + JSON.stringify(zle));
           } finally { ukr2.remove(); }
+          // #94: nakładka ze spadem (plik o proporcjach karty ze spadem) w ramce „zmieść” na całą kartę – raport i
+          // ostrzeżenie zlecenia pdf (spadDruku); „rozciągnij” i tło (cover) – bez zgłoszeń.
+          if (plikiZmiesc(k).length) b.push(t + ': plikiZmiesc zgłasza kartę bez „zmieść” ' + JSON.stringify(plikiZmiesc(k)));
+          const kz = k.cloneNode(true), nak = [...kz.querySelectorAll(':scope > .el.obrazek:not(.tlo)')].find((el) => parseFloat(el.style.left) < 0);
+          if (!nak) { b.push(t + ': brak nakładki ze spadem w przykładzie'); continue; }
+          Object.assign(nak.style, { left: '0mm', top: '0mm', width: w + 'mm', height: h + 'mm' });
+          nak.querySelector('img').style.objectFit = 'contain';
+          const ukr3 = document.createElement('div'); ukr3.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden'; ukr3.appendChild(kz); document.body.appendChild(ukr3);
+          try {
+            await nak.querySelector('img').decode();
+            const zm = plikiZmiesc(kz), oczSkala = Math.round(Math.min(w / (w + 2 * s), h / (h + 2 * s)) * 1000) / 1000;
+            const ostr = spadDruku([kz], 0).ostrzezenia.filter((x) => /zmieść/.test(x));
+            r[t].zmiesc = { zgloszone: zm, ostrzezenia: ostr };
+            if (zm.length !== 1 || zm[0].skala !== oczSkala || zm[0].ramkaZeSpadem.join() !== [w + 2 * s, h + 2 * s].join() || !/dopasuj=wypełnij/.test(opisZmiesc(zm[0])))
+              b.push(t + ': nakładka „zmieść” ' + JSON.stringify(zm));
+            if (ostr.length !== 1 || !/\\(1 karta\\) – plik ze spadem w ramce „zmieść” – zostanie pomniejszony/.test(ostr[0])) b.push(t + ': ostrzeżenie pdf ' + JSON.stringify(ostr));
+          } finally { ukr3.remove(); }
         }
         r.bledy = b; r.ok = !b.length;
         return r;

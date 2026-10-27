@@ -1671,12 +1671,39 @@ function plikiZeSpadem(k) {
   return wynik;
 }
 
+// #94 (decyzja A + C z 27.10.2026): w talii ze spadem obrazek „zmieść” (wpisany albo domyślny) przy krawędzi karty,
+// którego plik ma proporcje ramki przedłużonej o spad (po stronach, których dotyka; całą kartę – (szer+2N)/(wys+2N)),
+// to plik ze spadem – „zmieść” pomniejsza go do ramki bez spadu i obraz rozjeżdża się z tłem. Rysowanie bez zmian
+// (ramka „zmieść” nie rośnie): raport drukarni i zlecenie pdf radzą dopasuj=wypełnij. Tolerancja proporcji 1 %;
+// plik o proporcjach także ramki bez spadu (nie da się odróżnić) i obrazki z kadr= albo obrotem – pomijane.
+function plikiZmiesc(k) {
+  const sp = spadTalii(k.dataset.talia), wynik = [];
+  if (!sp) return wynik;
+  const [w, h] = cardMm(k);
+  for (const el of k.querySelectorAll(':scope > .el.obrazek')) {
+    const img = el.querySelector('img');
+    if (!img || !img.naturalWidth || !img.naturalHeight || img.style.objectFit !== 'contain' || /translate/.test(img.style.transform)) continue;
+    const g = krawedzieSpadu(el, w, h);
+    if (!g) continue;
+    // Ramka ze spadem jak w renderCard (wypełnij przy krawędzi): sięga co najmniej krawędzi spadu po dotykanych stronach.
+    const rw = (g.prawo ? Math.max(g.x + g.ew, w + sp) : g.x + g.ew) - (g.lewo ? Math.min(g.x, -sp) : g.x);
+    const rh = (g.dol ? Math.max(g.y + g.eh, h + sp) : g.y + g.eh) - (g.gora ? Math.min(g.y, -sp) : g.y);
+    const prop = img.naturalWidth / img.naturalHeight;
+    if (Math.abs(prop / (rw / rh) - 1) > 0.01 || Math.abs(prop / (g.ew / g.eh) - 1) <= 0.01) continue;
+    const r2 = (v) => Math.round(v * 100) / 100;
+    wynik.push({ plik: (URL_PLIK.get(img.src) || '').replace(/@[^@]*$/, ''), ramka: [r2(g.ew), r2(g.eh)], ramkaZeSpadem: [r2(rw), r2(rh)],
+      obraz: [img.naturalWidth, img.naturalHeight], skala: Math.round(Math.min(g.ew / rw, g.eh / rh) * 1000) / 1000 });
+  }
+  return wynik;
+}
+const opisZmiesc = (x) => `plik ze spadem w ramce „zmieść” – zostanie pomniejszony (×${String(x.skala).replace('.', ',')}) i rozjedzie się z tłem; dodaj dopasuj=wypełnij`;
+
 async function raportDrukarni() {
   const praca = async () => {
     const filtr = $('filtr').value; $('filtr').value = ''; applyFilter();      // odfiltrowane talie też
     try {
       const karty = [...$('podglad').querySelectorAll('.talia .karta')];
-      const odstep = [], czern = new Map(), pasy = new Map(), spad = [], pliki = [], widziane = new Set();
+      const odstep = [], czern = new Map(), pasy = new Map(), spad = [], pliki = [], zmiesc = [], widziane = new Set();
       for (const k of karty) {
         const rewers = k.classList.contains('rewers');
         const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' + nrRewersu(k) : k.dataset.row);
@@ -1697,6 +1724,7 @@ async function raportDrukarni() {
         }
         for (const x of obrazkiBezSpadu(k)) spad.push({ karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...x });
         for (const x of plikiZeSpadem(k)) pliki.push({ karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...x });
+        for (const x of plikiZmiesc(k)) zmiesc.push({ karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...x });
         const p = await pasKarty(k);
         if (p && !p.blad && ['czarny', 'ryzykowny'].includes(p.rodzaj)) {
           const kk = k.dataset.talia + '|' + (rewers ? 'r' : 'a') + '|' + p.rodzaj + '|' + (p.odcien || '') + '|' + p.kolor;
@@ -1708,7 +1736,7 @@ async function raportDrukarni() {
       odstep.forEach((x) => delete x.klucz);
       // Spad w szablonie (#84): talie bez deklaracji i pliki o proporcjach innych niż karta ze spadem.
       const talie = [...$('podglad').querySelectorAll('.talia')].map((t) => t.dataset.talia);
-      const spadSzablonu = { talie: Object.fromEntries(talie.map((t) => [t, spadTalii(t)])), bez: talie.filter((t) => !spadTalii(t)), pliki };
+      const spadSzablonu = { talie: Object.fromEntries(talie.map((t) => [t, spadTalii(t)])), bez: talie.filter((t) => !spadTalii(t)), pliki, zmiesc };
       return { margines: MARGINES_DRUKARNI, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad, spadSzablonu };
     } finally { $('filtr').value = filtr; applyFilter(); }
   };
@@ -1728,7 +1756,9 @@ async function sekcjeDrukarni(lista) {
     + ` – w PDF dla drukarni spad jest dorabiany (tło powiększone, obrazki przy krawędzi przedłużone). Do druku w drukarni dopisz spad w szablonie (np. <code>KARTA = 63, 88, spad=3</code>) i przygotuj tło i obrazki przy krawędzi ze spadem`] : [])
     .concat(ss.pliki.slice(0, POKAZ).map((x) => `${esc(x.karta)}: ${esc(x.plik)}${x.tlo ? ' (tło)' : ''} – ${x.obraz[0]}×${x.obraz[1]} px, a ramka ze spadem ma ${mm(x.ramka[0])} × ${mm(x.ramka[1])}`
       + (x.bezSpadu ? ': plik ma proporcje karty bez spadu – przygotuj go ze spadem' : ': inne proporcje') + (x.dopasowanie === 'rozciągnij' ? ' (obraz zostanie zniekształcony)' : ' (część obrazu zostanie przycięta)')))
-    .concat(ss.pliki.length > POKAZ ? [`… i ${ss.pliki.length - POKAZ} plików więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
+    .concat(ss.pliki.length > POKAZ ? [`… i ${ss.pliki.length - POKAZ} plików więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : [])
+    .concat(ss.zmiesc.slice(0, POKAZ).map((x) => `${esc(x.karta)}: ${esc(x.plik)} – ${x.obraz[0]}×${x.obraz[1]} px, ${esc(opisZmiesc(x)).replace('dopasuj=wypełnij', '<code>dopasuj=wypełnij</code>')}`))
+    .concat(ss.zmiesc.length > POKAZ ? [`… i ${ss.zmiesc.length - POKAZ} obrazków „zmieść” więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
     'wszystkie talie deklarują spad, a tło i obrazki przy krawędzi mają proporcje karty ze spadem');
   lista(`Drukarnia: tekst bliżej niż ${MARGINES_DRUKARNI} mm od linii cięcia`, r.odstep.slice(0, POKAZ).map((x) =>
     `<b>${mm(x.odstep)}</b> – ${esc(x.karta)}: ${x.element === 'IKONA' ? 'ikona' : '„' + esc(x.tekst) + '”'}, ${x.krawedz} krawędź`)
@@ -2356,6 +2386,16 @@ function spadDruku(karty, spadOkna) {
   if (bez.length && s) ostrzezenia.push((bez.length === talie.length ? 'projekt nie deklaruje spadu w szablonie' : 'talie bez spadu w szablonie: ' + bez.join(', '))
     + ` – spad ${mmTxt(s)} jest w PDF dorabiany (tło powiększone, obrazki przy krawędzi przedłużone). Do druku w drukarni dopisz spad w szablonie (np. KARTA = 63, 88, spad=3) i przygotuj tło i obrazki przy krawędzi ze spadem`);
   // Pliki talii mają spad x < s: tło i obrazki zostają w miejscu, więc pozostały pas spadu wypełnia tylko kolor tła karty.
+  // #94: pliki ze spadem w ramce „zmieść” – raz na plik i talię; liczba kart drukowanych z tym plikiem na awersie albo rewersie.
+  const zm = new Map(), wyniki = new Map(), zmiesc = (el) => (wyniki.has(el) ? wyniki : wyniki.set(el, plikiZmiesc(el))).get(el);
+  for (const k of karty.filter((k) => k && k.nodeType === 1))
+    for (const el of [k, rewersKarty(k)].filter(Boolean)) for (const x of zmiesc(el)) {
+      const kl = k.dataset.talia + '|' + x.plik;
+      if (!zm.has(kl)) zm.set(kl, { ...x, talia: k.dataset.talia, karty: new Set() });
+      zm.get(kl).karty.add(k);
+    }
+  const ileKart = (n) => n + ' ' + (n === 1 ? 'karta' : [2, 3, 4].includes(n % 10) && (n % 100 < 10 || n % 100 >= 20) ? 'karty' : 'kart');
+  for (const x of zm.values()) ostrzezenia.push(`talia ${x.talia}: ${x.plik} (${ileKart(x.karty.size)}) – ${opisZmiesc(x)}`);
   for (const [t, x] of talie) if (x && x !== s) ostrzezenia.push(`talia ${t}: spad w szablonie ${mmTxt(x)}, w PDF ${mmTxt(s)} – zewnętrzne ${mmTxt(s - x)} spadu tej talii będzie bez obrazu (tylko kolor tła karty)`);
   return { s, bez, ostrzezenia, zSzablonu: zadeklarowane.length > 0 };
 }
