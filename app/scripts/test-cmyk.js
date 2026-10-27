@@ -187,7 +187,7 @@ const plan = (pliki, plikiStron) => ({ uklad: 'drukarnia', szer: 69, wys: 94, sp
     const krotki = path.join(T, 'krotki.icc');
     fs.writeFileSync(krotki, 'acsp');
     assert.throws(() => cmyk.sprawdzPlikIcc(krotki), /nie jest profilem ICC/);
-    assert.throws(() => cmyk.rozwiazProfil(tekstowy, T), /możliwe: fogra39, fogra51/);   // rozszerzenie .txt
+    assert.throws(() => cmyk.rozwiazProfil(tekstowy, T), /możliwe: iso300, fogra39, fogra51/);   // rozszerzenie .txt
     // plik z rozszerzeniem .icc, ale tekstowy → odrzucony przez nagłówek
     const falszywy = path.join(T, 'falszywy.icc');
     fs.copyFileSync(tekstowy, falszywy);
@@ -195,7 +195,7 @@ const plan = (pliki, plikiStron) => ({ uklad: 'drukarnia', szer: 69, wys: 94, sp
     // klucz bez pobranego pliku → { brak }
     const r = cmyk.rozwiazProfil('fogra39', path.join(T, 'pusty'));
     assert.strictEqual(r.brak, 'fogra39');
-    assert.deepStrictEqual(Object.keys(cmyk.PROFILE).sort(), ['fogra39', 'fogra51']);
+    assert.deepStrictEqual(Object.keys(cmyk.PROFILE).sort(), ['fogra39', 'fogra51', 'iso300']);
     assert.strictEqual(cmyk.rozwiazProfil(undefined, path.join(T, 'pusty')).brak, 'fogra39');   // domyślny
   });
   if (profilGotowy) {
@@ -473,6 +473,28 @@ const plan = (pliki, plikiStron) => ({ uklad: 'drukarnia', szer: 69, wys: 94, sp
       await assert.rejects(cmyk.konwertujBufor(Buffer.from('%PDF-1.4 obcięty'), { gs, profil: iccCmyk, PDFLib }));
       const po = ile();
       assert.ok(po <= przed, `foldery karka-cmyk-: ${przed} → ${po}`);
+    });
+    // PDF/X-4 i TAC (#85, 0.7.0): nagłówek 1.6, Output Intent z profilem, Info + XMP; pomiar TAC czystych kolorów.
+    await krok('pdfx4 i zmierzTAC: metadane PDF/X-4, TAC 400 % / 100 % / 0 %', async () => {
+      const { PDFDocument, PDFName, cmyk: kolorCmyk } = PDFLib;
+      const d = await PDFDocument.create();
+      for (const k of [[1, 1, 1, 1], [0, 0, 0, 1], [0, 0, 0, 0]]) d.addPage([30, 30]).drawRectangle({ x: 0, y: 0, width: 30, height: 30, color: kolorCmyk(...k) });
+      d.getPages()[0].node.set(PDFName.of('ArtBox'), d.context.obj([0, 0, 30, 30]));
+      const b = await cmyk.pdfx4(Buffer.from(await d.save({ useObjectStreams: false })), { PDFLib, profil: iccCmyk, warunek: 'FOGRA39', nazwa: 'Test', tytul: 'Próba <&>' });
+      assert.strictEqual(b.toString('latin1', 0, 8), '%PDF-1.6');
+      const z = await PDFDocument.load(b, { updateMetadata: false });
+      const oi = z.catalog.lookup(PDFName.of('OutputIntents')).lookup(0);
+      assert.strictEqual(String(oi.get(PDFName.of('S'))), '/GTS_PDFX');
+      assert.ok(oi.lookup(PDFName.of('DestOutputProfile')).contents.length > 0, 'brak profilu w Output Intent');
+      assert.strictEqual(String(z.getInfoDict().get(PDFName.of('GTS_PDFXVersion'))), '(PDF/X-4)');
+      assert.strictEqual(String(z.getInfoDict().get(PDFName.of('Trapped'))), '/False');
+      const xmp = Buffer.from(z.catalog.lookup(PDFName.of('Metadata')).contents).toString('utf8');
+      assert.match(xmp, /<pdfxid:GTS_PDFXVersion>PDF\/X-4</); assert.match(xmp, /<pdf:Trapped>False</); assert.match(xmp, /Próba &lt;&amp;&gt;/);
+      assert.ok(!z.getPages()[0].node.get(PDFName.of('ArtBox')), 'ArtBox został');
+      const t = await cmyk.zmierzTAC(b, { gs, limit: 300, dpi: 36 });
+      assert.deepStrictEqual(t.strony.map((x) => x.maks), [400, 100, 0]);
+      assert.strictEqual(t.maksTAC, 400); assert.strictEqual(t.stronPonadLimit, 1);
+      return `TAC stron ${t.strony.map((x) => x.maks).join('/')}`;
     });
   } else {
     wyniki.push('pominięto – konwersja Ghostscriptem (brak gs ≥ 10 albo profilu CMYK)');

@@ -1,0 +1,32 @@
+{
+  "format": 1,
+  "id": "printnet",
+  "nazwa": "Printnet",
+  "opis": "Druk cyfrowy (Ricoh Pro C9210)",
+  "spad": 2,
+  "strefa": 3,
+  "icc": "iso300",
+  "tac": 300,
+  "pdfx": "PDF/X-4",
+  "nadrukCzerni": true,
+  "rewersy": true,
+  "strony": "naprzemian",
+  "wzorNazwy": "{projekt} – printnet{dopiski}",
+  "strona": {
+    "awersy": "awersy",
+    "rewersy": "rewersy",
+    "razem": ""
+  },
+  "komponent": "",
+  "jezyk": "",
+  "minTekstPt": {
+    "czarny": 6,
+    "kontra": 8
+  },
+  "uwagi": [
+    "Strefa bezpieczna 3 mm od linii cięcia (cięcie ±1 mm)",
+    "TAC 300 % (laminowane 250 %, niepowlekana strona kartonu 200 %)",
+    "Tekst min. 6 pt czarny, 8 pt w kontrze; czerń = 100 % K; unikać nadruku poza czernią",
+    "300 dpi, czcionki osadzone, jedna orientacja stron"
+  ]
+}

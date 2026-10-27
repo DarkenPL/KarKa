@@ -78,6 +78,7 @@ Są wbudowane w aplikację (menu **Plik → Przykłady**), a ich pliki leżą w 
 - [Komendy szablonów](docs/komendy.md) – pełna lista
 - [Nowa talia krok po kroku](docs/nowa-talia.md)
 - [Eksport do playingcards.io](docs/playingcards.md)
+- [Profile drukarni](docs/profile-drukarni.md) – LongPack, Printnet, własne ustawienia (PDF dla drukarni)
 
 ## Licencje
 

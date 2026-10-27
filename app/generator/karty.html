@@ -68,6 +68,12 @@ body { margin: 0; font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", 
 .okno .opis { color: #8a8378; font-size: 12px; }
 .okno fieldset label select { flex: 1 1 auto; min-width: 0; max-width: 100%; }   /* długa nazwa profilu – bez poziomego przewijania okna */
 .okno .talie { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.okno .pole-drukarni > label { display: inline-flex; margin: 3px 16px 3px 0; font-size: 13px; }   /* profile drukarni w jednym wierszu (#85) */
+.okno .ramka-profilu { border: 1px solid #ddd6cc; border-radius: 6px; padding: 8px 10px; margin-top: 8px; font-size: 13px; line-height: 1.5; }
+.okno .ramka-profilu ul { margin: 4px 0 0; padding-left: 18px; }
+.okno .profil-drukarni[data-id=wlasne] { margin-top: 10px; padding-left: 10px; border-left: 3px solid #ddd6cc; }
+.okno .profil-drukarni input[type=text] { font: inherit; }
+.okno .blad-spadu { color: #b3261e; }
 .okno-przyciski { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 button, select { font: inherit; padding: 6px 12px; border: 1px solid #c9c2b8; border-radius: 6px; background: #fff; cursor: pointer; }
 button.glowny { background: #c8463f; border-color: #c8463f; color: #fff; }
@@ -2379,11 +2385,14 @@ const spadTalii = (nazwa) => { const t = (typeof TALIE !== 'undefined' ? TALIE :
 // Spad PDF dla drukarni: z szablonu (największy zadeklarowany), a gdy żadna talia go nie deklaruje – z okna albo
 // zlecenia (dawne zachowanie: spad dorabiany – tło powiększone, obrazki przy krawędzi przedłużone, #74).
 // Talie bez deklaracji i z innym spadem → ostrzeżenia (decyzja właściciela 26.10.2026: PDF powstaje, z ostrzeżeniem).
-function spadDruku(karty, spadOkna) {
+// wymagany (#85, etap 2 – spad z profilu drukarni): PDF ma dokładnie ten spad. Talia ze spadem w szablonie większym →
+// przycięty do spadu profilu (informacje); mniejszym → błąd (bledy – PDF nie powstaje, spadu nie da się dorobić z pliku).
+function spadDruku(karty, spadOkna, wymagany = null) {
   const talie = [...new Set(karty.map((k) => k.dataset.talia))].map((t) => [t, spadTalii(t)]);
   const zadeklarowane = talie.map(([, x]) => x).filter(Boolean);
-  const s = zadeklarowane.length ? Math.max(...zadeklarowane) : Math.max(0, num(spadOkna ?? SPAD_DRUKARNI) || 0);
-  const bez = talie.filter(([, x]) => !x).map(([t]) => t), ostrzezenia = [];
+  const profil = wymagany != null;
+  const s = profil ? wymagany : zadeklarowane.length ? Math.max(...zadeklarowane) : Math.max(0, num(spadOkna ?? SPAD_DRUKARNI) || 0);
+  const bez = talie.filter(([, x]) => !x).map(([t]) => t), ostrzezenia = [], informacje = [], bledy = [];
   if (bez.length && s) ostrzezenia.push((bez.length === talie.length ? 'projekt nie deklaruje spadu w szablonie' : 'talie bez spadu w szablonie: ' + bez.join(', '))
     + ` – spad ${mmTxt(s)} jest w PDF dorabiany (tło powiększone, obrazki przy krawędzi przedłużone). Do druku w drukarni dopisz spad w szablonie (np. KARTA = 63, 88, spad=3) i przygotuj tło i obrazki przy krawędzi ze spadem`);
   // Pliki talii mają spad x < s: tło i obrazki zostają w miejscu, więc pozostały pas spadu wypełnia tylko kolor tła karty.
@@ -2397,8 +2406,13 @@ function spadDruku(karty, spadOkna) {
     }
   const ileKart = (n) => n + ' ' + (n === 1 ? 'karta' : [2, 3, 4].includes(n % 10) && (n % 100 < 10 || n % 100 >= 20) ? 'karty' : 'kart');
   for (const x of zm.values()) ostrzezenia.push(`talia ${x.talia}: ${x.plik} (${ileKart(x.karty.size)}) – ${opisZmiesc(x)}`);
-  for (const [t, x] of talie) if (x && x !== s) ostrzezenia.push(`talia ${t}: spad w szablonie ${mmTxt(x)}, w PDF ${mmTxt(s)} – zewnętrzne ${mmTxt(s - x)} spadu tej talii będzie bez obrazu (tylko kolor tła karty)`);
-  return { s, bez, ostrzezenia, zSzablonu: zadeklarowane.length > 0 };
+  for (const [t, x] of talie) {
+    if (!x || x === s) continue;
+    if (profil && x > s) informacje.push(`talia ${t}: spad w szablonie ${mmTxt(x)}, drukarnia wymaga ${mmTxt(s)} – w PDF przycięty do ${mmTxt(s)}`);
+    else if (profil) bledy.push(`talia ${t}: spad w szablonie ${mmTxt(x)}, a drukarnia wymaga ${mmTxt(s)} – spadu nie da się dorobić; zwiększ spad= w szablonie i przygotuj tło i obrazki przy krawędzi z większym spadem`);
+    else ostrzezenia.push(`talia ${t}: spad w szablonie ${mmTxt(x)}, w PDF ${mmTxt(s)} – zewnętrzne ${mmTxt(s - x)} spadu tej talii będzie bez obrazu (tylko kolor tła karty)`);
+  }
+  return { s, bez, ostrzezenia, informacje, bledy, zSzablonu: zadeklarowane.length > 0 };
 }
 // Odcisk rewersu do porównania kart: ten sam wygląd i rozmiar = ten sam rewers (bez data-talia i title).
 const wygladRewersu = (el, w, h) => w + 'x' + h + '|' + el.style.cssText + '|' + el.innerHTML;
@@ -2428,13 +2442,13 @@ function buildPrint(o = {}) {
     // ostatnia strona tego samego pliku, różne rewersy → drugi plik, w którym strona N to rewers awersu N
     // (karta talii bez rewersu → pusta strona); 'naprzemian' – awers, rewers, awers… (jak do 0.5.8).
     // Spad: z szablonu (#84), bez deklaracji – z okna / zlecenia (dorabiany, z ostrzeżeniem).
-    const sd = tryb === 'drukarnia' ? spadDruku([...groups.values()].flatMap((g) => g.karty.map((a) => a.k)), o.spad) : null;
+    const sd = tryb === 'drukarnia' ? spadDruku([...groups.values()].flatMap((g) => g.karty.map((a) => a.k)), o.spad, o.spadProfilu ?? null) : null;
     const s = sd ? sd.s : 0;
     // Jeden format strony dla całego wydruku: największa karta (pionowo); mniejsze karty na środku.
     const pw = Math.max(...[...groups.values()].map((g) => g.cw)) + 2 * s;
     const ph = Math.max(...[...groups.values()].map((g) => g.ch)) + 2 * s;
     const plan = { uklad: tryb, szer: pw, wys: ph, spad: s, pliki: [''], strony: [] };
-    if (sd) Object.assign(plan, { spadZSzablonu: sd.zSzablonu, bezSpadu: sd.bez, ostrzezenia: sd.ostrzezenia });
+    if (sd) Object.assign(plan, { spadZSzablonu: sd.zSzablonu, bezSpadu: sd.bez, ostrzezenia: sd.ostrzezenia, informacje: sd.informacje, bledy: sd.bledy });
     // Zapas spadu: Chromium zaokrągla stronę PDF (np. 94 → 93,8 mm), więc strona jest o 2 × ZAPAS większa,
     // a karta ma spad + ZAPAS (wystaje poza arkusz). main.js przycina stronę do pw × ph (MediaBox) –
     // bez białej kreski przy dolnej i prawej krawędzi spadu.
@@ -2459,7 +2473,10 @@ function buildPrint(o = {}) {
       const zRewersem = awersy.filter((a) => a.back);
       if (zRewersami && zRewersem.length) {
         const wyglady = new Set(zRewersem.map((a) => wygladRewersu(a.back, a.w, a.h)));
-        if (wyglady.size === 1 && zRewersem.length === awersy.length) { const a = awersy[0]; page(a.back, a.w, a.h); }
+        // dwapliki (#85, LongPack): rewersy zawsze w osobnym pliku – jeden wspólny rewers to jednostronicowy plik rewersów.
+        const jeden = wyglady.size === 1 && zRewersem.length === awersy.length;
+        if (jeden && o.strony === 'dwapliki') { plan.pliki = ['awersy', 'rewersy']; const a = awersy[0]; page(a.back, a.w, a.h, 1); }
+        else if (jeden) { const a = awersy[0]; page(a.back, a.w, a.h); }
         else {
           plan.pliki = ['awersy', 'rewersy'];
           for (const a of awersy) page(a.back || null, a.w, a.h, 1);
@@ -2801,7 +2818,7 @@ const KLUCZE_ZLECEN = {
   katalog: ['talie', 'id'],
   stan: [],
   raport: ['drukarnia'],
-  pdf: ['uklad', 'ciecie', 'rewersy', 'wspolnearkusze', 'strony', 'szkic', 'spad', 'przesunieciex', 'przesunieciey', 'talie', 'id', 'tylkozmienione', 'profil', 'nadrukczerni', 'plik'],
+  pdf: ['uklad', 'ciecie', 'rewersy', 'wspolnearkusze', 'strony', 'szkic', 'spad', 'przesunieciex', 'przesunieciey', 'talie', 'id', 'tylkozmienione', 'profil', 'nadrukczerni', 'pdfx', 'drukarnia', 'plik'],
   obrazki: ['dpi', 'format', 'talie', 'id', 'rewersy'],
   pcio: ['dpi', 'talie', 'id'],
 };
@@ -2847,11 +2864,28 @@ function opcjeZlecenia(polecenie, surowe = {}) {
   }
   if (v.id !== undefined) o.id = lista(v.id);
   if (v.uklad !== undefined) o.uklad = wybor('uklad', ['a4', 'pojedyncze', 'drukarnia'], { osobne: 'pojedyncze' });
+  // Profil drukarni (#85, etap 2): drukarnia = longpack | printnet | wlasne. LongPack i Printnet ustalają spad, strony,
+  // profil ICC, PDF/X, nadruk i rewersy – te klucze są wtedy pomijane z ostrzeżeniem; przy wlasne nadpisują zapisane ustawienia.
+  let profilZl = null;
+  if (polecenie === 'pdf') { delete o.drukarnia; delete o.profilDrukarni; }   // wybór drukarni z okna nie przechodzi na zlecenie bez klucza
+  if (polecenie === 'pdf' && v.drukarnia !== undefined) {
+    const id = wybor('drukarnia', profileDrukarni().map((p) => p.id), { 'wlasne ustawienia': 'wlasne', wlasny: 'wlasne', wlasneustawienia: 'wlasne' });
+    profilZl = id ? profilDrukarni(id) : null;
+    if (profilZl) {
+      if (v.uklad !== undefined && o.uklad !== 'drukarnia') bledy.push(`uklad: profil drukarni działa tylko z uklad = drukarnia (albo bez klucza uklad)`);
+      if (profilZl.id !== 'wlasne') {
+        const ustala = ['spad', 'strony', 'profil', 'pdfx', 'nadrukczerni', 'rewersy'].filter((k) => v[k] !== undefined);
+        if (ustala.length) ostrzezenia.push(`${ustala.join(', ')}: ustala profil drukarni ${profilZl.nazwa} – pominięte (własne wartości: drukarnia = wlasne)`);
+        for (const k of ustala) delete v[k];
+      }
+      Object.assign(o, opcjeProfilu(profilZl));
+    }
+  }
   if (v.ciecie !== undefined) o.ciecie = wybor('ciecie', ['znaczniki', 'nozyczki', 'oba'], { linie: 'nozyczki' });
   if (v.rewersy !== undefined) o.rewersy = tak('rewersy');
   if (v.wspolnearkusze !== undefined) o.wspolne = tak('wspolnearkusze');
-  if (v.strony !== undefined) o.strony = wybor('strony', ['osobno', 'naprzemian'], { przemian: 'naprzemian', na_przemian: 'naprzemian', osobne: 'osobno' });
-  if (v.drukarnia !== undefined) o.drukarnia = tak('drukarnia');
+  if (v.strony !== undefined) o.strony = wybor('strony', ['osobno', 'naprzemian', 'dwapliki'], { przemian: 'naprzemian', na_przemian: 'naprzemian', osobne: 'osobno', 'dwa pliki': 'dwapliki', dwa_pliki: 'dwapliki' });
+  if (v.drukarnia !== undefined && polecenie !== 'pdf') o.drukarnia = tak('drukarnia');
   if (v.szkic !== undefined) o.szkic = tak('szkic');
   if (v.spad !== undefined) o.spad = liczba('spad', 0, 10);
   if (v.przesunieciex !== undefined) o.przesuniecieX = liczba('przesunieciex', -10, 10);
@@ -2862,15 +2896,22 @@ function opcjeZlecenia(polecenie, surowe = {}) {
   if (polecenie === 'pdf') o.ktore = v.tylkozmienione !== undefined && tak('tylkozmienione') ? 'zmienione' : 'wszystkie';
   // CMYK w zleceniu tylko z kluczem profil (bez niego RGB jak do 0.5.10 – także gdy okno ma CMYK włączony).
   if (polecenie === 'pdf') {
-    o.cmyk = false;
-    if (v.profil !== undefined && !/^(nie|brak|rgb|0|false|no)$/.test(plain(v.profil))) {
+    if (!profilZl) o.cmyk = false;                // bez profilu drukarni CMYK tylko z kluczem profil (jak do 0.6.8)
+    if (v.profil !== undefined && /^(nie|brak|rgb|0|false|no)$/.test(plain(v.profil))) { o.cmyk = false; delete o.profil; }
+    else if (v.profil !== undefined) {
       const k = plain(v.profil).replace(/[\s_-]/g, '');
       o.cmyk = true;
-      const znany = ['fogra39', 'fogra51'].includes(k);
+      const znany = ['iso300', 'fogra39', 'fogra51'].includes(k);
       o.profil = znany ? k : v.profil;
-      if (!znany && !/\.ic[cm]$/i.test(v.profil)) bledy.push(`profil: „${v.profil}” – możliwe: fogra39, fogra51, rgb albo ścieżka do pliku .icc`);
+      if (!znany && !/\.ic[cm]$/i.test(v.profil)) bledy.push(`profil: „${v.profil}” – możliwe: iso300, fogra39, fogra51, rgb albo ścieżka do pliku .icc`);
       if (o.uklad !== 'drukarnia') bledy.push('profil: CMYK działa tylko w układzie drukarnia (dopisz uklad = drukarnia)');
     }
+    // PDF/X-4 (#85): domyślnie tak dla PDF CMYK; pdfx = nie – plik jak w 0.6.8.
+    if (v.pdfx !== undefined) {
+      o.pdfx = tak('pdfx');
+      if (!o.cmyk) ostrzezenia.push('pdfx: działa tylko w PDF CMYK (z kluczem profil albo drukarnia) – pominięty');
+    }
+    if (profilZl) o.spadProfilu = o.spad;           // wlasne + spad = … – spad wymagany przez „profil”
     // Nadruk czerni K100 (#92): bez klucza – ustawienie z okna (domyślnie tak); bez CMYK klucz nic nie zmienia.
     if (v.nadrukczerni !== undefined) {
       o.nadrukCzerni = tak('nadrukczerni');
@@ -2966,6 +3007,9 @@ const ZADANIA_ZLECEN = {
       wynik.spadZSzablonu = !!plan.spadZSzablonu;
       if (plan.bezSpadu && plan.bezSpadu.length) wynik.bezSpadu = plan.bezSpadu;
       if (plan.ostrzezenia && plan.ostrzezenia.length) wynik.ostrzezenia = [...(wynik.ostrzezenia || []), ...plan.ostrzezenia];
+      if (plan.ostrzezeniaTAC && plan.ostrzezeniaTAC.length) wynik.ostrzezenia = [...(wynik.ostrzezenia || []), ...plan.ostrzezeniaTAC];
+      if (plan.informacje && plan.informacje.length) wynik.informacje = plan.informacje;
+      if (o.drukarnia) wynik.drukarnia = o.drukarnia;
     }
     return wynik;
   },
@@ -2983,6 +3027,7 @@ const ZADANIA_ZLECEN = {
 
 async function wykonajZlecenie(polecenie, surowe = {}) {
   let o, ostrzezenia = [];
+  if (polecenie === 'pdf') await odswiezDrukarnie();          // „Własne ustawienia” mogły się zmienić w innej zakładce
   try { ({ o, ostrzezenia } = opcjeZlecenia(polecenie, surowe)); }
   catch (e) { return { ok: false, pliki: [], blad: String(e.message || e), ...stanZlecenia() }; }
   const zDysku = !!(SZABLON && ED.zmiany);
@@ -3287,14 +3332,28 @@ async function zapiszPdf(o = {}) {
   const karty = kartyEksportu(o);
   if (!karty.length) { status('Brak kart do PDF – sprawdź wybór kart i talii.'); return; }
   const plan = buildPrint({ ...o, karty });
+  // Spad z profilu drukarni mniejszy niż w szablonie (#85) – PDF nie powstaje.
+  if (plan.bledy && plan.bledy.length) {
+    status('PDF dla drukarni nie powstał' + (o.profilDrukarni ? ` (${o.profilDrukarni.nazwa})` : '') + ': ' + plan.bledy.join('; '));
+    if (o.zlecenie) throw new Error(plan.bledy.join('; '));
+    return;
+  }
   // Drukarnia: plan idzie do main.js – dokładny rozmiar stron, TrimBox, podział na awersy i rewersy.
   const druk = o.uklad === 'drukarnia' ? { szer: plan.szer, wys: plan.wys, spad: plan.spad, pliki: plan.pliki, strony: plan.strony } : null;
-  // CMYK (etap 2 z #66): okno – tylko gdy jest Ghostscript (inaczej opcja wyszarzona); zlecenie – z kluczem profil.
+  // CMYK (etap 2 z #66): okno – tylko gdy jest Ghostscript (inaczej opcja wyszarzona); zlecenie – z kluczem profil albo drukarnia.
   // nadruk (#92): czarny tekst K100 nadrukowany na tło (/OP) – domyślnie tak, jak w InDesignie.
-  if (druk && o.cmyk && (o.zlecenie || (CMYK_STAN && CMYK_STAN.gs.ok))) druk.cmyk = { profil: o.profil || 'fogra39', nadruk: o.nadrukCzerni !== false };
+  // pdfx (#85): PDF/X-4 domyślnie dla PDF CMYK (pdfx = nie – plik jak w 0.6.8); tac – limit z profilu drukarni (pomiar zawsze).
+  if (druk && o.cmyk && (o.zlecenie || (CMYK_STAN && CMYK_STAN.gs.ok)))
+    druk.cmyk = { profil: o.profil || 'fogra39', nadruk: o.nadrukCzerni !== false, pdfx: o.pdfx !== false ? 'PDF/X-4' : null, tac: o.tac || null };
   const info = await APP.info();
-  const nazwa = (PROJEKT || info.nazwa || 'karty') + ({ pojedyncze: ' – karty pojedynczo', drukarnia: ' – drukarnia' }[o.uklad] || ' – karty A4')
-    + (o.ktore === 'zaznaczone' ? ' – wybrane' : '') + (o.ktore === 'zmienione' ? ' – zmienione' : '') + (o.szkic ? ' – szkic' : '');
+  const dopiski = (o.ktore === 'zaznaczone' ? ' – wybrane' : '') + (o.ktore === 'zmienione' ? ' – zmienione' : '') + (o.szkic ? ' – szkic' : '');
+  let nazwa = (PROJEKT || info.nazwa || 'karty') + ({ pojedyncze: ' – karty pojedynczo', drukarnia: ' – drukarnia' }[o.uklad] || ' – karty A4') + dopiski;
+  // Profil drukarni: nazwy plików z wzoru profilu (bez klucza plik w zleceniu – plik wskazany ręcznie ma pierwszeństwo).
+  if (druk && o.profilDrukarni && !(o.zlecenie && o.plik)) {
+    // dwapliki bez rewersów (żadna talia nie ma [REWERS] albo rewersy wyłączone) – jeden plik awersów („Front”).
+    druk.nazwyCzesci = plan.pliki.map((cz) => nazwaPlikuDrukarni(o.profilDrukarni, plan.pliki.length > 1 ? cz : o.strony === 'dwapliki' ? 'awersy' : 'razem', dopiski, info.nazwa));
+    nazwa = druk.nazwyCzesci[0];
+  }
   status('Zapisywanie PDF…');
   try {
     // Zlecenie z pliku: zapis bez okna – o.plik (ścieżka w projekcie) albo nazwa jak przy ręcznym zapisie.
@@ -3303,8 +3362,12 @@ async function zapiszPdf(o = {}) {
     // CMYK: { pliki, cmyk } – kontrola z main.js; inaczej ścieżka albo lista ścieżek.
     OSTATNI_CMYK = (w && w.cmyk) || null;
     const pliki = w ? [].concat(w.pliki || w) : null;
-    const uwagi = pliki && plan.ostrzezenia && plan.ostrzezenia.length ? ' · Uwaga: ' + plan.ostrzezenia.join('; ') : '';
-    status(pliki ? `Zapisano PDF${OSTATNI_CMYK ? ' w CMYK (' + OSTATNI_CMYK.profil + ')' : ''}: ` + pliki.join(', ') + uwagi : 'Zapis PDF anulowany.');
+    // TAC powyżej limitu profilu – ostrzeżenie (plik powstaje); spad przycięty do profilu – informacja.
+    const c = OSTATNI_CMYK;
+    plan.ostrzezeniaTAC = c && c.limitTAC && c.stronPonadLimit ? [`TAC do ${c.maksTAC} % – ${c.stronPonadLimit} ${c.stronPonadLimit === 1 ? 'strona' : 'stron(y)'} powyżej limitu drukarni ${c.limitTAC} % (sprawdź ciemne kolory i czerń czterokolorową w grafikach)`] : [];
+    const wszystkie = [...(plan.ostrzezenia || []), ...plan.ostrzezeniaTAC];
+    const uwagi = (pliki && wszystkie.length ? ' · Uwaga: ' + wszystkie.join('; ') : '') + (pliki && plan.informacje && plan.informacje.length ? ' · ' + plan.informacje.join('; ') : '');
+    status(pliki ? `Zapisano PDF${OSTATNI_CMYK ? ' w CMYK (' + OSTATNI_CMYK.profil + (OSTATNI_CMYK.pdfx ? ', ' + OSTATNI_CMYK.pdfx : '') + ')' : ''}${o.profilDrukarni ? ' dla drukarni ' + o.profilDrukarni.nazwa : ''}: ` + pliki.join(', ') + uwagi : 'Zapis PDF anulowany.');
     if (pliki) { await zapamietajDruk(karty); punktHistorii(({ pojedyncze: 'PDF – osobne strony', drukarnia: OSTATNI_CMYK ? 'PDF – drukarnia CMYK' : 'PDF – drukarnia' }[o.uklad] || 'PDF A4') + (o.zlecenie ? ' (zlecenie)' : '')); }
     return pliki;
   } catch (e) {
@@ -3322,6 +3385,39 @@ async function odswiezCmyk() {
   return CMYK_STAN;
 }
 
+// ── Profile drukarni (#85, etap 2, od 0.7.0; format: docs/profile-drukarni.md) ──
+// main: drukarnie:lista → { wbudowane: [LongPack, Printnet], wlasne: zapisane „Własne ustawienia” albo null }.
+// Profil ustala spad, profil ICC, PDF/X-4, limit TAC, nadruk, rewersy, układ stron i nazwy plików; ręcznie – karty i talie.
+let DRUKARNIE = { wbudowane: [], wlasne: null };
+async function odswiezDrukarnie() {
+  try { DRUKARNIE = (await APP.drukarnie()) || DRUKARNIE; } catch (e) { console.error('profile drukarni:', e); }
+  return DRUKARNIE;
+}
+const NAZWY_ICC = { iso300: 'ISO Coated v2 300 % (ECI)', fogra39: 'ISO Coated v2 (ECI) – Fogra39', fogra51: 'PSO Coated v3 – Fogra51', rgb: 'RGB (bez konwersji)' };
+const nazwaIcc = (icc) => NAZWY_ICC[icc] || 'plik: ' + String(icc).split('/').pop();
+// „Własne ustawienia” bez zapisanego pliku: pola okna PDF dla drukarni z 0.6.x (spad, strony, CMYK, profil, nadruk, rewersy).
+function wlasneZOkna() {
+  const u = ustawieniaOkna('drukarnia');
+  return { format: 1, id: 'wlasne', nazwa: 'Własne ustawienia', opis: 'Wszystko do ustawienia ręcznie', spad: num(u.spad ?? SPAD_DRUKARNI), strefa: 3,
+    icc: u.cmyk ? u.profil || 'fogra39' : 'rgb', tac: 300, pdfx: 'PDF/X-4', nadrukCzerni: u.nadrukCzerni !== false, rewersy: u.rewersy !== false,
+    strony: u.strony === 'naprzemian' ? 'naprzemian' : 'osobno', wzorNazwy: '{projekt} – drukarnia{dopiski} – {strona}',
+    strona: { awersy: 'awersy', rewersy: 'rewersy', razem: '' }, komponent: '', jezyk: '', minTekstPt: null, uwagi: [] };
+}
+const profileDrukarni = () => [...DRUKARNIE.wbudowane, DRUKARNIE.wlasne && !DRUKARNIE.wlasne.blad ? DRUKARNIE.wlasne : wlasneZOkna()];
+const profilDrukarni = (id) => profileDrukarni().find((p) => p.id === id) || null;
+// Profil → opcje druku (te same pola co okno 0.6.x i zlecenie pdf).
+const opcjeProfilu = (p) => ({ uklad: 'drukarnia', drukarnia: p.id, profilDrukarni: p, spad: p.spad, spadProfilu: p.spad, strony: p.strony,
+  rewersy: p.rewersy, cmyk: p.icc !== 'rgb', profil: p.icc === 'rgb' ? undefined : p.icc, nadrukCzerni: p.nadrukCzerni, pdfx: !!p.pdfx, tac: p.tac || null });
+// Nazwa pliku z wzoru profilu: {projekt} {komponent} {strona} {jezyk} {wersja} {dopiski}; pusty człon znika razem ze
+// znakami rozdzielającymi przed nim (spacja, _, –, -); bez {dopiski} we wzorze dopiski („ – wybrane”) idą na koniec.
+// czesc: awersy | rewersy | razem (jeden plik).
+function nazwaPlikuDrukarni(p, czesc, dopiski = '', zapasowa = '') {
+  const wart = { projekt: PROJEKT || zapasowa || 'karty', komponent: p.komponent, strona: (p.strona || {})[czesc], jezyk: p.jezyk, wersja: WERSJA, dopiski };
+  const wzor = p.wzorNazwy.includes('{dopiski}') ? p.wzorNazwy : p.wzorNazwy + '{dopiski}';
+  return wzor.replace(/\{(\w+)\}/g, (m, k) => (k in wart ? (wart[k] ? String(wart[k]) : '\u0000') : m))
+    .replace(/[\s_–-]*\u0000/g, '').replace(/^[\s_–-]+/, '').replace(/[\/:]/g, '-').trim() || 'karty';
+}
+
 // ── Okna druku i eksportu ────────────────────────────────────────────────────
 // Jedno okno dialogowe z zestawem pól zależnym od rodzaju. Ostatnie ustawienia są zapamiętywane
 // osobno dla każdego projektu (dane aplikacji: eksport/<szablon>.json). Enter = przycisk domyślny, Esc = anuluj.
@@ -3331,7 +3427,7 @@ async function odswiezCmyk() {
 // swoje pola z USTAWIENIA_OKIEN.druk (ustawieniaOkna); zlecenie pdf – pola okna swojego układu (ustawieniaDruku).
 let USTAWIENIA_OKIEN = {};
 // Wartości domyślne zlecenia pdf – jak dawnego okna „Druk i PDF” (te same klucze i wartości co do 0.6.6).
-const DRUK_DOMYSLNE = { uklad: 'a4', ciecie: 'znaczniki', spad: SPAD_DRUKARNI, strony: 'osobno', cmyk: true, profil: 'fogra39', nadrukCzerni: true, rewersy: true, wspolne: true, przesuniecieX: 0, przesuniecieY: 0, szkic: false, ktore: 'wszystkie', pominTalie: [] };
+const DRUK_DOMYSLNE = { uklad: 'a4', ciecie: 'znaczniki', spad: SPAD_DRUKARNI, strony: 'osobno', cmyk: true, profil: 'fogra39', nadrukCzerni: true, pdfx: true, rewersy: true, wspolne: true, przesuniecieX: 0, przesuniecieY: 0, szkic: false, ktore: 'wszystkie', pominTalie: [] };
 const wybierzKlucze = (o, klucze) => Object.fromEntries(klucze.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
 const OKNA = {
   obrazki: { tytul: 'Eksport obrazków', pola: ['dpi', 'format', 'ktore', 'talie', 'rewersy'],
@@ -3342,10 +3438,23 @@ const OKNA = {
     domyslne: wybierzKlucze(DRUK_DOMYSLNE, ['ciecie', 'wspolne', 'rewersy', 'przesuniecieX', 'przesuniecieY', 'szkic', 'ktore', 'pominTalie']),
     przyciski: [['pdf', 'Zapisz PDF'], ['drukuj', 'Drukuj…']],
     opis: 'Arkusze A4 do wydruku na własnej drukarce: karty 1:1 do wycięcia, ze znacznikami albo liniami cięcia.' },
-  drukarnia: { tytul: 'PDF dla drukarni', uklad: 'drukarnia', pola: ['spad', 'rewersy', 'strony', 'cmyk', 'ktore', 'talie'],
+  // #85, etap 2 (0.7.0): wybór profilu drukarni zamiast pól spad/strony/CMYK. Pola dawnego okna (spad, rewersy, strony, cmyk,
+  // profil, nadrukCzerni) zostają w zapamiętanych ustawieniach – zlecenie pdf bez klucza drukarnia i „Własne ustawienia”
+  // bez zapisanego pliku biorą je jak w 0.6.8.
+  drukarnia: { tytul: 'PDF dla drukarni', uklad: 'drukarnia', pola: ['drukarnia', 'ktore', 'talie'],
     domyslne: wybierzKlucze(DRUK_DOMYSLNE, ['spad', 'rewersy', 'strony', 'cmyk', 'profil', 'nadrukCzerni', 'ktore', 'pominTalie']),
     przyciski: [['pdf', 'Zapisz PDF']],
-    opis: 'Plik dla drukarni: strona na kopię karty, ze spadem, bez znaczników cięcia, z TrimBox.' },
+    opis: 'Plik dla drukarni: strona na kopię karty, ze spadem, bez znaczników cięcia, z TrimBox. Profil drukarni ustala spad, kolory, układ stron i nazwy plików.',
+    poOtwarciu: (form) => {
+      const odswiez = () => {
+        const id = (form.querySelector('[name=drukarnia]:checked') || {}).value;
+        for (const d of form.querySelectorAll('.profil-drukarni')) d.hidden = d.dataset.id !== id;
+        const spadW = form.querySelector('[name=wlSpad]'), info = form.querySelector('.profil-drukarni[data-id=wlasne] .spad-profilu');
+        if (spadW && info) info.innerHTML = opisSpaduProfilu(num(String(spadW.value).replace(',', '.')) || 0);
+      };
+      for (const x of form.querySelectorAll('[name=drukarnia], [name=wlSpad]')) x.addEventListener(x.name === 'wlSpad' ? 'input' : 'change', odswiez);
+      odswiez();
+    } },
   katalog: { tytul: 'Katalog talii', pola: ['talie'], domyslne: { pominTalie: [] },
     przyciski: [['ok', 'Zapisz katalog']],
     opis: 'Każda talia jako obrazek JPG: rewers, a po nim zmniejszone awersy z podpisami (ID, nazwa, liczba kopii) – do przeglądu, instrukcji i dla testerów. Pliki w folderze Export/katalog projektu.' },
@@ -3354,6 +3463,70 @@ const OKNA = {
     przyciski: [['ok', 'Zapisz pokój']],
     opis: 'Nowy pokój: każda talia jako osobny stos. Plik .pcio w folderze projektu; w playingcards.io: Edit Table → Import room.' },
 };
+// Spad profilu drukarni a spad z szablonu (#85): przycięcie – informacja, za mały – błąd (PDF nie powstanie), brak – dorabiany.
+function opisSpaduProfilu(sp) {
+  const talie = [...$('podglad').querySelectorAll('.talia')].map((t) => [t.dataset.talia, spadTalii(t.dataset.talia)]);
+  const za = talie.filter(([, x]) => x && x < sp), wiecej = talie.filter(([, x]) => x > sp), bez = talie.filter(([, x]) => !x);
+  const t = (l) => esc(l.map(([n, x]) => x ? `${n} (${mmTxt(x)})` : n).join(', '));
+  return (za.length ? `<div class="opis blad-spadu">⛔ Spad w szablonie mniejszy niż ${mmTxt(sp)}: ${t(za)} – PDF nie powstanie (zwiększ <code>spad=</code> w szablonie i przygotuj pliki ze spadem).</div>` : '') +
+    (wiecej.length ? `<div class="opis">Spad z szablonu większy: ${t(wiecej)} – w PDF przycięty do ${mmTxt(sp)}.</div>` : '') +
+    (bez.length && sp ? `<div class="opis ostrzezenie-spadu">⚠ ${bez.length === talie.length ? 'Projekt nie deklaruje spadu w szablonie' : 'Talie bez spadu w szablonie: ' + t(bez)} – spad ${mmTxt(sp)} będzie dorabiany (tło powiększone, obrazki przy krawędzi przedłużone). Do druku w drukarni dopisz np. <code>KARTA = 63, 88, spad=${String(sp).replace('.', ',')}</code>.</div>` : '') +
+    (!za.length && !wiecej.length && !bez.length && sp ? `<div class="opis">Spad z szablonu: ${mmTxt(sp)}.</div>` : '');
+}
+const OPIS_STRON = { dwapliki: 'Awersy i rewersy w dwóch plikach, karta na stronę (wspólny rewers – plik rewersów z jedną stroną)',
+  naprzemian: 'Jeden plik: awers i rewers na zmianę (awers 1, rewers 1, awers 2…)',
+  osobno: 'Plik awersów, karta na stronę; wspólny rewers na ostatniej stronie, różne rewersy – drugi plik (strona N = rewers awersu N)' };
+function opisPlikowDrukarni(p) {
+  const n = (c) => esc(nazwaPlikuDrukarni(p, c) + '.pdf');
+  return p.strony === 'dwapliki' ? `${n('awersy')}, ${n('rewersy')}` : p.strony === 'naprzemian' ? n('razem')
+    : `${n('razem')} <span class="opis">(różne rewersy: ${n('awersy')}, ${n('rewersy')})</span>`;
+}
+// Pole „Drukarnia” okna PDF dla drukarni: profile, podsumowanie wybranego, a przy „Własnych ustawieniach” – pola do zmiany.
+function poleDrukarni(u) {
+  const gs = !!(CMYK_STAN && CMYK_STAN.gs && CMYK_STAN.gs.ok), lista = profileDrukarni();
+  const dostepny = (p) => gs || p.icc === 'rgb';
+  // Bez zapamiętanego wyboru: „Własne ustawienia”, gdy projekt ma ustawienia drukarni z 0.6.x (okno PDF dla drukarni albo dawne
+  // „Druk i PDF” z polami drukarni innymi niż domyślne) – PDF jak dotąd; inaczej LongPack.
+  const dawne = USTAWIENIA_OKIEN.drukarnia || USTAWIENIA_OKIEN.druk || {};
+  const zDawnych = !!USTAWIENIA_OKIEN.drukarnia || dawne.uklad === 'drukarnia' || ['spad', 'strony', 'cmyk', 'profil', 'nadrukCzerni', 'rewersy'].some((k) => k in dawne && dawne[k] !== DRUK_DOMYSLNE[k]);
+  const zapamietany = u.drukarnia || (zDawnych ? 'wlasne' : 'longpack');
+  let id = (lista.find((p) => p.id === zapamietany && dostepny(p)) || lista.find(dostepny) || lista[lista.length - 1]).id;
+  const radia = lista.map((p) => `<label><input type="radio" name="drukarnia" value="${esc(p.id)}"${p.id === id ? ' checked' : ''}${dostepny(p) ? '' : ' disabled'}> ${esc(p.nazwa)}</label>`).join(' ');
+  const bezGs = gs ? '' : `<div class="opis">${esc((CMYK_STAN && CMYK_STAN.gs && CMYK_STAN.gs.powod) || 'Brak Ghostscripta. Zainstaluj: brew install ghostscript')} – profile drukarni w CMYK są niedostępne.</div>`;
+  const panele = lista.map((p) => {
+    if (p.id === 'wlasne') return `<div class="profil-drukarni" data-id="wlasne">${polaWlasnych(p)}</div>`;
+    const kolory = [`Spad ${mmTxt(p.spad)}`, nazwaIcc(p.icc), p.tac ? `TAC ≤ ${p.tac} %` : '', p.pdfx || '', p.nadrukCzerni ? 'nadruk czerni K100' : ''].filter(Boolean).join(' · ');
+    return `<div class="profil-drukarni ramka-profilu" data-id="${esc(p.id)}"><div><b>${esc(p.opis || p.nazwa)}</b></div><div>${esc(kolory)}</div>` +
+      `<div>${esc(OPIS_STRON[p.strony])}${p.rewersy ? '' : ' – bez rewersów'}</div><div>Pliki: ${opisPlikowDrukarni(p)}</div>` +
+      (p.uwagi.length ? `<ul class="opis">${p.uwagi.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '') +
+      `<div class="spad-profilu">${opisSpaduProfilu(p.spad)}</div></div>`;
+  }).join('');
+  return `<fieldset class="pole-drukarni"><legend>Drukarnia</legend>${radia}${bezGs}${panele}</fieldset>`;
+}
+// Pola „Własnych ustawień” – nazwy z przedrostkiem wl (nie mieszają się z polami innych okien); spad, strony i kolory jak w 0.6.x.
+function polaWlasnych(p) {
+  const uw = { strony: p.strony, cmyk: p.icc !== 'rgb', profil: p.icc !== 'rgb' ? p.icc : 'iso300', nadrukCzerni: p.nadrukCzerni, rewersy: p.rewersy };
+  return `<fieldset><legend>Spad</legend><label><input type="number" name="wlSpad" min="0" max="10" step="0.5" value="${esc(p.spad)}" style="width:4.5em"> mm ` +
+    `<span class="opis">– tło i elementy przy krawędzi wychodzą poza linię cięcia</span></label><div class="spad-profilu"></div></fieldset>` +
+    poleOkna('strony', 'drukarnia', uw) + poleOkna('cmyk', 'drukarnia', uw) +
+    `<fieldset><legend>PDF dla drukarni <span class="opis">(tylko CMYK)</span></legend>` +
+    `<label><input type="checkbox" name="wlPdfx"${p.pdfx ? ' checked' : ''}> PDF/X-4 <span class="opis">– Output Intent z profilem kolorów, metadane PDF/X (przezroczystość zostaje)</span></label> ` +
+    `<label>Limit farby (TAC) <input type="number" name="wlTac" min="100" max="400" step="10" value="${esc(p.tac || 300)}" style="width:4.5em"> % <span class="opis">– pomiar po konwersji, ostrzeżenie powyżej limitu</span></label></fieldset>` +
+    poleOkna('rewersy', 'drukarnia', uw) +
+    `<fieldset><legend>Nazwy plików</legend><label>Wzór <input type="text" name="wlWzor" value="${esc(p.wzorNazwy)}" style="width:22em"></label>` +
+    `<label>Komponent <input type="text" name="wlKomponent" value="${esc(p.komponent)}" style="width:8em"></label> <label>Język <input type="text" name="wlJezyk" value="${esc(p.jezyk)}" style="width:3em"></label>` +
+    `<div class="opis">{projekt} {komponent} {strona} {jezyk} {wersja} {dopiski} – pusty człon znika razem ze znakiem przed nim.</div></fieldset>`;
+}
+// Odczyt „Własnych ustawień” z okna → profil (zapisywany w danych aplikacji: drukarnie/wlasne.json).
+function wlasneZFormularza(form, p) {
+  const v = (n) => form.querySelector(`[name=${n}]`), liczbaPola = (n, min, max, d) => { const x = parseFloat(String(v(n).value).replace(',', '.')); return Number.isFinite(x) ? Math.min(max, Math.max(min, x)) : d; };
+  const cmyk = v('cmyk') && !v('cmyk').disabled ? v('cmyk').checked : p.icc !== 'rgb';
+  const wybor = v('profil'), icc = !wybor || wybor.disabled || wybor.value === '__inny' ? (p.icc !== 'rgb' ? p.icc : 'iso300') : wybor.value;
+  return { ...p, spad: liczbaPola('wlSpad', 0, 10, p.spad), strony: (form.querySelector('[name=strony]:checked') || {}).value || p.strony,
+    icc: cmyk ? icc : 'rgb', nadrukCzerni: v('nadrukCzerni') && !v('nadrukCzerni').disabled ? v('nadrukCzerni').checked : p.nadrukCzerni,
+    pdfx: v('wlPdfx').checked ? 'PDF/X-4' : null, tac: liczbaPola('wlTac', 100, 400, p.tac || 300), rewersy: v('rewersy').checked,
+    wzorNazwy: v('wlWzor').value.includes('{projekt}') ? v('wlWzor').value.trim() : p.wzorNazwy, komponent: v('wlKomponent').value.trim(), jezyk: v('wlJezyk').value.trim() };
+}
 function poleOkna(nazwa, rodzaj, u) {
   const radio = (legenda, name, opcje) => `<fieldset><legend>${legenda}</legend>` + opcje.map(([v, t, wyl]) =>
     `<label><input type="radio" name="${name}" value="${v}"${String(u[name]) === String(v) ? ' checked' : ''}${wyl ? ' disabled' : ''}> ${t}</label>`).join('') + '</fieldset>';
@@ -3390,20 +3563,22 @@ function poleOkna(nazwa, rodzaj, u) {
           (zad.length ? ` Talie ze spadem w szablonie mają ${mmTxt(Math.max(...zad))} i ten spad ma cały PDF.` : '') + '</div>' : '';
       return pole.replace(/<\/fieldset>$/, info + '</fieldset>');
     }
+    case 'drukarnia': return poleDrukarni(u);
     case 'strony': return radio('Strony', 'strony', [
       ['osobno', 'Awersy i rewersy osobno <span class="opis">– plik awersów (karta na stronę), wspólny rewers na ostatniej stronie; różne rewersy → drugi plik: strona N = rewers awersu N</span>'],
+      ['dwapliki', 'Zawsze dwa pliki <span class="opis">– awersy i rewersy osobno także przy wspólnym rewersie</span>'],
       ['naprzemian', 'Na przemian <span class="opis">– awers, rewers, awers… w jednym pliku</span>']]);
     case 'cmyk': {
       // Bez Ghostscripta ≥ 10 opcja wyszarzona z podpowiedzią; profil: dwa z eci.org (pobierane raz) albo własny plik .icc.
       const st = CMYK_STAN, gs = st && st.gs, jest = !!(gs && gs.ok), pr = (st && st.profile) || {};
       const opcja = (v, t) => `<option value="${esc(v)}"${String(u.profil) === v ? ' selected' : ''}>${esc(t)}</option>`;
       const zEci = (k, t) => opcja(k, t + (pr[k] && !pr[k].pobrany ? ` – pobierze się z eci.org (${pr[k].paczkaMB} MB)` : ''));
-      const wlasny = u.profil && !['fogra39', 'fogra51'].includes(u.profil) ? opcja(u.profil, 'plik: ' + String(u.profil).split('/').pop()) : '';
+      const wlasny = u.profil && !['iso300', 'fogra39', 'fogra51'].includes(u.profil) ? opcja(u.profil, 'plik: ' + String(u.profil).split('/').pop()) : '';
       return `<fieldset class="pole-cmyk"><legend>Kolory</legend>` +
         `<label><input type="checkbox" name="cmyk"${jest && u.cmyk ? ' checked' : ''}${jest ? '' : ' disabled'}> Druk w drukarni (CMYK) ` +
         `<span class="opis">– konwersja Ghostscriptem; czarny tekst i ikony jako czysta czerń K100</span></label>` +
         (jest ? '' : `<div class="opis">${esc((gs && gs.powod) || 'Brak Ghostscripta. Zainstaluj: brew install ghostscript')}</div>`) +
-        `<label>Profil <select name="profil"${jest ? '' : ' disabled'}>${zEci('fogra39', 'ISO Coated v2 (ECI) – Fogra39 (domyślny)')}${zEci('fogra51', 'PSO Coated v3 – Fogra51')}${wlasny}` +
+        `<label>Profil <select name="profil"${jest ? '' : ' disabled'}>${zEci('iso300', 'ISO Coated v2 300 % (ECI) – limit farby 300 %')}${zEci('fogra39', 'ISO Coated v2 (ECI) – Fogra39')}${zEci('fogra51', 'PSO Coated v3 – Fogra51')}${wlasny}` +
         `<option value="__inny">inny plik .icc…</option></select></label>` +
         `<label><input type="checkbox" name="nadrukCzerni"${u.nadrukCzerni !== false ? ' checked' : ''}${jest ? '' : ' disabled'}> Nadruk czarnego tekstu (K100) ` +
         `<span class="opis">– litery w #000 nadrukowane na tło, bez wycinania (jak w InDesignie); prostokąty, linie i obrazki bez zmian</span></label></fieldset>`;
@@ -3465,7 +3640,8 @@ function otworzOkno(rodzaj, domyslna) {
     const zbierz = () => {
       const o = {};
       for (const p of def.pola) {
-        if (p === 'talie') {
+        if (p === 'drukarnia') o.drukarnia = (form.querySelector('[name=drukarnia]:checked') || {}).value || u.drukarnia;
+        else if (p === 'talie') {
           const pola = [...form.querySelectorAll('[name=talia]')];
           o.pominTalie = pola.filter((x) => !x.checked).map((x) => x.value);
         } else if (['rewersy', 'szkic', 'wspolne'].includes(p)) o[p] = !!form.querySelector(`[name=${p}]`)?.checked;
@@ -3487,12 +3663,23 @@ function otworzOkno(rodzaj, domyslna) {
     };
     for (const b of $('oknoPrzyciski').querySelectorAll('button')) b.onclick = async () => {
       if (!b.dataset.akcja) return zamknij(null);
-      const opcje = zbierz();
+      let opcje = zbierz();
+      // PDF dla drukarni (#85): zapamiętany wybór drukarni (pola dawnego okna zostają), „Własne ustawienia” – do danych aplikacji.
+      let profil = null;
+      if (rodzaj === 'drukarnia') {
+        profil = profilDrukarni(opcje.drukarnia);
+        if (profil && profil.id === 'wlasne') {
+          profil = wlasneZFormularza(form, profil);
+          try { DRUKARNIE.wlasne = await APP.zapiszWlasneDrukarni(profil); profil = DRUKARNIE.wlasne; }
+          catch (e) { status('Nie udało się zapisać Własnych ustawień: ' + String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
+        }
+        opcje = { ...u, ...opcje };
+      }
       USTAWIENIA_OKIEN[rodzaj] = opcje;
       // Okno druku: zlecenie pdf bez klucza uklad bierze układ okna użytego ostatnio (pola – z okna tego układu).
       if (def.uklad) USTAWIENIA_OKIEN.druk = { ...(USTAWIENIA_OKIEN.druk || {}), uklad: def.uklad };
       try { await APP.zapiszEksportUstawienia(USTAWIENIA_OKIEN); } catch (e) { /* bez zapamiętania */ }
-      zamknij({ akcja: b.dataset.akcja, opcje: def.uklad ? { ...opcje, uklad: def.uklad } : opcje });
+      zamknij({ akcja: b.dataset.akcja, opcje: profil ? { ...opcje, ...opcjeProfilu(profil) } : def.uklad ? { ...opcje, uklad: def.uklad } : opcje });
     };
     // „inny plik .icc…” – okno wyboru pliku w main (sprawdza, czy to profil CMYK); anulowanie = poprzedni wybór.
     const wyborProfilu = form.querySelector('[name=profil]');
@@ -3507,6 +3694,7 @@ function otworzOkno(rodzaj, domyslna) {
         wyborProfilu.value = poprzedni = plik;
       };
     }
+    if (def.poOtwarciu) def.poOtwarciu(form, u);
     okno.oncancel = (e) => { e.preventDefault(); zamknij(null); };
     okno.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); $('oknoPrzyciski').querySelector('.domyslny').click(); } };
     okno.showModal();
@@ -3525,7 +3713,7 @@ async function oknoDrukuA4(domyslna = 'drukuj') {
   return r.akcja === 'drukuj' ? drukuj(r.opcje) : zapiszPdf(r.opcje);
 }
 async function oknoPdfDrukarni() {
-  await odswiezCmyk();
+  await Promise.all([odswiezCmyk(), odswiezDrukarnie()]);
   const r = await otworzOkno('drukarnia');
   if (r) return zapiszPdf(r.opcje);
 }
@@ -3560,6 +3748,7 @@ async function startAplikacji() {
   const info = await APP.info();
   AUTO_ODSWIEZANIE = info.auto !== false;
   try { USTAWIENIA_OKIEN = (await APP.eksportUstawienia()) || {}; } catch (e) { USTAWIENIA_OKIEN = {}; }
+  await odswiezDrukarnie();
   if (!info.szablon) return startAplikacji();
   // Edytor szablonu
   ED.tylkoOdczyt = !!info.przyklad;

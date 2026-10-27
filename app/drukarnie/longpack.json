@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "id": "longpack",
+  "nazwa": "LongPack",
+  "opis": "Offset – karty do gier (wytyczne „Games artwork guidelines” 2025-04-16)",
+  "spad": 3,
+  "strefa": 3,
+  "icc": "iso300",
+  "tac": 300,
+  "pdfx": "PDF/X-4",
+  "nadrukCzerni": true,
+  "rewersy": true,
+  "strony": "dwapliki",
+  "wzorNazwy": "{projekt}_{komponent}_{strona}_{jezyk}_{wersja}",
+  "strona": {
+    "awersy": "Front",
+    "rewersy": "Back",
+    "razem": ""
+  },
+  "komponent": "Playingcards",
+  "jezyk": "PL",
+  "minTekstPt": null,
+  "uwagi": [
+    "Strefa bezpieczna 3 mm od linii cięcia (cięcie ±1 mm)",
+    "Tekst, małe ikony i kody w czystej czerni K100, ramka kart „border black” C40 K100",
+    "Obrazy min. 300 ppi, czcionki osadzone"
+  ]
+}

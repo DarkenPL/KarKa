@@ -3,7 +3,7 @@
 //   node scripts/testy-ci.js <tryb> --bin "<polecenie aplikacji>" --tmp <katalog> [--razem 4] [--limit 600]
 // tryb: pr    – 07-gildie w trzech procesach (grupy z scripts/grupy-testow.js, ostatnia = dopełnienie; razem pełny
 //               --test-edytor),
-//               08-wieze – blok spadSzablonu, pozostałe przykłady --test-pdf (renderowanie, PDF, eksport);
+//               08-wieze – bloki spadSzablonu i profileDrukarni (#85), pozostałe przykłady --test-pdf (renderowanie, PDF, eksport);
 //       pelny – --test-edytor na każdym przykładzie (jak do 0.6.2).
 // --bin: w CI ścieżka do KarKa w .app; lokalnie np. "xvfb-run -a ./node_modules/.bin/electron --no-sandbox ."
 // Każde uruchomienie ma własną kopię przykładu i własny --user-data-dir (procesy równoległe się nie blokują).
@@ -38,7 +38,7 @@ function plan() {
   for (const n of przyklady) {
     if (n === '07-gildie') for (const g of GRUPY_07)
       lista.push({ nazwa: n + '-' + g.nazwa, przyklad: n, opcje: ['--test-edytor', '--test-bloki', g.bloki], waga: 2 });
-    else if (n === '08-wieze') lista.push({ nazwa: n, przyklad: n, opcje: ['--test-edytor', '--test-bloki', 'spadSzablonu'], waga: 1 });
+    else if (n === '08-wieze') lista.push({ nazwa: n, przyklad: n, opcje: ['--test-edytor', '--test-bloki', 'spadSzablonu,profileDrukarni'], waga: 1 });
     else lista.push({ nazwa: n, przyklad: n, opcje: [], waga: 0 });
   }
   // Najdłuższe najpierw (grupy 07) – krótkie wypełniają wolne miejsca.
