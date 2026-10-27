@@ -90,7 +90,7 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 .talia-tytul { margin: 18px 16px 0; font-size: 15px; color: #4a453f; }
 /* Podgląd rewersów (#47): awersy chowane bez display:none – karty zachowują układ (dopasowanie tekstu, eksport, katalog). */
 #podglad.schowany { height: 0; overflow: hidden; }
-#podgladRewersy .brak-rewersu { background: repeating-linear-gradient(45deg, #f4f1ec 0 6px, #e6e1da 6px 12px); box-shadow: none; outline: 1px dashed #b8b1a7; }
+#podgladRewersy .brak-rewersu { cursor: default; background: repeating-linear-gradient(45deg, #f4f1ec 0 6px, #e6e1da 6px 12px); box-shadow: none; outline: 1px dashed #b8b1a7; }
 .rewers-podglad { position: relative; }        /* zajmuje dokładnie miejsce karty – siatka się nie rozjeżdża */
 .rewers-podglad .etykieta {
   position: absolute; left: 50%; bottom: 7mm; transform: translateX(-50%); pointer-events: none;
@@ -1800,14 +1800,13 @@ async function raportProjektu(o = {}) {
   // Sekcja tylko w projektach z takim rewersem – inne raporty bez zmian.
   const zalezne = RAPORT.talie.filter(({ nazwa }) => REWERSY_KART.has(nazwa));
   if (zalezne.length) {
-    const odmiana = (n) => n === 1 ? 'wariant' : [2, 3, 4].includes(n % 10) && (n % 100 < 10 || n % 100 >= 20) ? 'warianty' : 'wariantów';
     lista('Rewersy zależne od karty', zalezne.map(({ nazwa, rows }) => {
       const z = REWERSY_KART.get(nazwa), t = TALIE.find((x) => x.nazwa === nazwa);
       const kolumny = new Set((rows.length ? Object.keys(rows[0]) : []).map((k) => plain(k).toLowerCase()));
       const wart = t ? [...t.rewers.flatMap((c) => [...c.args, ...Object.values(c.opt)]), ...Object.values(t.kartaRewers || {})] : [];
       const w = wart.flatMap((v) => [...String(v ?? '').matchAll(/\[([^\[\]]+)\]/g)].map((m) => m[1].trim())).filter((k) => !/^[=_]/.test(k));
       const brak = [...new Set(w)].filter((k) => !kolumny.has(plain(k).toLowerCase()));
-      return `Talia <b>${esc(nazwa)}</b>: ${z.lista.length} ${odmiana(z.lista.length)} rewersu (` + z.lista.map((x) => '×' + x.ile).join(', ') + ')'
+      return `Talia <b>${esc(nazwa)}</b>: ${z.lista.length} ${odmianaWariant(z.lista.length)} rewersu (` + z.lista.map((x) => '×' + x.ile).join(', ') + ')'
         + (brak.length ? ` · <b>brak kolumn:</b> ${esc(brak.join(', '))}` : '');
     }), '');
   }
@@ -2132,6 +2131,7 @@ function odciskRewersuKarty(k) {
   return b ? b.dataset.odcisk || skrot(htmlKarty(b)) : null;
 }
 window.rewersKarty = rewersKarty;
+const odmianaWariant = (n) => n === 1 ? 'wariant' : [2, 3, 4].includes(n % 10) && (n % 100 < 10 || n % 100 >= 20) ? 'warianty' : 'wariantów';
 // Numer wariantu rewersu zależnego (0, 1…) albo -1 – talia ze wspólnym rewersem albo karta bez rewersu.
 function wariantRewersu(k) {
   const z = REWERSY_KART.get(k.dataset.talia), b = z && rewersKarty(k);
@@ -2155,7 +2155,7 @@ function odswiezRewersyKart() {
     const sekcja = document.createElement('section'), siatka = document.createElement('div');
     sekcja.className = 'talia'; sekcja.dataset.talia = talia; siatka.className = 'siatka';
     const h = document.createElement('h2'); h.className = 'talia-tytul';
-    h.textContent = `${talia} · rewersy ${karty.length} kart` + (z ? ` · ${z.els.length} ${z.els.length === 1 ? 'wariant' : [2, 3, 4].includes(z.els.length % 10) && (z.els.length % 100 < 10 || z.els.length % 100 >= 20) ? 'warianty' : 'wariantów'}` : '');
+    h.textContent = `${talia} · rewersy ${karty.length} kart` + (z ? ` · ${z.els.length} ${odmianaWariant(z.els.length)}` : '');
     for (const k of karty) {
       const b = rewersKarty(k), opak = document.createElement('div'), et = document.createElement('span');
       opak.className = 'rewers-podglad';

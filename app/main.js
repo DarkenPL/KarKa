@@ -2740,7 +2740,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         return b ? el.innerHTML === b.innerHTML : el.classList.contains('brak-rewersu');
       }).length;
       spr('podglad', podglad.classList.contains('schowany') && podglad.getBoundingClientRect().height === 0 && getComputedStyle(cel).display !== 'none' && sekcje.length === visibleSections().length
-        && klony.length === visibleCards().length && zgodne === klony.length, sekcje.length + ' sekcji, ' + zgodne + '/' + klony.length + ' klonów');
+        && klony.length === visibleCards().length && zgodne === klony.length && klony.every((el) => el.getBoundingClientRect().width > 0),
+        sekcje.length + ' sekcji, ' + zgodne + '/' + klony.length + ' klonów');
       spr('podgladBezSkutkow', podglad.querySelectorAll('.siatka .karta').length === kartyPrzed && kartyEksportu({}).length === eksPrzed
         && !cel.querySelector('[data-odcisk]'));
       await build();
@@ -2802,6 +2803,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-rewersy-kart.png', (await wc.capturePage(rewersyDodatki.rect)).toPNG());
       delete rewersyDodatki.rect;
     }
+    await wc.executeJavaScript('pokazRewersyKart(false)');   // menu ma włączyć podgląd samo (przegląd #97)
     // Menu Widok → Pokaż rewersy kart: przełącza stronę, stan zakładki; wyłączenie wraca do awersów.
     const pozycja = Menu.getApplicationMenu()?.items.find((i) => i.label === 'Widok')?.submenu.items.find((i) => i.label === 'Pokaż rewersy kart');
     const naStronie = () => wc.executeJavaScript("getComputedStyle(document.getElementById('podgladRewersy')).display !== 'none'");
