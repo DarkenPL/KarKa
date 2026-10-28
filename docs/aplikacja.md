@@ -8,7 +8,7 @@ KarKa to dawny **Generator kart** – od wersji 0.5.0 pod nową nazwą.
 
 Aplikacja działa na Macach z procesorem Apple (M1–M4). Jaki masz procesor, sprawdzisz w  → **Ten Mac** (pozycja „Układ”).
 
-Plik budowany jest automatycznie po każdej zmianie w gałęzi `main`, a każda wersja dostaje własne wydanie (`v0.4.3`, `v0.4.4`…) w zakładce **Releases** – starsze wersje zostają do pobrania. Wersja robocza z pull requestu jest w zakładce **Actions** → uruchomienie „Aplikacja macOS” → **Artifacts**.
+Plik budowany jest automatycznie, gdy do gałęzi `main` trafia nowa wersja aplikacji; każda wersja dostaje własne wydanie (`v0.4.3`, `v0.4.4`…) w zakładce **Releases** – starsze wersje zostają do pobrania. Pull request nie buduje aplikacji (od #101 – w jego **Artifacts** są tylko wyniki testów, `wyniki-testow`). Wersję z gałęzi przed scaleniem zbudujesz ręcznie: **Actions** → „Aplikacja macOS” → **Run workflow** → wybór gałęzi; po kilkunastu minutach (pełny zestaw testów) w **Artifacts** tego uruchomienia jest `KarKa` z plikiem `KarKa.dmg`. Taki przebieg nie tworzy wydania.
 
 ## Instalacja i pierwsze uruchomienie
 
@@ -376,14 +376,16 @@ npm run dist       # budowanie .app (na macOS)
 - Aktualizacje: `app/start.js` (rozrusznik – wybiera kod z paczki albo nakładkę), `app/nakladka.js`, `app/aktualizacje.js`; pliki do wydania robi `app/scripts/paczka-kodu.js` (`kod.zip`, `aktualizacja.json`), a workflow dokłada `KarKa.zip` (`ditto` z `.app`). Test: `node app/scripts/test-aktualizacje.js [--electron]`. `--bez-nakladki` uruchamia kod z paczki.
 - `app/scripts/testuj.sh [przykład… | szablon.txt]`: na Linuksie z Xvfb przebudowuje zasoby i uruchamia tryb testowy na kopiach przykładów (domyślnie wszystkich, równolegle); wypisuje wiersz na projekt i kończy z kodem 0 albo 1.
 - `.github/workflows/aplikacja-mac.yml`: budowanie i testy na macOS. Po każdej zmianie w `main` tworzy wydanie `v<wersja>` z DMG (wersja z `app/package.json`). Testy przykładów (od 0.6.3) zależą od zdarzenia:
-  - **pull request** – pełny `--test-edytor` na `07-gildie` (w dwóch równoległych procesach), na `05-zaklecia` blok `raportStart` (od 0.7.1), na `08-wieze` blok `spadSzablonu`, pozostałe przykłady `--test-pdf` (renderowanie, PDF, eksport); uruchomienia przez `app/scripts/testy-ci.js pr|pelny --bin <aplikacja> --tmp <katalog>` (do 3 naraz; lokalnie np. `--bin "xvfb-run -a ./node_modules/.bin/electron --no-sandbox ."`);
+  - **pull request** – pełny `--test-edytor` na `07-gildie` (w trzech równoległych procesach – grupy z `app/scripts/grupy-testow.js`), na `05-zaklecia` blok `raportStart` (od 0.7.1), na `08-wieze` bloki `spadSzablonu` i `profileDrukarni`, pozostałe przykłady `--test-pdf` (renderowanie, PDF, eksport); uruchomienia przez `app/scripts/testy-ci.js pr|pelny --bin <aplikacja> --tmp <katalog>` (do 4 naraz; lokalnie np. `--bin "xvfb-run -a ./node_modules/.bin/electron --no-sandbox ."`). **Bez DMG** – w Artifacts tylko `wyniki-testow`;
   - **push do `main`** (po scaleniu przetestowanego PR-a) – bez testów przykładów: start, nowy projekt, nakładka, DMG i wydanie;
-  - **pełny zestaw** (`--test-edytor` na wszystkich przykładach) – ręcznie (Actions → „Aplikacja macOS” → Run workflow), przy tagu `v*` i wydaniu opublikowanym na GitHubie.
+  - **pełny zestaw** (`--test-edytor` na wszystkich przykładach) – ręcznie (Actions → „Aplikacja macOS” → Run workflow, dowolna gałąź), przy tagu `v*` i wydaniu opublikowanym na GitHubie.
+
+  DMG (`KarKa.dmg`, sprawdzenie DMG, pliki aktualizacji i artefakt `KarKa`) powstaje tylko w przebiegach innych niż pull request (od #101).
 
   Czasy przykładów są w podsumowaniu przebiegu (Summary); ostrzeżenie, gdy przykład trwa ponad 3 min albo przebieg PR ponad 10 min.
 
 ### Wydania
 
-Każda zmiana w `main` podnosi wersję w `app/package.json` (0.4.3 → 0.4.4 …). Po scaleniu workflow sam tworzy wydanie `v<wersja>` z plikiem DMG, opisem (lista scalonych PR-ów) i oznaczeniem „najnowsze”, więc link do pobrania w README wskazuje ostatnią wersję. Gdy wersja nie została podniesiona, wydanie nie powstaje (ostrzeżenie w Actions).
+Każda zmiana aplikacji w `main` podnosi wersję w `app/package.json` (0.4.3 → 0.4.4 …). Po scaleniu workflow sam tworzy wydanie `v<wersja>` z plikiem DMG, opisem (lista scalonych PR-ów) i oznaczeniem „najnowsze”, więc link do pobrania w README wskazuje ostatnią wersję. Gdy wersja nie została podniesiona, wydanie nie powstaje (ostrzeżenie „Wydanie … już istnieje” w Actions). Tak jest celowo przy zmianach bez plików aplikacji – sama dokumentacja, CI, skrypty testów (od #101): nie podbijają wersji, bo wydanie i aktualizacja bez zmian dla użytkownika nie mają sensu.
 
 Ręcznie opublikowane wydanie albo wypchnięty tag `v*` też dostaną DMG – workflow dołączy plik po kilku minutach.
