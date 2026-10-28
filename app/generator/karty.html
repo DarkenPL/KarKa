@@ -1599,7 +1599,8 @@ function malyTekstKarty(k, progi = progiTekstu()) {
 
 // Obwódki i ramki przy linii cięcia (#110, pkt 2; decyzje 28.10.2026): obwódka karty (KARTA … obwódka=) leży na linii
 // cięcia – zawsze BŁĄD; obwódki PROSTOKĄT / ELIPSA i LINIA bliżej niż MARGINES_DRUKARNI od cięcia – BŁĄD; boki prostokątów
-// i linie równoległe do krawędzi w pasie 3–5 mm – UWAGA (po cięciu ±1 mm odstęp widocznie nierówny). Linie i boki, które
+// i linie równoległe do krawędzi w pasie 3–5 mm – UWAGA (po cięciu ±1 mm odstęp widocznie nierówny); LINIA nierównoległa,
+// której koniec leży bliżej niż 3 mm przed cięciem – UWAGA (koniec: true). Linie i boki, które
 // przechodzą przez linię cięcia (dochodzą do spadu), są celowe – pomijane; elementy wypełnione bez obwódki – też.
 // Geometria w mm karty z offset* (bez skali podglądu) i transformacji elementu (obrót wokół środka).
 const PAS_RAMEK = 5;                  // mm – równoległe obwódki bliżej niż tyle: UWAGA
@@ -1620,8 +1621,10 @@ function obwodkiKarty(k) {
       if (Math.max(u1, u2) < 0 || Math.min(u1, u2) > L) continue;
       const d = Math.min(a, b) - g, dl = Math.hypot(q[0] - p[0], q[1] - p[1]);
       const rownolegla = dl > 0.5 && Math.abs(a - b) <= dl * Math.sin(Math.PI / 36);   // do 5°
-      const poziom = d < MARGINES_DRUKARNI - 0.005 ? 'BŁĄD' : rownolegla && d < PAS_RAMEK - 0.005 ? 'UWAGA' : '';
-      if (poziom && (!naj || (poziom === 'BŁĄD') > (naj.poziom === 'BŁĄD') || (poziom === naj.poziom && d < naj.odstep))) naj = { element, opis, poziom, odstep: r1(Math.max(0, d)), krawedz: s };
+      // LINIA nierównoległa do krawędzi, która kończy się przed linią cięcia – tylko UWAGA (decyzja właściciela 28.10.2026).
+      const koniec = element === 'LINIA' && !rownolegla && d < MARGINES_DRUKARNI - 0.005;
+      const poziom = koniec ? 'UWAGA' : d < MARGINES_DRUKARNI - 0.005 ? 'BŁĄD' : rownolegla && d < PAS_RAMEK - 0.005 ? 'UWAGA' : '';
+      if (poziom && (!naj || (poziom === 'BŁĄD') > (naj.poziom === 'BŁĄD') || (poziom === naj.poziom && d < naj.odstep))) naj = { element, opis, poziom, odstep: r1(Math.max(0, d)), krawedz: s, ...(koniec ? { koniec: true } : {}) };
     }
     return naj;
   };
@@ -1629,7 +1632,7 @@ function obwodkiKarty(k) {
     if (!x) return;
     const byl = wynik.find((y) => y.opis === x.opis);
     if (!byl) wynik.push(x);
-    else if ((x.poziom === 'BŁĄD' && byl.poziom !== 'BŁĄD') || (x.poziom === byl.poziom && x.odstep < byl.odstep)) Object.assign(byl, x);
+    else if ((x.poziom === 'BŁĄD' && byl.poziom !== 'BŁĄD') || (x.poziom === byl.poziom && x.odstep < byl.odstep)) { delete byl.koniec; Object.assign(byl, x); }
   };
   const widoczna = (el, st) => st.display !== 'none' && parseFloat(st.opacity) > 0;
   const mmTxt = (v) => String(r1(v)).replace('.', ',');
@@ -1971,11 +1974,12 @@ async function sekcjeDrukarni(lista, o = {}) {
   const RADA_OBW = {
     KARTA: 'leży na linii cięcia – po cięciu (±1 mm) będzie nierówna albo ucięta; usuń ją albo zastąp ramką ≥ 5 mm od krawędzi',
     BŁĄD: `bliżej niż ${MARGINES_DRUKARNI} mm od linii cięcia – po cięciu (±1 mm) może zostać ucięta; odsuń ją albo przedłuż do spadu`,
+    KONIEC: `kończy się bliżej niż ${MARGINES_DRUKARNI} mm przed linią cięcia – po cięciu (±1 mm) odstęp końca od krawędzi będzie widocznie różny; doprowadź ją do spadu albo skróć`,
     UWAGA: `równoległa do krawędzi ${MARGINES_DRUKARNI}–${PAS_RAMEK} mm od linii cięcia – po cięciu (±1 mm) odstęp będzie widocznie nierówny; odsuń ją na ≥ ${PAS_RAMEK} mm`,
   };
   lista('Drukarnia: obwódki i ramki przy linii cięcia', (r.obwodki || []).slice(0, POKAZ).map((x) =>
     `<b>${x.poziom}${x.element === 'KARTA' ? '' : ' ' + mm(x.odstep)}</b> – ${esc(x.talia)} – ${x.strona === 'rewers' ? 'rewers' : 'awersy (' + x.karty.length + ')'}: ${esc(x.opis)}`
-      + (x.element === 'KARTA' ? ' ' : `, ${x.krawedz} krawędź – `) + (RADA_OBW[x.element === 'KARTA' ? 'KARTA' : x.poziom]) + (x.strona === 'awers' ? `: ${ileKart(x.karty)}` : ''))
+      + (x.element === 'KARTA' ? ' ' : `, ${x.krawedz} krawędź – `) + (RADA_OBW[x.element === 'KARTA' ? 'KARTA' : x.koniec ? 'KONIEC' : x.poziom]) + (x.strona === 'awers' ? `: ${ileKart(x.karty)}` : ''))
     .concat((r.obwodki || []).length > POKAZ ? [`… i ${r.obwodki.length - POKAZ} pozycji więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
     `obwódki i ramki są co najmniej ${PAS_RAMEK} mm od linii cięcia albo przechodzą przez nią do spadu`);
   lista('Drukarnia: „prawie czerń” zamiast #000', r.czern.map((x) =>
