@@ -1280,7 +1280,9 @@ function utworzOkno() {
   });
 }
 // Okno pokazuje się po wczytaniu strony projektu (jak dawniej „ready-to-show” okna), najpóźniej po 3 s.
+// Start w tle (--w-tle, #120) – okno zostaje ukryte do pokazUkryteOkno().
 function pokazOknoPoWczytaniu(p) {
+  if (startWTle) return;
   const pokaz = () => { if (okno && !okno.isDestroyed() && !okno.isVisible()) { okno.show(); ulozWidok(); if (p.wc) p.wc.focus(); } };
   p.wc.once('did-finish-load', pokaz);
   setTimeout(pokaz, 3000);
@@ -3719,7 +3721,27 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
 
 // ── Start ───────────────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) app.quit();
-app.on('second-instance', () => { if (okno) { if (okno.isMinimized()) okno.restore(); okno.focus(); } });
+// Start w tle (#120): `open -g -a KarKa --args --w-tle` – okno ukryte (ikona w Docku), bez fokusu i bez okna
+// aktualizacji. Zakładki, zlecenia i plik stanu działają jak zwykle (aktywna zakładka nie ma dławienia timerów).
+// Okno pokazuje się, gdy użytkownik przełączy się na KarKę (Dock, ⌘Tab, open bez -g); wtedy też sprawdzenie aktualizacji.
+// Nie przy „activate” ani „second-instance” – przychodzą też z ponownego `open -g` i pokazanie okna zabrałoby fokus.
+let startWTle = process.argv.includes('--w-tle');
+let sprawdzanieZaplanowane = false;                      // ciche sprawdzenie aktualizacji raz po pokazaniu okna
+function zaplanujSprawdzenie() {
+  if (sprawdzanieZaplanowane) return;
+  sprawdzanieZaplanowane = true;
+  setTimeout(() => sprawdzAktualizacje({ cicho: true }), 4000);
+}
+function pokazUkryteOkno() {
+  if (!startWTle) return;
+  startWTle = false;                                     // aktywacja przed utworzeniem okna – pokaże je pokazOknoPoWczytaniu
+  if (!okno || okno.isDestroyed()) return;
+  okno.show(); ulozWidok();
+  if (aktywny && aktywny.wc) aktywny.wc.focus();
+  zaplanujSprawdzenie();
+}
+app.on('did-become-active', pokazUkryteOkno);
+app.on('second-instance', () => { if (okno && !startWTle) { if (okno.isMinimized()) okno.restore(); okno.focus(); } });
 
 let doOtwarcia = null;                                   // szablon otwarty z Findera przed startem aplikacji
 app.on('open-file', (e, plik) => {
@@ -3766,7 +3788,7 @@ app.whenReady().then(async () => {
     return;
   }
   await oknoZZakladkami(doOtwarcia, true);
-  setTimeout(() => sprawdzAktualizacje({ cicho: true }), 4000);
+  if (!startWTle) zaplanujSprawdzenie();
 });
 
 app.on('activate', async () => {

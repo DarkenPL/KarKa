@@ -29,7 +29,7 @@ Od wersji 0.5.0 („Gołąb pocztowy”) aplikacja aktualizuje się sama – bez
 
 **Przejście z Generatora kart (0.4.x):** zainstaluj KarKę z DMG jak przy pierwszej instalacji. Przy pierwszym uruchomieniu KarKa przejmie ostatnie projekty i ustawienia okien druku i eksportu. Starą aplikację **Generator kart** usuń potem z Programów (przenieś do Kosza); jej folder danych `~/Library/Application Support/Generator kart` też można skasować.
 
-- **Kiedy sprawdza:** przy każdym uruchomieniu (po kilku sekundach; bez komunikatu, gdy nie ma nowej wersji albo internetu), z menu **KarKa → Sprawdź aktualizacje…** i [zleceniem z pliku](#zlecenia-z-pliku) `aktualizacja`.
+- **Kiedy sprawdza:** przy każdym uruchomieniu (po kilku sekundach; po [starcie w tle](#gdy-karka-jest-zamknięta) – dopiero po pokazaniu okna; bez komunikatu, gdy nie ma nowej wersji albo internetu), z menu **KarKa → Sprawdź aktualizacje…** i [zleceniem z pliku](#zlecenia-z-pliku) `aktualizacja`.
 - Gdy jest nowa wersja, okno pokazuje, co się zmieniło: **Zainstaluj**, **Później** albo **Pomiń tę wersję** (przy starcie aplikacja nie zapyta o nią ponownie; z menu – tak).
 - **Mała aktualizacja** (prawie zawsze, ok. 1 MB): pobiera się sam kod Generatora (silnik kart, okna, przykłady) do `~/Library/Application Support/KarKa/kod`, a aplikacja uruchamia się ponownie. Aplikacja w Programach się nie zmienia, więc macOS o nic nie pyta.
 - **Pełna aktualizacja** (ok. 120 MB): gdy nowa wersja ma nowszy Electron (silnik okna), pobiera się cała aplikacja. Po pobraniu aplikacja zamyka się, podmienia w Programach i uruchamia od nowa. macOS może wtedy raz zapytać o dostęp do folderów z projektami.
@@ -299,13 +299,14 @@ Gdy nie ma żadnego, wynik ma `ok: false` i opis w `blad`.
 Zamknięta aplikacja nie wykona zleceń. Program z zewnątrz (np. opiekun uruchamiany przez launchd albo Claude w powłoce Maca) może ją uruchomić w tle:
 
 ```
-open -g -a KarKa
+open -g -a KarKa --args --w-tle
 ```
 
-- Z `-g` KarKa startuje w tle: okno nie wychodzi na wierzch i nie zabiera fokusu (sprawdzone na Macu 28.10.2026). Potem przywraca zakładki, przegląda Folder z projektami, wykonuje czekające zlecenia i odkłada zaległe.
+- Z `--w-tle` (od 0.7.8) KarKa startuje bez okna: w Docku jest tylko ikona, a okno nie wychodzi na wierzch i nie zabiera fokusu. KarKa przywraca zakładki, przegląda Folder z projektami, wykonuje czekające zlecenia i odkłada zaległe. Okno pokaże się, gdy przełączysz się na KarKę (kliknięcie ikony w Docku, ⌘Tab). Dopiero wtedy KarKa sprawdza też aktualizacje – dopóki okno jest ukryte, o nowej wersji się nie dowiesz (zlecenie `aktualizacja` – [Aktualizacje](#aktualizacje) – działa także bez okna).
+- Samo `open -g -a KarKa` (bez `--w-tle`) pokazuje okno na wierzchu i zabiera fokus. Starsze wersje (do 0.7.7) nie znają `--w-tle` – uruchamiają się wtedy jak bez niego.
 - Zlecenia w projektach bez zakładki wymagają włączonego [Folderu z projektami](#gdy-projekt-nie-jest-otwarty). Bez niego wykonają się tylko zlecenia w przywróconych zakładkach.
 - Nie otwieraj szablonu (`open -a KarKa …/gra.txt`). W ten sposób powstaje zwykła zakładka, aplikacja przełącza się na nią i przerywa pracę.
-- Gdy KarKa już działa, ponowne `open -g -a KarKa` niczego nie psuje, bo druga kopia aplikacji się nie uruchamia. Czy KarKa działa, mówi [plik stanu](#plik-stanu):
+- Gdy KarKa już działa, ponowne `open -g -a KarKa` niczego nie psuje, bo druga kopia aplikacji się nie uruchamia, a okno ukryte przez `--w-tle` zostaje ukryte. Czy KarKa działa, mówi [plik stanu](#plik-stanu):
 
 ```sh
 STAN="$HOME/Library/Application Support/KarKa/stan.json"
@@ -315,7 +316,7 @@ if grep -q '"dziala": *true' "$STAN" 2>/dev/null && [ -n "$(find "$STAN" -mmin -
    && [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
   echo "KarKa działa (pid $PID)"
 else
-  open -g -a KarKa
+  open -g -a KarKa --args --w-tle
 fi
 ```
 
@@ -359,7 +360,7 @@ Od 0.7.3 KarKa zapisuje plik `~/Library/Application Support/KarKa/stan.json`. Pr
 - `kolejka` jest liczona raz, na początku przeglądu. W trakcie długiego zlecenia (np. PDF w CMYK) nie maleje.
 
 **Kolejność sprawdzania, gdy nie ma wyniku:**
-1. `dziala: false`, martwy `pid` albo `czas` starszy niż minuta – KarKa nie działa: `open -g -a KarKa`. Brak pliku stanu oznacza, że KarKa nie była uruchomiona w wersji 0.7.3 lub nowszej. Starsze wersje nie znają Folderu z projektami, zaległych zleceń ani pliku stanu – zlecenia wykonują tylko w otwartych zakładkach (`wersjaAplikacji` w wyniku dowolnego zlecenia).
+1. `dziala: false`, martwy `pid` albo `czas` starszy niż minuta – KarKa nie działa: `open -g -a KarKa --args --w-tle`. Brak pliku stanu oznacza, że KarKa nie była uruchomiona w wersji 0.7.3 lub nowszej. Starsze wersje nie znają Folderu z projektami, zaległych zleceń ani pliku stanu – zlecenia wykonują tylko w otwartych zakładkach (`wersjaAplikacji` w wyniku dowolnego zlecenia).
 2. Projekt nie ma zakładki, a `folderProjektow` jest `null` albo projekt leży poza nim – zlecenie nie zostanie zauważone.
 3. Projekt ma zakładkę z `"zlecenie": true` albo `kolejka` > 0 – zlecenie czeka albo trwa. Czekaj dalej: PDF w CMYK może trwać kilka minut.
 
