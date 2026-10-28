@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Hook PreToolUse (Bash): przy `gh pr create` sprawdza wersję aplikacji (zasada z CLAUDE.md: każdy PR podnosi wersję).
 Blokuje PR, gdy: wersja w app/package.json jest taka sama jak na origin/main; package-lock.json ma inną wersję;
-tag v<wersja> już istnieje na GitHubie (wersja zajęta – np. przez inny PR)."""
-import json, os, re, subprocess, sys
+tag v<wersja> już istnieje na GitHubie (wersja zajęta – np. przez inny PR); inny otwarty PR ma w app/package.json
+tę samą wersję (gałąź z head.ref; gdy gh nie odpowiada – tylko ostrzeżenie)."""
+import base64, json, os, re, subprocess, sys
 
 try:
     dane = json.load(sys.stdin)
@@ -44,7 +45,7 @@ if not nowa:
     blokuj("brak wersji w app/package.json", "Sprawdź plik.")
 if stara and nowa == stara:
     blokuj(f"wersja aplikacji nie została podniesiona (origin/main i gałąź: {stara})",
-           "Każdy PR do main podnosi wersję o najmniejszą podwersję w app/package.json i package-lock.json i dopisuje ją w „Zrobione” w CLAUDE.md.")
+           "Każdy PR do main podnosi wersję o najmniejszą podwersję w app/package.json i package-lock.json i dopisuje ją w docs/historia.md.")
 lock_w = {lock.get("version"), (lock.get("packages") or {}).get("", {}).get("version")}
 if lock_w != {nowa}:
     blokuj(f"package-lock.json ma inną wersję ({', '.join(str(x) for x in lock_w if x)}) niż package.json ({nowa})",
@@ -52,4 +53,29 @@ if lock_w != {nowa}:
 tagi = git("ls-remote", "--tags", "origin", f"refs/tags/v{nowa}")
 if tagi.strip():
     blokuj(f"tag v{nowa} już istnieje na GitHubie – wersja zajęta", "Weź kolejną wolną podwersję (sprawdź też otwarte PR-y).")
+
+def gh_api(sciezka):
+    w = subprocess.run(["gh", "api", sciezka], cwd=proj, capture_output=True, text=True, timeout=30)
+    if w.returncode != 0:
+        raise RuntimeError((w.stderr or w.stdout).strip()[:200])
+    return json.loads(w.stdout)
+
+adres = git("remote", "get-url", "origin").strip()
+m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", adres)
+galaz = git("rev-parse", "--abbrev-ref", "HEAD").strip()
+if m:
+    try:
+        for pr in gh_api(f"repos/{m.group(1)}/pulls?state=open&per_page=100"):
+            glowa = pr.get("head") or {}
+            ref, repo = glowa.get("ref"), (glowa.get("repo") or {}).get("full_name") or m.group(1)
+            if not ref or (ref == galaz and repo == m.group(1)):
+                continue   # własny PR tej gałęzi (np. drugi `gh pr create`) się nie liczy
+            plik = gh_api(f"repos/{repo}/contents/app/package.json?ref={ref}")
+            if wersja_z(base64.b64decode(plik.get("content", "")).decode("utf-8")) == nowa:
+                blokuj(f"wersja {nowa} jest już w otwartym PR #{pr.get('number')} (gałąź {ref})",
+                       "Weź kolejną wolną podwersję albo poczekaj na scalenie tamtego PR-a i zrób rebase na main.")
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"Uwaga (.claude/hooks/wersja-pr.py): nie sprawdzono wersji w otwartych PR-ach ({e}).", file=sys.stderr)
 sys.exit(0)
