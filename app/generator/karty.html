@@ -1436,27 +1436,35 @@ async function zbudujTeraz() {
 
 // ── Raport projektu ─────────────────────────────────────────────────────────
 // Duplikaty ID, puste pola używanych kolumn, nieużywane kolumny, obrazki i ikony.
-// Obrazki (OBRAZEK i TŁO z pliku) z rozdzielczością poniżej 300 dpi w rozmiarze, w jakim stoją na karcie.
-// Grafiki SVG są wektorowe – pomijane. Wynik: lista „plik – N dpi (talie)”, od najgorszych.
-async function obrazkiNiskiejRozdzielczosci(prog = 300) {
-  const PX_MM = 96 / 25.4;
-  const naj = new Map();                               // plik → { dpi, talie }
-  const dodaj = (u, dpi, talia) => {
+// Obrazki (OBRAZEK, TŁO z pliku i ikony rastrowe – IKONA i znaczniki {…}, #110) z rozdzielczością poniżej 300 dpi
+// w rozmiarze, w jakim stoją na karcie. Grafiki SVG są wektorowe – pomijane. Wynik: lista „plik – N dpi (talie)”,
+// od najgorszych; jedno miejsce po przecinku (w dół) i tolerancja 0,5 dpi – 815 px na 69 mm (299,98) to nie błąd (#110).
+async function obrazkiNiskiejRozdzielczosci(prog = 300, karty = $('podglad').querySelectorAll('.karta')) {
+  const PX_MM = 96 / 25.4, granica = prog - 0.5;
+  const naj = new Map();                               // plik → { dpi, talie, ikona }
+  const dodaj = (u, dpi, talia, ikona = false) => {
     const plik = (URL_PLIK.get(u) || '').replace(/@[^@]*$/, '');
     if (!plik || /\.svg$/i.test(plik) || !(dpi > 0)) return;
-    const x = naj.get(plik) || naj.set(plik, { dpi: Infinity, talie: new Set() }).get(plik);
-    if (dpi < prog) x.talie.add(talia);
-    x.dpi = Math.min(x.dpi, dpi);
+    const x = naj.get(plik) || naj.set(plik, { dpi: Infinity, talie: new Set(), ikona }).get(plik);
+    if (dpi < granica) x.talie.add(talia);
+    x.dpi = Math.min(x.dpi, dpi); x.ikona = x.ikona || ikona;
   };
   const wymiary = new Map();
   const rozmiar = (u) => wymiary.get(u) || wymiary.set(u, new Promise((r) => {
     const i = new Image(); i.onload = () => r([i.naturalWidth, i.naturalHeight]); i.onerror = () => r([0, 0]); i.src = u;
   })).get(u);
-  for (const k of $('podglad').querySelectorAll('.karta')) {
+  for (const k of karty) {
     const talia = k.dataset.talia || '';
+    // Ikona: wysokość z CSS (em albo wysokość pola IKONA), szerokość z proporcji pliku – skala z wysokości.
+    for (const img of k.querySelectorAll('img.ikona')) {
+      if (getComputedStyle(img).display === 'none') continue;
+      const [, nh] = img.naturalWidth ? [img.naturalWidth, img.naturalHeight] : await rozmiar(img.src);
+      const bh = parseFloat(getComputedStyle(img).height) / PX_MM;       // bez zaokrąglenia do pikseli (offsetHeight)
+      if (nh && bh) dodaj(img.src, nh / bh * 25.4, talia, true);
+    }
     for (const img of k.querySelectorAll('.el.obrazek img')) {
       const [nw, nh] = img.naturalWidth ? [img.naturalWidth, img.naturalHeight] : await rozmiar(img.src);
-      const box = img.parentElement, bw = box.offsetWidth / PX_MM, bh = box.offsetHeight / PX_MM;   // mm (bez obrotu)
+      const box = img.parentElement, sb = getComputedStyle(box), bw = parseFloat(sb.width) / PX_MM, bh = parseFloat(sb.height) / PX_MM;   // mm (bez obrotu)
       if (!nw || !nh || !bw || !bh) continue;
       const fit = img.style.objectFit;
       const pow = +((/scale\(([\d.]+)\)/.exec(img.style.transform) || [])[1] || 1);   // kadr= powiększa obraz
@@ -1470,8 +1478,8 @@ async function obrazkiNiskiejRozdzielczosci(prog = 300) {
       if (nw && nh && bw && bh) dodaj(m[1], 25.4 / Math.max(bw / nw, bh / nh), talia);   // tło: cover
     }
   }
-  return [...naj.entries()].filter(([, x]) => x.dpi < prog).sort((a, b) => a[1].dpi - b[1].dpi)
-    .map(([p, x]) => `${esc(p)} – <b>${Math.round(x.dpi)} dpi</b> <span class="opis">(${esc([...x.talie].join(', '))})</span>`);
+  return [...naj.entries()].filter(([, x]) => x.dpi < granica).sort((a, b) => a[1].dpi - b[1].dpi)
+    .map(([p, x]) => `${esc(p)}${x.ikona ? ' (ikona)' : ''} – <b>${String(Math.floor(x.dpi * 10) / 10).replace('.', ',')} dpi</b> <span class="opis">(${esc([...x.talie].join(', '))})</span>`);
 }
 
 // ── Raport – tryb drukarni (#66) ────────────────────────────────────────────
@@ -1557,6 +1565,123 @@ function odstepyKarty(k) {
     }
   }
   return naj;
+}
+
+// Rozmiar tekstu po dopasowaniu (#110, pkt 1): każdy fragment osobno (<small>, <big>, <rozmiar=>), z getComputedStyle
+// po fitAll. Próg: czysta czerń #000 (w CMYK jedna farba K100) – czarny, każdy inny kolor (także biały na tle i
+// „prawie czerń”) – kontra. Progi z profilu drukarni wybranego w oknie PDF dla drukarni (minTekstPt), domyślnie 6 / 8 pt.
+const PROGI_TEKSTU = { czarny: 6, kontra: 8 };
+function progiTekstu() {
+  let p = null;
+  try { const id = ustawieniaOkna('drukarnia').drukarnia; p = profileDrukarni().find((x) => x && x.id === id) || null; } catch (e) { /* bez profilu */ }
+  const m = (p && p.minTekstPt) || {};
+  return { czarny: +m.czarny || PROGI_TEKSTU.czarny, kontra: +m.kontra || PROGI_TEKSTU.kontra, profil: p && p.minTekstPt ? p.nazwa : null };
+}
+// Wynik: fragmenty poniżej progu [{ tekst, rozmiar (pt), prog, kolor }], od najmniejszego.
+function malyTekstKarty(k, progi = progiTekstu()) {
+  const out = [];
+  for (const el of k.querySelectorAll('.el.tekst')) {
+    const se = getComputedStyle(el);
+    if (se.display === 'none' || !(parseFloat(se.opacity) > 0)) continue;   // krycie=0 – niewidoczny
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      const tekst = n.nodeValue.trim();
+      if (!tekst) continue;
+      const st = getComputedStyle(n.parentElement), rgb = rgbZCss(st.color);
+      if (!rgb || rgb[3] === 0) continue;
+      const pt = parseFloat(st.fontSize) * 72 / 96;
+      const czarny = rgb[0] === 0 && rgb[1] === 0 && rgb[2] === 0, prog = czarny ? progi.czarny : progi.kontra;
+      if (pt < prog - 0.05) out.push({ tekst: tekst.replace(/\s+/g, ' ').slice(0, 40), rozmiar: Math.round(pt * 10) / 10, prog, czarny, kolor: hexZRgb(rgb) });
+    }
+  }
+  return out.sort((a, b) => a.rozmiar - b.rozmiar);
+}
+
+// Obwódki i ramki przy linii cięcia (#110, pkt 2; decyzje 28.10.2026): obwódka karty (KARTA … obwódka=) leży na linii
+// cięcia – zawsze BŁĄD; obwódki PROSTOKĄT / ELIPSA i LINIA bliżej niż MARGINES_DRUKARNI od cięcia – BŁĄD; boki prostokątów
+// i linie równoległe do krawędzi w pasie 3–5 mm – UWAGA (po cięciu ±1 mm odstęp widocznie nierówny). Linie i boki, które
+// przechodzą przez linię cięcia (dochodzą do spadu), są celowe – pomijane; elementy wypełnione bez obwódki – też.
+// Geometria w mm karty z offset* (bez skali podglądu) i transformacji elementu (obrót wokół środka).
+const PAS_RAMEK = 5;                  // mm – równoległe obwódki bliżej niż tyle: UWAGA
+function obwodkiKarty(k) {
+  const [W, H] = cardMm(k), PX = 96 / 25.4, wynik = [];
+  const kr = { lewa: (x) => x, prawa: (x) => W - x, górna: (x, y) => y, dolna: (x, y) => H - y };
+  const pionowa = (s) => s === 'lewa' || s === 'prawa';
+  const r1 = (v) => Math.round(v * 10) / 10;
+  // Odcinek obwódki (oś linii, połowa grubości g) → najbliższa krawędź karty i poziom.
+  const odcinek = (p, q, g, opis, element) => {
+    let naj = null;
+    for (const s of Object.keys(kr)) {
+      const a = kr[s](...p), b = kr[s](...q);
+      if (Math.min(a, b) + g <= 0 && Math.max(a, b) + g <= 0) continue;       // cały poza kartą (w spadzie)
+      if (Math.min(a, b) - g < 0 && Math.max(a, b) - g > 0 && Math.abs(a - b) > 2 * g) continue;   // przechodzi przez cięcie
+      // wzdłuż krawędzi odcinek musi leżeć naprzeciw karty
+      const [u1, u2, L] = pionowa(s) ? [p[1], q[1], H] : [p[0], q[0], W];
+      if (Math.max(u1, u2) < 0 || Math.min(u1, u2) > L) continue;
+      const d = Math.min(a, b) - g, dl = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      const rownolegla = dl > 0.5 && Math.abs(a - b) <= dl * Math.sin(Math.PI / 36);   // do 5°
+      const poziom = d < MARGINES_DRUKARNI - 0.005 ? 'BŁĄD' : rownolegla && d < PAS_RAMEK - 0.005 ? 'UWAGA' : '';
+      if (poziom && (!naj || (poziom === 'BŁĄD') > (naj.poziom === 'BŁĄD') || (poziom === naj.poziom && d < naj.odstep))) naj = { element, opis, poziom, odstep: r1(Math.max(0, d)), krawedz: s };
+    }
+    return naj;
+  };
+  const dodaj = (x) => {
+    if (!x) return;
+    const byl = wynik.find((y) => y.opis === x.opis);
+    if (!byl) wynik.push(x);
+    else if ((x.poziom === 'BŁĄD' && byl.poziom !== 'BŁĄD') || (x.poziom === byl.poziom && x.odstep < byl.odstep)) Object.assign(byl, x);
+  };
+  const widoczna = (el, st) => st.display !== 'none' && parseFloat(st.opacity) > 0;
+  const mmTxt = (v) => String(r1(v)).replace('.', ',');
+  for (const el of k.querySelectorAll(':scope > .el')) {
+    const st = getComputedStyle(el);
+    if (!widoczna(el, st)) continue;
+    if (el.classList.contains('linia')) {
+      if (el.getAttribute('opacity') !== null && +el.getAttribute('opacity') === 0) continue;
+      for (const l of el.querySelectorAll('line')) {
+        const g = (parseFloat(l.getAttribute('stroke-width')) || 0) / 2;
+        const p = [+l.getAttribute('x1'), +l.getAttribute('y1')], q = [+l.getAttribute('x2'), +l.getAttribute('y2')];
+        if (!g || [...p, ...q].some(Number.isNaN)) continue;
+        const kol = rgbZCss(getComputedStyle(l).stroke);
+        if (kol && kol[3] === 0) continue;
+        dodaj(odcinek(p, q, g, `LINIA ${mmTxt(p[0])}, ${mmTxt(p[1])} → ${mmTxt(q[0])}, ${mmTxt(q[1])} mm`, 'LINIA'));
+      }
+      continue;
+    }
+    // Wymiary w mm ze stylu elementu (renderCard pisze je w mm) – offset* i obliczona grubość obwódki są zaokrąglone do pikseli.
+    const wMm = (v, zapas) => /mm$/.test(v) ? parseFloat(v) : zapas;
+    const b = wMm(el.style.borderTopWidth, parseFloat(st.borderTopWidth) / PX);
+    if (!(b > 0) || st.borderTopStyle === 'none' || (rgbZCss(st.borderTopColor) || [0, 0, 0, 1])[3] === 0) continue;
+    const kszt = el.classList.contains('ksztalt');
+    if (!kszt && el.classList.length !== 1) continue;                         // obwódka karty: .el bez innych klas
+    const x = wMm(el.style.left, el.offsetLeft / PX), y = wMm(el.style.top, el.offsetTop / PX), w = wMm(el.style.width, el.offsetWidth / PX), h = wMm(el.style.height, el.offsetHeight / PX);
+    if (!kszt) {
+      const strona = k.classList.contains('rewers') ? 'rewersu' : 'karty';
+      dodaj({ element: 'KARTA', opis: `obwódka ${strona} (KARTA … obwódka=${mmTxt(b)})`, poziom: 'BŁĄD', odstep: 0, krawedz: 'na linii cięcia' });
+      continue;
+    }
+    const m = st.transform && st.transform !== 'none' ? new DOMMatrix(st.transform) : null;
+    const elipsa = st.borderTopLeftRadius === '50%';
+    const nazwa = elipsa ? 'ELIPSA' : 'PROSTOKĄT', opis = `${nazwa} ${mmTxt(x)}, ${mmTxt(y)}, ${mmTxt(w)} × ${mmTxt(h)} mm (obwódka ${mmTxt(b)} mm)`;
+    if (elipsa) {
+      // Najbliższy punkt obwódki elipsy to bok jej obwiedni (po obrocie – półosie rzutowane na osie).
+      const kat = m ? Math.atan2(m.b, m.a) : 0, a = w / 2, c = h / 2, sx = x + a, sy = y + c;
+      const ex = Math.hypot(a * Math.cos(kat), c * Math.sin(kat)), ey = Math.hypot(a * Math.sin(kat), c * Math.cos(kat));
+      let naj = null;
+      for (const [s, d] of [['lewa', sx - ex], ['prawa', W - sx - ex], ['górna', sy - ey], ['dolna', H - sy - ey]]) {
+        if (d < 0) continue;                                                 // wychodzi za kartę – przecina cięcie
+        if (d < MARGINES_DRUKARNI - 0.005 && (!naj || d < naj.odstep)) naj = { element: nazwa, opis, poziom: 'BŁĄD', odstep: r1(d), krawedz: s };
+      }
+      dodaj(naj);
+      continue;
+    }
+    // Prostokąt: cztery boki (oś obwódki – b/2 do środka), po obrocie wokół środka elementu.
+    const g = b / 2, ox = x + w / 2, oy = y + h / 2;
+    const pkt = (px, py) => { if (!m) return [px, py]; const t = m.transformPoint(new DOMPoint(px - ox, py - oy)); return [t.x + ox, t.y + oy]; };
+    const A = pkt(x + g, y + g), B = pkt(x + w - g, y + g), C = pkt(x + w - g, y + h - g), D = pkt(x + g, y + h - g);
+    for (const [p, q] of [[A, B], [B, C], [C, D], [D, A]]) dodaj(odcinek(p, q, g, opis, nazwa));
+  }
+  return wynik.sort((a, b) => (b.poziom === 'BŁĄD') - (a.poziom === 'BŁĄD') || a.odstep - b.odstep);
 }
 
 // Kolory do sprawdzenia „prawie czerni” w karcie: [{ rgb, rodzaj }].
@@ -1757,6 +1882,7 @@ async function raportDrukarniTeraz() {
       await ukladDoPomiaru(karty);
     }
     const odstep = [], bezPomiaru = [], czern = new Map(), pasy = new Map(), spad = [], pliki = [], zmiesc = [], widziane = new Set();
+    const progi = progiTekstu(), malyTekst = [], obwodki = new Map();
     for (const k of karty) {
       const rewers = k.classList.contains('rewers');
       const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' + nrRewersu(k) : k.dataset.row);
@@ -1769,6 +1895,14 @@ async function raportDrukarniTeraz() {
         else if (o.odstep < byla.odstep) Object.assign(byla, o, { odstep: Math.round(o.odstep * 100) / 100 });
       }
       if (!pierwsza) continue;                                   // kopie tej samej karty – raz
+      const strona = rewers ? 'rewers' : 'awers';
+      const maly = malyTekstKarty(k, progi);
+      if (maly.length) malyTekst.push({ karta: opisKarty(k), talia: k.dataset.talia, strona, rozmiar: maly[0].rozmiar, prog: maly[0].prog, fragmenty: maly });
+      for (const x of obwodkiKarty(k)) {
+        const kk = [k.dataset.talia, strona, x.opis, x.poziom, x.odstep, x.krawedz].join('|');
+        const y = obwodki.get(kk) || obwodki.set(kk, { talia: k.dataset.talia, strona, ...x, karty: [] }).get(kk);
+        y.karty.push(opisKarty(k));
+      }
       for (const { rgb, rodzaj } of await koloryKarty(k)) {
         if (!prawieCzarny(rgb)) continue;
         const kolor = hexZRgb(rgb), kk = kolor + '|' + rodzaj;
@@ -1791,7 +1925,10 @@ async function raportDrukarniTeraz() {
     // Spad w szablonie (#84): talie bez deklaracji i pliki o proporcjach innych niż karta ze spadem.
     const talie = [...$('podglad').querySelectorAll('.talia')].map((t) => t.dataset.talia);
     const spadSzablonu = { talie: Object.fromEntries(talie.map((t) => [t, spadTalii(t)])), bez: talie.filter((t) => !spadTalii(t)), pliki, zmiesc };
-    return { margines: MARGINES_DRUKARNI, karty: karty.length, niezmierzone: bezPomiaru, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad, spadSzablonu };
+    malyTekst.sort((a, b) => a.rozmiar - b.rozmiar);
+    const obw = [...obwodki.values()].sort((a, b) => (b.poziom === 'BŁĄD') - (a.poziom === 'BŁĄD') || a.odstep - b.odstep);
+    return { margines: MARGINES_DRUKARNI, karty: karty.length, niezmierzone: bezPomiaru, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad, spadSzablonu,
+      progiTekstu: progi, malyTekst, obwodki: obw };
   });
   // Obrazki kart (html-to-image) czytają podgląd – na wyłączność, chyba że eksport już trwa.
   return (OSTATNI_RAPORT_DRUKARNI = EKSPORT_TRWA ? await praca() : await naWylacznosc(praca));
@@ -1820,6 +1957,27 @@ async function sekcjeDrukarni(lista, o = {}) {
     `<b>${mm(x.odstep)}</b> – ${esc(x.karta)}: ${x.element === 'IKONA' ? 'ikona' : '„' + esc(x.tekst) + '”'}, ${x.krawedz} krawędź`)
     .concat(r.odstep.length > POKAZ ? [`… i ${r.odstep.length - POKAZ} kart więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : [])),
     `tekst i ikony są co najmniej ${MARGINES_DRUKARNI} mm od linii cięcia`);
+  // Rozmiar tekstu po dopasowaniu (#110, pkt 1) – na karcie najmniejszy fragment, w zleceniu wszystkie.
+  const pg = r.progiTekstu || progiTekstu(), pt = (v) => String(v).replace('.', ',') + ' pt', maly = r.malyTekst || [];
+  lista(`Drukarnia: tekst mniejszy niż ${pt(pg.czarny)} (czarny) / ${pt(pg.kontra)} (kolorowy)`, maly.slice(0, POKAZ).map((x) => {
+    const f = x.fragmenty[0], reszta = x.fragmenty.length - 1;
+    return `<b>${pt(f.rozmiar)}</b> – ${esc(x.karta)}: „${esc(f.tekst)}” (${f.czarny ? 'czarny' : 'kolor ' + esc(f.kolor)}, próg ${pt(f.prog)})`
+      + (reszta ? ` <span class="opis">i ${reszta} ${reszta === 1 ? 'inny fragment' : 'innych fragmentów'}</span>` : '');
+  }).concat(maly.length > POKAZ ? [`… i ${maly.length - POKAZ} kart więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : [])
+    .concat(maly.length ? [`Rozmiar po dopasowaniu do pola (min= w szablonie, domyślnie 0,6 rozmiaru) i ze znacznikami &lt;small&gt; / &lt;rozmiar=&gt;. Tekst #000 (K100) może być mniejszy niż kolorowy`
+      + (pg.profil ? ` – progi z profilu ${esc(pg.profil)}` : '')] : []),
+    `tekst czarny ma co najmniej ${pt(pg.czarny)}, kolorowy co najmniej ${pt(pg.kontra)}`);
+  // Obwódki i ramki przy linii cięcia (#110, pkt 2).
+  const RADA_OBW = {
+    KARTA: 'leży na linii cięcia – po cięciu (±1 mm) będzie nierówna albo ucięta; usuń ją albo zastąp ramką ≥ 5 mm od krawędzi',
+    BŁĄD: `bliżej niż ${MARGINES_DRUKARNI} mm od linii cięcia – po cięciu (±1 mm) może zostać ucięta; odsuń ją albo przedłuż do spadu`,
+    UWAGA: `równoległa do krawędzi ${MARGINES_DRUKARNI}–${PAS_RAMEK} mm od linii cięcia – po cięciu (±1 mm) odstęp będzie widocznie nierówny; odsuń ją na ≥ ${PAS_RAMEK} mm`,
+  };
+  lista('Drukarnia: obwódki i ramki przy linii cięcia', (r.obwodki || []).slice(0, POKAZ).map((x) =>
+    `<b>${x.poziom}${x.element === 'KARTA' ? '' : ' ' + mm(x.odstep)}</b> – ${esc(x.talia)} – ${x.strona === 'rewers' ? 'rewers' : 'awersy (' + x.karty.length + ')'}: ${esc(x.opis)}`
+      + (x.element === 'KARTA' ? ' ' : `, ${x.krawedz} krawędź – `) + (RADA_OBW[x.element === 'KARTA' ? 'KARTA' : x.poziom]) + (x.strona === 'awers' ? `: ${ileKart(x.karty)}` : ''))
+    .concat((r.obwodki || []).length > POKAZ ? [`… i ${r.obwodki.length - POKAZ} pozycji więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
+    `obwódki i ramki są co najmniej ${PAS_RAMEK} mm od linii cięcia albo przechodzą przez nią do spadu`);
   lista('Drukarnia: „prawie czerń” zamiast #000', r.czern.map((x) =>
     `<b>${esc(x.kolor)}</b> (jasność ${x.jasnosc}) – ${esc(x.rodzaj)}: ${ileKart(x.karty)}. Po konwersji do CMYK wyjdzie czerń czterokolorowa – drukarnie chcą tekstu i małych ikon w czystej czerni (K100): wpisz #000`),
     'czarne teksty, obrysy i ikony są w #000');
@@ -1942,7 +2100,7 @@ async function pokazRaport(pokaz = $('raport').hidden) {
   const tresc = await raportProjektu();
   if (nr !== RAPORT_NR) return;
   r.innerHTML = '<button class="zamknij" id="raportZamknij">Zamknij</button>'
-    + `<label class="raport-drukarnia"><input type="checkbox" id="raportDrukarnia"${druk ? ' checked' : ''}> Tryb drukarni <span class="opis">– odstęp tekstu od linii cięcia (${MARGINES_DRUKARNI} mm), „prawie czerń”, kolor przy krawędzi</span></label>` + tresc;
+    + `<label class="raport-drukarnia"><input type="checkbox" id="raportDrukarnia"${druk ? ' checked' : ''}> Tryb drukarni <span class="opis">– odstęp tekstu od linii cięcia (${MARGINES_DRUKARNI} mm), rozmiar tekstu, obwódki przy cięciu, „prawie czerń”, kolor przy krawędzi</span></label>` + tresc;
   $('raportZamknij').onclick = () => pokazRaport(false);
   $('raportDrukarnia').onchange = (e) => {
     try { localStorage.setItem('raportDrukarnia', e.target.checked ? '1' : '0'); } catch (er) { /* bez zapamiętywania */ }
