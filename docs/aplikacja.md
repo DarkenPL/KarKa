@@ -8,7 +8,7 @@ KarKa to dawny **Generator kart** – od wersji 0.5.0 pod nową nazwą.
 
 Aplikacja działa na Macach z procesorem Apple (M1–M4). Jaki masz procesor, sprawdzisz w  → **Ten Mac** (pozycja „Układ”).
 
-Plik budowany jest automatycznie po każdej zmianie w gałęzi `main`, a każda wersja dostaje własne wydanie (`v0.4.3`, `v0.4.4`…) w zakładce **Releases** – starsze wersje zostają do pobrania. Wersja robocza z pull requestu jest w zakładce **Actions** → uruchomienie „Aplikacja macOS” → **Artifacts**.
+Plik budowany jest automatycznie, gdy do gałęzi `main` trafia nowa wersja aplikacji; każda wersja dostaje własne wydanie (`v0.4.3`, `v0.4.4`…) w zakładce **Releases** – starsze wersje zostają do pobrania. Pull request nie buduje aplikacji (od #101 – w jego **Artifacts** są tylko wyniki testów, `wyniki-testow`). Wersję z gałęzi przed scaleniem zbudujesz ręcznie: **Actions** → „Aplikacja macOS” → **Run workflow** → wybór gałęzi; po kilkunastu minutach (pełny zestaw testów) w **Artifacts** tego uruchomienia jest `KarKa` z plikiem `KarKa.dmg`. Taki przebieg nie tworzy wydania.
 
 ## Instalacja i pierwsze uruchomienie
 
@@ -114,7 +114,7 @@ Wersję, nazwę wydania i źródło kodu pokazuje **KarKa → O aplikacji KarKa*
      - „Drukarnia: nadruk czarnego tekstu (K100)” (od 0.6.4): ustawienie nadruku z okna PDF dla drukarni; przy wyłączonym – ostrzeżenie, że czarny tekst w PDF CMYK wycina tło. W wyniku zlecenia `raport` z `drukarnia = tak`: `drukarnia.nadrukCzerni` (`true` / `false`).
      - „Drukarnia: spad w szablonie” (od 0.6.2): talie bez deklaracji `spad=` (spad jest wtedy dorabiany awaryjnie) oraz pliki `TŁO` i `OBRAZEK` przy krawędzi, których proporcje nie pasują do ramki ze spadem (np. plik o proporcjach samej karty – „proporcje karty bez spadu”, przygotuj go ze spadem; `wypełnij` przytnie obraz, `rozciągnij` go zniekształci). Od 0.6.6 także obrazki „zmieść” przy krawędzi karty, których plik ma proporcje ramki ze spadem – zostaną pomniejszone i rozjadą się z tłem; dodaj `dopasuj=wypełnij` ([opis](komendy.md#spad-w-szablonie-od-062)). Wynik zlecenia `raport` z `drukarnia = tak`: `drukarnia.spadSzablonu` (`talie`, `bez`, `pliki`, od 0.6.6 `zmiesc` – `karta`, `talia`, `strona`, `plik`, `ramka`, `ramkaZeSpadem`, `obraz`, `skala`).
      - „Drukarnia: obrazek przy krawędzi nie sięga do końca spadu” (dotyczy tylko talii bez deklaracji spadu): obrazki `dopasuj=wypełnij` / `rozciągnij` dotykające krawędzi karty, których obraz nie wystaje poza ramkę o pełny spad (3 mm) – w spadzie widać wtedy tło pod obrazkiem. Wystawanie liczone z rozmiaru obrazka (przy `wypełnij` obraz jest skalowany tak, by wypełnić ramkę, i wystaje tylko w jednej osi; `rozciągnij` nie wystaje wcale). Rozwiązanie: powiększ obrazek poza krawędź karty albo daj pod spód tło w kolorze brzegu obrazka. Obrazki z `kadr=` i obrócone nie są sprawdzane.
-9. Aplikacja pamięta ostatnie szablony (**Plik → Ostatnie projekty**) i przy starcie otwiera ostatni.
+9. Aplikacja pamięta ostatnie szablony (**Plik → Ostatnie projekty**), a przy starcie przywraca [zakładki](#zakładki) z poprzedniego uruchomienia.
 
 | Skrót | Działanie |
 |---|---|
@@ -126,6 +126,11 @@ Wersję, nazwę wydania i źródło kodu pokazuje **KarKa → O aplikacji KarKa*
 | ⇧⌘S | PDF dla drukarni (okno opcji) |
 | ⌥⌘E | Pokaż/ukryj edytor szablonu |
 | ⌘R | Odśwież karty (automatyczne odświeżanie: **Widok → Odświeżaj automatycznie**) |
+| ⌘T | Nowa (pusta) zakładka |
+| ⌘W | Zamknij zakładkę |
+| ⇧⌘W | Zamknij okno |
+| ⌃Tab / ⌃⇧Tab | Następna / poprzednia zakładka |
+| ⌘1–9 | Zakładka nr 1–9 |
 
 - **Eksport obrazków** zapisuje każdą kartę (i rewersy) jako osobny plik JPG albo PNG w folderze `Export` obok szablonu albo folderu `Szablony`.
   - Nazwy: `NazwaProjektu_NazwaTalii_NumerKarty_NumerKopii.jpg` (albo `.png`), np. `ZlotaWyprawa_Przedmioty_7_2.jpg`; rewers: `ZlotaWyprawa_Przedmioty_rewers.jpg`. Rewers zależny od karty (od 0.6.5) – plik na kartę: `ZlotaWyprawa_Przedmioty_7_rewers.jpg` ([opis](komendy.md#rewers-zależny-od-karty-od-061)).
@@ -136,6 +141,46 @@ Wersję, nazwę wydania i źródło kodu pokazuje **KarKa → O aplikacji KarKa*
 - **Katalog talii** (**Plik → Eksport → Katalog talii (JPG)…**): dla każdej talii obrazek JPG – najpierw rewers (niebieska ramka; przy rewersach zależnych od karty – każdy wariant z podpisem „Rewers 2 · ×4”, od 0.6.5), potem siatka zmniejszonych awersów z podpisami (ID, nazwa, liczba kopii) – do przeglądu całej talii, instrukcji i dla testerów. Pliki `NazwaProjektu_NazwaTalii.jpg` w `Export/katalog`; obrazek ma najwyżej ok. 2000×2000 px, więc duże talie dzielą się na kilka plików (`_1`, `_2`…). Karty z za długim tekstem mają czerwoną ramkę.
   - Katalog można też zamówić bez klikania – [zlecenie z pliku](#zlecenia-z-pliku) `katalog`.
 - **Przykłady** są tylko do odczytu. Eksport obrazków pyta wtedy o folder. Żeby zmieniać przykład, skopiuj jego folder z repozytorium i otwórz szablon kopii.
+
+## Zakładki
+
+Od 0.5.8 każdy projekt otwiera się we własnej zakładce, więc w jednym oknie może być otwartych kilka gier naraz. Każda zakładka ma własny podgląd kart, edytor, zaznaczenie i ustawienia okien druku.
+
+- **Pasek zakładek** pojawia się nad kartami, gdy otwarte są co najmniej dwie zakładki. Przy jednej zakładce go nie ma i aplikacja wygląda jak dawniej. Zakładka pokazuje:
+  - nazwę projektu (`PROJEKT =` z szablonu albo nazwę folderu), a w dymku ścieżkę szablonu;
+  - kropkę, gdy edytor ma niezapisane zmiany;
+  - kręcące się kółko w trakcie [zlecenia z pliku](#zlecenia-z-pliku);
+  - `×`, który ją zamyka.
+
+  Przycisk `+` (albo ⌘T) otwiera pustą zakładkę z ekranem powitalnym.
+- **Otwieranie projektów.** ⌘O, **Ostatnie projekty**, **Przykłady**, **Nowy projekt…** i otwieranie z Findera działają tak samo:
+  - pusta zakładka – projekt wczytuje się w niej;
+  - projekt jest już otwarty – aplikacja przełącza na jego zakładkę. Gdy wskażesz inny szablon tego samego folderu, zastępuje on szablon w tej zakładce (przy niezapisanych zmianach aplikacja najpierw pyta);
+  - w pozostałych przypadkach powstaje nowa zakładka na końcu paska.
+- **Zamykanie:** ⌘W, `×` albo środkowy przycisk myszy. Przy niezapisanych zmianach w edytorze aplikacja pyta. Po zamknięciu aktywna staje się sąsiednia zakładka: po prawej, a gdy jej nie ma, po lewej. Ostatnia zakładka zostaje pusta, ⇧⌘W zamyka okno, a ⌘Q kończy pracę.
+- **Przełączanie:** kliknięcie, ⌃Tab / ⌃⇧Tab, ⌘1–9 albo lista zakładek w menu **Okno**.
+- **Limit: 8 zakładek.** Przy próbie otwarcia dziewiątej aplikacja proponuje zamknięcie najdawniej używanej zakładki bez niezapisanych zmian. Gdy każda ma zmiany albo trwa w niej zlecenie, aplikacja odmawia.
+- **Po starcie** wracają zakładki z poprzedniego uruchomienia i aktywna jest ta sama co wtedy. Nie wracają przykłady, puste zakładki i nieprzejęte zakładki otwarte przez zlecenie (niżej).
+- Niewidoczna zakładka sprawdza pliki rzadziej, co kilka sekund zamiast co 1,5 s. Po przełączeniu na nią karty są aktualne od razu.
+
+### Rodzaje zakładek
+
+Te same nazwy są w polu `zakladka` wyniku [zlecenia](#zlecenia-z-pliku) i w [pliku stanu](#plik-stanu):
+
+| Rodzaj | Co to jest |
+|---|---|
+| `aktywna` | zakładka widoczna w oknie |
+| `w tle` | Twoja zakładka, która jest w tej chwili niewidoczna, bo aktywna jest inna |
+| `otwarta przez zlecenie` | zakładka, którą KarKa sama otworzyła dla zlecenia w projekcie bez zakładki ([Folder z projektami](#gdy-projekt-nie-jest-otwarty)) i której jeszcze nie oglądałeś |
+
+„W tle” oznacza więc Twoją zakładkę. Zakładka otwarta przez zlecenie też jest niewidoczna, ale ma osobny rodzaj, bo zachowuje się inaczej:
+
+- dopisuje się na końcu paska po prawej, a aktywna zakładka się nie zmienia. Okno nie wychodzi na wierzch i nie zabiera fokusu;
+- gdy była otwarta tylko jedna Twoja zakładka, pojawia się pasek zakładek, więc karty przesuwają się w dół o jego wysokość (ok. 34 px). Po samozamknięciu zakładki pasek znika i układ wraca;
+- **zamyka się sama** 15 min po ostatnim zleceniu, ale tylko wtedy, gdy nie jest aktywna, nie ma niezapisanych zmian i nie trwa w niej zlecenie;
+- **przejęcie:** zakładka staje się zwykłą zakładką, gdy ją pokażesz – kliknięciem, ⌘1–9, ⌃Tab albo otwarciem tego samego projektu z menu lub Findera. Wtedy już nie zamyka się sama, trafia do **Ostatnich projektów** i wraca po starcie. Nieprzejęta zakładka nie robi żadnej z tych rzeczy;
+- przy zamykaniu Twojej zakładki aktywna staje się najpierw inna Twoja zakładka, a nie zakładka otwarta przez zlecenie;
+- przy limicie 8 zlecenie zamyka nieprzejętą zakładkę z najdawniejszym zleceniem, bez pytania. Twoich zakładek zlecenie nigdy nie zamyka.
 
 ## Zlecenia z pliku
 
@@ -160,6 +205,12 @@ Otwarta aplikacja wykonuje polecenia zapisane w plikach – bez klikania. Służ
 - `pcio`: `talie` – tylko te talie (stos na talię), `id` – tylko karty o tych ID (każda w stosie swojej talii, ze wszystkimi kopiami); oba klucze razem – karty o tych ID z tych talii. Bez `talie` – talie zaznaczone ostatnio w oknie playingcards.io (domyślnie wszystkie). W wyniku: `talie` (np. `Rośliny: 12 kart`), `holdery` (liczba stosów), `karty` (liczba kart z kopiami); przy talii z różnymi rewersami – ostrzeżenie w `ostrzezenia`.
 - Brak klucza = ostatnie ustawienie z okna (Druk domowy A4 / PDF dla drukarni, Eksport obrazków, playingcards.io) albo domyślne. Zlecenie `pdf` bez `uklad` bierze układ okna druku użytego ostatnio (A4 albo drukarnia). Pola bierze z okna swojego układu (`uklad = a4` – z okna Druk domowy A4, `drukarnia` – z PDF dla drukarni); pól, których to okno nie ma (np. szkic przy drukarni), nie widać w nim, więc mają wartości domyślne. Bez zapisanych ustawień – domyślne jak do 0.6.6 (A4, spad 3 mm, strony osobno…). Zlecenie tych ustawień nie zmienia. Wyjątek: zlecenie zawsze bierze wszystkie karty (nie „zaznaczone”), chyba że `tylkoZmienione = tak`.
 - `plik` (PDF): ścieżka w folderze projektu, np. `plik = Druk/playtest 3.pdf`. Bez niej nazwa jak przy ręcznym zapisie (`Projekt – karty A4.pdf`, `Projekt – drukarnia.pdf`…) w folderze projektu.
+- `szablon` (każde polecenie poza `aktualizacja`, od 0.7.3): szablon, w którym ma się wykonać zlecenie – ścieżka względem `Szablony/` projektu, `.txt` można pominąć (`szablon = druk` → `Szablony/druk.txt`). Służy głównie [projektom bez zakładki](#gdy-projekt-nie-jest-otwarty). W otwartej zakładce:
+  - ten sam szablon co w zakładce – zlecenie wykonuje się jak zwykle;
+  - inny szablon w nieprzejętej [zakładce otwartej przez zlecenie](#rodzaje-zakładek) bez niezapisanych zmian – KarKa podmienia szablon i wykonuje zlecenie;
+  - inny szablon w Twojej zakładce (albo w zakładce ze zlecenia z niezapisanymi zmianami) – zlecenie nie jest wykonywane (`ok: false`, „projekt jest otwarty z innym szablonem…”), bo KarKa nie przełącza szablonu, na którym pracujesz.
+
+  Brak takiego pliku w `Szablony/` daje `ok: false`.
 - `uklad = pojedyncze` (alias `osobne`; każda karta na osobnej stronie, bez spadu, awers i rewers na przemian): od 0.6.7 bez pozycji w oknach, działa jak dotąd, ale wynik ma ostrzeżenie w `ostrzezenia` – układ może zniknąć w kolejnej wersji. Zamiast niego: `uklad = drukarnia`, `strony = naprzemian`, `spad = 0` (spad zadeklarowany w szablonie ma pierwszeństwo).
 - `pdf` z `uklad = a4`: w wyniku `strony` (wszystkie arkusze) i `arkusze` (`awersy`, `rewersy` – liczba arkuszy, `wspolne` – czy talie były na wspólnych arkuszach).
 - `pdf` z `uklad = drukarnia`: w wyniku dodatkowo `pliki` (1 albo 2 – awersy i rewersy), `stronyPlikow` (liczba stron w każdym pliku), `strona` ([szerokość, wysokość] strony w mm) i `spad`; od 0.6.2 także `spadZSzablonu` (`true`, gdy spad pochodzi z szablonu), `bezSpadu` (lista talii bez deklaracji spadu) i `ostrzezenia` (np. projekt bez spadu w szablonie, talia ze spadem innym niż w PDF; od 0.6.6 – plik ze spadem w ramce „zmieść”). Przykład: `uklad = drukarnia` / `spad = 3` / `plik = Export/Ogród – drukarnia.pdf`.
@@ -172,7 +223,7 @@ Otwarta aplikacja wykonuje polecenia zapisane w plikach – bez klikania. Służ
 - `raport` z `drukarnia = tak`: w `raport` dochodzą sekcje „Drukarnia: …”, a w wyniku pole `drukarnia` z pełnymi listami: `margines` (3), `odstep` (`karta`, `talia`, `strona`: awers / rewers, `odstep` w mm, `krawedz`, `element`: TEKST / IKONA, `tekst`), `czern` (`kolor`, `rodzaj`, `jasnosc`, `karty`) , `krawedz` (`talia`, `strona`, `rodzaj`: czarny / ryzykowny, `odcien`, `kolor`, `karty`), `spad` (obrazki bez pełnego spadu) i `spadSzablonu` (od 0.6.2: `talie`, `bez`, `pliki`; od 0.6.6 `zmiesc`); od 0.7.1 także `karty` (ile kart zmierzono) i `niezmierzone` (karty, których nie dało się zmierzyć – wtedy w sekcji odstępu jest błąd zamiast ✓; powtórz raport). Raport drukarni czeka na wczytanie czcionek użytych w kartach, a kilka raportów naraz (panel i zlecenie) wykonuje się po kolei. Bez klucza raport jest jak dotąd – przełącznik w panelu nie wpływa na zlecenie.
 - Gdy w edytorze szablonu są niezapisane zmiany, zlecenie używa szablonu z dysku, a potem wraca podgląd z edytora (w wyniku `niezapisaneZmiany: true`).
 - Zlecenia `pdf`, `obrazki` i `pcio` dodają punkt w historii wersji z dopiskiem „(zlecenie)”.
-- Działa tylko poza przykładami i tylko w projekcie otwartym w aplikacji.
+- Zlecenia działają poza przykładami, w projektach otwartych w zakładkach. Po włączeniu [Folderu z projektami](#gdy-projekt-nie-jest-otwarty) działają też w projektach bez zakładki. Zamkniętą KarKę można [uruchomić w tle](#gdy-karka-jest-zamknięta). Zlecenie starsze niż 10 min nie jest wykonywane ([zaległe zlecenia](#zaległe-zlecenia)).
 
 Przykład – zlecenie `.generator/zlecenia/pdf`:
 
@@ -209,10 +260,106 @@ Fragment wyniku `wynik-pdf.json`:
   "blad": null }
 ```
 
-- Wspólne pola wyniku: `ok`, `pliki` (ścieżki względem folderu projektu; w katalogu – nazwy w `folder`), `uwagi`, `zaDlugie` (karty z za długim tekstem), `niezapisaneZmiany`, `blad`, `wersjaAplikacji`, `opcje` (opcje po uzupełnieniu z okna), `ostrzezenia` (np. nieznany klucz, brak karty o podanym ID).
+- Wspólne pola wyniku: `zlecenie` (polecenie), `czas`, `szablon` (szablon, w którym wykonano zlecenie – względem folderu projektu), `ok`, `pliki` (ścieżki względem folderu projektu; w katalogu – nazwy w `folder`), `uwagi`, `zaDlugie` (karty z za długim tekstem), `niezapisaneZmiany`, `blad`, `wersjaAplikacji`, `opcje` (opcje po uzupełnieniu z okna), `ostrzezenia` (np. nieznany klucz, brak karty o podanym ID).
+- `zakladka` (od 0.7.3): [rodzaj zakładki](#rodzaje-zakładek), w której wykonano zlecenie – `aktywna`, `w tle` albo `otwarta przez zlecenie`.
+- Od 0.7.3 **każde zlecenie dostaje wynik**, także niewykonane: zaległe (`ok: false` i `przeterminowane`), przy limicie zakładek (`blad: "limit zakładek"`), bez szablonu, z obcym `szablon =`. Brak wyniku oznacza więc, że zlecenie czeka w kolejce albo KarKa go nie widzi (jest zamknięta albo projekt leży poza Folderem z projektami) – sprawdź [plik stanu](#plik-stanu).
 - Błędna wartość (np. `uklad = plakat`, nieistniejąca talia) – zlecenie nie jest wykonane: `ok: false` i opis w `blad`.
 - `katalog` zapisuje wynik także w dawnym `wynik.json` (zgodność ze starszymi wersjami).
 - `aktualizacja`: wynik (`wersjaAplikacji`, `najnowsza`, `dostepna`, `rodzaj` – `kod` albo `pelna`, `rozmiar`, `zainstalowano`, `restart`) powstaje przed ponownym uruchomieniem. Gdy edytor ma niezapisane zmiany albo `restart = nie`, nowa wersja uruchomi się przy następnym starcie (pełna – po zamknięciu aplikacji). Zlecenie nie pokazuje okien z pytaniami.
+
+### Gdy projekt nie jest otwarty
+
+Bez dodatkowych ustawień zlecenia wykonują się tylko w projektach otwartych w zakładkach. Od 0.7.3 KarKa może sama otwierać projekty, w których czeka zlecenie:
+
+1. **KarKa → Folder z projektami → Wybierz…** i wskaż folder, w którym trzymasz gry (np. `~/Projekty-kart`). Wybrany folder widać w tym samym podmenu. **Wyłącz** przywraca pracę tylko z otwartymi zakładkami. Domyślnie ustawienie jest wyłączone.
+2. Co 3 s KarKa sprawdza `.generator/zlecenia/` w podfolderach tego folderu i jeden poziom niżej, np. `Projekty-kart/Ogród/` i `Projekty-kart/Próby/Ogród/`. Pomija:
+   - foldery ukryte i zaczynające się od `_`;
+   - `Szablony`, `Export`, `Ikony`/`Icons` i `node_modules`;
+   - przykłady;
+   - dowiązania, które prowadzą poza Folder z projektami.
+3. Projekt ze zleceniem, który nie ma zakładki, otwiera się jako [zakładka otwarta przez zlecenie](#rodzaje-zakładek): w tle, bez przełączania Twojej pracy. Zlecenie wykonuje się w niej jak w zwykłej zakładce, a w wyniku jest `"zakladka": "otwarta przez zlecenie"`. Kolejka zleceń jest wspólna dla wszystkich zakładek i projektów, a zlecenia wykonują się po jednym.
+
+**Nie wskazuj folderu domowego, całego dysku ani dużego folderu z innymi plikami.** Przegląd co 3 s przechodzi przez dwa poziomy podfolderów, więc przy tysiącach folderów niepotrzebnie obciąża dysk. Najlepszy jest osobny folder z samymi projektami gier.
+
+**Szablon projektu bez zakładki** KarKa wybiera po kolei:
+1. klucz `szablon = …` w zleceniu ([opis klucza](#zlecenia-z-pliku));
+2. ostatnio używany szablon tego folderu z **Ostatnich projektów**;
+3. jedyny albo pierwszy alfabetycznie plik `.txt` w `Szablony/`, z pominięciem plików zaczynających się od `_` (np. `_szkic.txt`).
+
+Gdy nie ma żadnego, wynik ma `ok: false` i opis w `blad`.
+
+**Limit zakładek.** Przy 8 otwartych zakładkach zlecenie zamyka nieprzejętą zakładkę otwartą przez zlecenie, ta z najdawniejszym zleceniem idzie pierwsza. Gdy takiej nie ma, zlecenie nie czeka na Ciebie: wynik ma `ok: false` i `blad: "limit zakładek"`, a plik zlecenia jest usuwany. Zlecenia nigdy nie pokazują okien z pytaniami, a okno aktualizacji ani ekran powitalny nie wstrzymują kolejki.
+
+**Odświeżanie.** Zakładka otwarta przez zlecenie nie sprawdza plików co 1,5 s. Przed każdym zleceniem i tak wczytuje pliki z dysku, więc wynik jest aktualny.
+
+### Gdy KarKa jest zamknięta
+
+Zamknięta aplikacja nie wykona zleceń. Program z zewnątrz (np. opiekun uruchamiany przez launchd albo Claude w powłoce Maca) może ją uruchomić w tle:
+
+```
+open -g -a KarKa
+```
+
+- Z `-g` KarKa startuje w tle: okno nie wychodzi na wierzch i nie zabiera fokusu (sprawdzone na Macu 28.10.2026). Potem przywraca zakładki, przegląda Folder z projektami, wykonuje czekające zlecenia i odkłada zaległe.
+- Zlecenia w projektach bez zakładki wymagają włączonego [Folderu z projektami](#gdy-projekt-nie-jest-otwarty). Bez niego wykonają się tylko zlecenia w przywróconych zakładkach.
+- Nie otwieraj szablonu (`open -a KarKa …/gra.txt`). W ten sposób powstaje zwykła zakładka, aplikacja przełącza się na nią i przerywa pracę.
+- Gdy KarKa już działa, ponowne `open -g -a KarKa` niczego nie psuje, bo druga kopia aplikacji się nie uruchamia. Czy KarKa działa, mówi [plik stanu](#plik-stanu):
+
+```sh
+STAN="$HOME/Library/Application Support/KarKa/stan.json"
+PID=$(grep -o '"pid": *[0-9]*' "$STAN" 2>/dev/null | grep -o '[0-9]*$')
+# działa = "dziala": true, plik zapisany w ostatniej minucie (KarKa przepisuje go co ok. 3 s) i proces pid żyje
+if grep -q '"dziala": *true' "$STAN" 2>/dev/null && [ -n "$(find "$STAN" -mmin -1 2>/dev/null)" ] \
+   && [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+  echo "KarKa działa (pid $PID)"
+else
+  open -g -a KarKa
+fi
+```
+
+### Zaległe zlecenia
+
+Zlecenie starsze niż **10 min** (liczy się czas modyfikacji pliku) nie jest wykonywane. Reguła dotyczy wszystkich poleceń, także `aktualizacja`, i działa w zakładce aktywnej, w tle, w projekcie bez zakładki i przy starcie aplikacji. Wyjątek: `aktualizacja` działa tylko w projekcie otwartym w zakładce – w projekcie bez zakładki KarKa jej nie widzi (ani nie wykonuje, ani nie odkłada). Dzięki temu PDF zamówiony kilka dni temu nie powstanie nagle przy otwarciu projektu.
+
+- Plik zlecenia jest **przenoszony**, a nie usuwany, do `.generator/zlecenia/przeterminowane/<RRRR-MM-DD-GG-MM>-<polecenie>`. Data to czas zlecenia, a przy powtórce nazwa dostaje `-2`, `-3`… KarKa tego folderu nie czyta, więc możesz go przejrzeć i usunąć.
+- Wynik `wynik-<polecenie>.json` ma `ok: false`, opis w `blad` (np. „zaległe zlecenie z 2026-10-27 14:05 (starsze niż 10 min) – nie wykonane, odłożone do …”) i ścieżkę odłożonego pliku w `przeterminowane`.
+- W otwartej zakładce projektu komunikat pojawia się też w pasku stanu.
+- Żeby mimo wszystko wykonać takie zlecenie, utwórz plik zlecenia od nowa.
+
+### Plik stanu
+
+Od 0.7.3 KarKa zapisuje plik `~/Library/Application Support/KarKa/stan.json`. Programy z zewnątrz (i Claude) mogą z niego odczytać, **dlaczego** nie ma jeszcze wyniku zlecenia, zamiast zgadywać.
+
+```json
+{ "dziala": true, "wersja": "0.7.3", "pid": 4321, "czas": "2026-10-28T09:15:02.120Z",
+  "folderProjektow": "/Users/ja/Projekty-kart",
+  "zakladki": [
+    { "nazwa": "Ogród", "folder": "/Users/ja/Projekty-kart/Ogród", "szablon": "/Users/ja/Projekty-kart/Ogród/Szablony/gra.txt",
+      "rodzaj": "aktywna", "zmiany": false, "zlecenie": false },
+    { "nazwa": "Wyprawa", "folder": "/Users/ja/Projekty-kart/Wyprawa", "szablon": "/Users/ja/Projekty-kart/Wyprawa/Szablony/wyprawa.txt",
+      "rodzaj": "otwarta przez zlecenie", "zmiany": false, "zlecenie": true } ],
+  "kolejka": 2,
+  "ostatnieZlecenie": { "polecenie": "pdf", "folder": "/Users/ja/Projekty-kart/Wyprawa", "czas": "2026-10-28T09:14:40.002Z", "ok": true, "blad": null } }
+```
+
+| Pole | Znaczenie |
+|---|---|
+| `dziala` | `true` w trakcie pracy, `false` po normalnym zamknięciu aplikacji |
+| `wersja`, `pid` | wersja aplikacji i numer procesu |
+| `czas` | chwila ostatniego zapisu pliku – działająca KarKa odświeża go co kilka sekund |
+| `folderProjektow` | [Folder z projektami](#gdy-projekt-nie-jest-otwarty) albo `null`, gdy jest wyłączony |
+| `zakladki` | otwarte zakładki z projektem (bez pustych): nazwa, folder, szablon, [rodzaj](#rodzaje-zakładek), `zmiany` (niezapisany edytor), `zlecenie` (trwa zlecenie) |
+| `kolejka` | ile zleceń czekało na początku bieżącego przeglądu, razem z zaległymi, które za chwilę zostaną odłożone (0, gdy przegląd się skończył) |
+| `ostatnieZlecenie` | ostatnie zakończone zlecenie: polecenie, folder projektu, czas, `ok`, `blad`; także niewykonane (np. zaległe) |
+
+- KarKa zapisuje plik przy każdym przeglądzie zleceń (co ok. 3 s) i po każdej zmianie, ale nie częściej niż co 2 s. Zapis idzie przez plik tymczasowy, więc czytający nigdy nie trafi na połowę pliku.
+- **Po awarii albo zabiciu procesu `dziala` zostaje `true`.** Sprawdzaj więc też, czy proces `pid` żyje (`kill -0 <pid>`, przykład [wyżej](#gdy-karka-jest-zamknięta)), i czy `czas` jest świeży: `dziala: true` z `czas` starszym niż minuta oznacza, że KarKa nie działa (a numer `pid` mógł już dostać inny proces).
+- `kolejka` jest liczona raz, na początku przeglądu. W trakcie długiego zlecenia (np. PDF w CMYK) nie maleje.
+
+**Kolejność sprawdzania, gdy nie ma wyniku:**
+1. `dziala: false`, martwy `pid` albo `czas` starszy niż minuta – KarKa nie działa: `open -g -a KarKa`. Brak pliku stanu oznacza, że KarKa nie była uruchomiona w wersji 0.7.3 lub nowszej. Starsze wersje nie znają Folderu z projektami, zaległych zleceń ani pliku stanu – zlecenia wykonują tylko w otwartych zakładkach (`wersjaAplikacji` w wyniku dowolnego zlecenia).
+2. Projekt nie ma zakładki, a `folderProjektow` jest `null` albo projekt leży poza nim – zlecenie nie zostanie zauważone.
+3. Projekt ma zakładkę z `"zlecenie": true` albo `kolejka` > 0 – zlecenie czeka albo trwa. Czekaj dalej: PDF w CMYK może trwać kilka minut.
 
 ## Dla deweloperów
 
@@ -231,14 +378,16 @@ npm run dist       # budowanie .app (na macOS)
 - Aktualizacje: `app/start.js` (rozrusznik – wybiera kod z paczki albo nakładkę), `app/nakladka.js`, `app/aktualizacje.js`; pliki do wydania robi `app/scripts/paczka-kodu.js` (`kod.zip`, `aktualizacja.json`), a workflow dokłada `KarKa.zip` (`ditto` z `.app`). Test: `node app/scripts/test-aktualizacje.js [--electron]`. `--bez-nakladki` uruchamia kod z paczki.
 - `app/scripts/testuj.sh [przykład… | szablon.txt]`: na Linuksie z Xvfb przebudowuje zasoby i uruchamia tryb testowy na kopiach przykładów (domyślnie wszystkich, równolegle); wypisuje wiersz na projekt i kończy z kodem 0 albo 1.
 - `.github/workflows/aplikacja-mac.yml`: budowanie i testy na macOS. Po każdej zmianie w `main` tworzy wydanie `v<wersja>` z DMG (wersja z `app/package.json`). Testy przykładów (od 0.6.3) zależą od zdarzenia:
-  - **pull request** – pełny `--test-edytor` na `07-gildie` (w dwóch równoległych procesach), na `05-zaklecia` blok `raportStart` (od 0.7.1), na `08-wieze` blok `spadSzablonu`, pozostałe przykłady `--test-pdf` (renderowanie, PDF, eksport); uruchomienia przez `app/scripts/testy-ci.js pr|pelny --bin <aplikacja> --tmp <katalog>` (do 3 naraz; lokalnie np. `--bin "xvfb-run -a ./node_modules/.bin/electron --no-sandbox ."`);
+  - **pull request** – pełny `--test-edytor` na `07-gildie` (w trzech równoległych procesach – grupy z `app/scripts/grupy-testow.js`), na `05-zaklecia` blok `raportStart` (od 0.7.1), na `08-wieze` bloki `spadSzablonu` i `profileDrukarni`, pozostałe przykłady `--test-pdf` (renderowanie, PDF, eksport); uruchomienia przez `app/scripts/testy-ci.js pr|pelny --bin <aplikacja> --tmp <katalog>` (do 4 naraz; lokalnie np. `--bin "xvfb-run -a ./node_modules/.bin/electron --no-sandbox ."`). **Bez DMG** – w Artifacts tylko `wyniki-testow`;
   - **push do `main`** (po scaleniu przetestowanego PR-a) – bez testów przykładów: start, nowy projekt, nakładka, DMG i wydanie;
-  - **pełny zestaw** (`--test-edytor` na wszystkich przykładach) – ręcznie (Actions → „Aplikacja macOS” → Run workflow), przy tagu `v*` i wydaniu opublikowanym na GitHubie.
+  - **pełny zestaw** (`--test-edytor` na wszystkich przykładach) – ręcznie (Actions → „Aplikacja macOS” → Run workflow, dowolna gałąź), przy tagu `v*` i wydaniu opublikowanym na GitHubie.
+
+  DMG (`KarKa.dmg`, sprawdzenie DMG, pliki aktualizacji i artefakt `KarKa`) powstaje tylko w przebiegach innych niż pull request (od #101).
 
   Czasy przykładów są w podsumowaniu przebiegu (Summary); ostrzeżenie, gdy przykład trwa ponad 3 min albo przebieg PR ponad 10 min.
 
 ### Wydania
 
-Każda zmiana w `main` podnosi wersję w `app/package.json` (0.4.3 → 0.4.4 …). Po scaleniu workflow sam tworzy wydanie `v<wersja>` z plikiem DMG, opisem (lista scalonych PR-ów) i oznaczeniem „najnowsze”, więc link do pobrania w README wskazuje ostatnią wersję. Gdy wersja nie została podniesiona, wydanie nie powstaje (ostrzeżenie w Actions).
+Każda zmiana aplikacji w `main` podnosi wersję w `app/package.json` (0.4.3 → 0.4.4 …). Po scaleniu workflow sam tworzy wydanie `v<wersja>` z plikiem DMG, opisem (lista scalonych PR-ów) i oznaczeniem „najnowsze”, więc link do pobrania w README wskazuje ostatnią wersję. Gdy wersja nie została podniesiona, wydanie nie powstaje (ostrzeżenie „Wydanie … już istnieje” w Actions). Tak jest celowo przy zmianach bez plików aplikacji (od #101) – nie podbijają wersji, bo wydanie i aktualizacja bez zmian dla użytkownika nie mają sensu. Workflow uruchamia się tylko przy zmianach w `app/`, `przyklady/` albo w samym workflow: zmiana skryptów testów albo CI daje przebieg z tym ostrzeżeniem, a sama dokumentacja (`docs/`, README, `CLAUDE.md`) nie uruchamia go wcale – ani w pull requeście, ani na `main`.
 
 Ręcznie opublikowane wydanie albo wypchnięty tag `v*` też dostaną DMG – workflow dołączy plik po kilku minutach.

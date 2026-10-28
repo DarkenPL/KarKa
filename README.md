@@ -7,6 +7,7 @@
 - **zapisać PDF do druku**: A4 ze znacznikami cięcia (karty 1:1, np. 63×88 mm) i z rewersami do druku dwustronnego, albo każda karta na osobnej stronie;
 - **wyeksportować obrazki** każdej karty (JPG albo PNG, 150 lub 300 dpi) do folderu `Export` projektu;
 - **przygotować pokój [playingcards.io](https://playingcards.io)**: każda talia jako osobny stos, gotowy do dalszego ustawienia.
+- **zlecać PDF, obrazki, raport i inne bez klikania** – plikiem w folderze projektu ([zlecenia z pliku](docs/aplikacja.md#zlecenia-z-pliku)), także w projektach bez otwartej zakładki i przy aplikacji uruchomionej w tle; przydaje się np. Claude albo własnym skryptom.
 
 ![Przykładowe karty](docs/img/przyklady.png)
 
@@ -74,7 +75,8 @@ Są wbudowane w aplikację (menu **Plik → Przykłady**), a ich pliki leżą w 
 
 ## Dokumentacja
 
-- [Aplikacja: instalacja, skróty, wydania](docs/aplikacja.md)
+- [Aplikacja: instalacja, skróty, zakładki, wydania](docs/aplikacja.md)
+- [Zlecenia z pliku](docs/aplikacja.md#zlecenia-z-pliku) – PDF, obrazki, raport bez klikania; [Folder z projektami](docs/aplikacja.md#gdy-projekt-nie-jest-otwarty), [plik stanu](docs/aplikacja.md#plik-stanu)
 - [Komendy szablonów](docs/komendy.md) – pełna lista
 - [Nowa talia krok po kroku](docs/nowa-talia.md)
 - [Eksport do playingcards.io](docs/playingcards.md)
