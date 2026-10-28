@@ -3726,12 +3726,19 @@ if (!app.requestSingleInstanceLock()) app.quit();
 // Okno pokazuje się, gdy użytkownik przełączy się na KarKę (Dock, ⌘Tab, open bez -g); wtedy też sprawdzenie aktualizacji.
 // Nie przy „activate” ani „second-instance” – przychodzą też z ponownego `open -g` i pokazanie okna zabrałoby fokus.
 let startWTle = process.argv.includes('--w-tle');
+let sprawdzanieZaplanowane = false;                      // ciche sprawdzenie aktualizacji raz po pokazaniu okna
+function zaplanujSprawdzenie() {
+  if (sprawdzanieZaplanowane) return;
+  sprawdzanieZaplanowane = true;
+  setTimeout(() => sprawdzAktualizacje({ cicho: true }), 4000);
+}
 function pokazUkryteOkno() {
-  if (!startWTle || !okno || okno.isDestroyed()) return;
-  startWTle = false;
+  if (!startWTle) return;
+  startWTle = false;                                     // aktywacja przed utworzeniem okna – pokaże je pokazOknoPoWczytaniu
+  if (!okno || okno.isDestroyed()) return;
   okno.show(); ulozWidok();
   if (aktywny && aktywny.wc) aktywny.wc.focus();
-  setTimeout(() => sprawdzAktualizacje({ cicho: true }), 4000);
+  zaplanujSprawdzenie();
 }
 app.on('did-become-active', pokazUkryteOkno);
 app.on('second-instance', () => { if (okno && !startWTle) { if (okno.isMinimized()) okno.restore(); okno.focus(); } });
@@ -3781,7 +3788,7 @@ app.whenReady().then(async () => {
     return;
   }
   await oknoZZakladkami(doOtwarcia, true);
-  if (!startWTle) setTimeout(() => sprawdzAktualizacje({ cicho: true }), 4000);
+  if (!startWTle) zaplanujSprawdzenie();
 });
 
 app.on('activate', async () => {

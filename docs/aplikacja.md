@@ -29,7 +29,7 @@ Od wersji 0.5.0 („Gołąb pocztowy”) aplikacja aktualizuje się sama – bez
 
 **Przejście z Generatora kart (0.4.x):** zainstaluj KarKę z DMG jak przy pierwszej instalacji. Przy pierwszym uruchomieniu KarKa przejmie ostatnie projekty i ustawienia okien druku i eksportu. Starą aplikację **Generator kart** usuń potem z Programów (przenieś do Kosza); jej folder danych `~/Library/Application Support/Generator kart` też można skasować.
 
-- **Kiedy sprawdza:** przy każdym uruchomieniu (po kilku sekundach; bez komunikatu, gdy nie ma nowej wersji albo internetu), z menu **KarKa → Sprawdź aktualizacje…** i [zleceniem z pliku](#zlecenia-z-pliku) `aktualizacja`.
+- **Kiedy sprawdza:** przy każdym uruchomieniu (po kilku sekundach; po [starcie w tle](#gdy-karka-jest-zamknięta) – dopiero po pokazaniu okna; bez komunikatu, gdy nie ma nowej wersji albo internetu), z menu **KarKa → Sprawdź aktualizacje…** i [zleceniem z pliku](#zlecenia-z-pliku) `aktualizacja`.
 - Gdy jest nowa wersja, okno pokazuje, co się zmieniło: **Zainstaluj**, **Później** albo **Pomiń tę wersję** (przy starcie aplikacja nie zapyta o nią ponownie; z menu – tak).
 - **Mała aktualizacja** (prawie zawsze, ok. 1 MB): pobiera się sam kod Generatora (silnik kart, okna, przykłady) do `~/Library/Application Support/KarKa/kod`, a aplikacja uruchamia się ponownie. Aplikacja w Programach się nie zmienia, więc macOS o nic nie pyta.
 - **Pełna aktualizacja** (ok. 120 MB): gdy nowa wersja ma nowszy Electron (silnik okna), pobiera się cała aplikacja. Po pobraniu aplikacja zamyka się, podmienia w Programach i uruchamia od nowa. macOS może wtedy raz zapytać o dostęp do folderów z projektami.
@@ -302,7 +302,7 @@ Zamknięta aplikacja nie wykona zleceń. Program z zewnątrz (np. opiekun urucha
 open -g -a KarKa --args --w-tle
 ```
 
-- Z `--w-tle` (od 0.7.8) KarKa startuje bez okna: w Docku jest tylko ikona, a okno nie wychodzi na wierzch i nie zabiera fokusu. KarKa przywraca zakładki, przegląda Folder z projektami, wykonuje czekające zlecenia i odkłada zaległe. Okno pokaże się, gdy przełączysz się na KarKę (kliknięcie ikony w Docku, ⌘Tab). Dopiero wtedy KarKa sprawdza też aktualizacje.
+- Z `--w-tle` (od 0.7.8) KarKa startuje bez okna: w Docku jest tylko ikona, a okno nie wychodzi na wierzch i nie zabiera fokusu. KarKa przywraca zakładki, przegląda Folder z projektami, wykonuje czekające zlecenia i odkłada zaległe. Okno pokaże się, gdy przełączysz się na KarKę (kliknięcie ikony w Docku, ⌘Tab). Dopiero wtedy KarKa sprawdza też aktualizacje – dopóki okno jest ukryte, o nowej wersji się nie dowiesz (zlecenie `aktualizacja` – [Aktualizacje](#aktualizacje) – działa także bez okna).
 - Samo `open -g -a KarKa` (bez `--w-tle`) pokazuje okno na wierzchu i zabiera fokus. Starsze wersje (do 0.7.7) nie znają `--w-tle` – uruchamiają się wtedy jak bez niego.
 - Zlecenia w projektach bez zakładki wymagają włączonego [Folderu z projektami](#gdy-projekt-nie-jest-otwarty). Bez niego wykonają się tylko zlecenia w przywróconych zakładkach.
 - Nie otwieraj szablonu (`open -a KarKa …/gra.txt`). W ten sposób powstaje zwykła zakładka, aplikacja przełącza się na nią i przerywa pracę.
