@@ -55,7 +55,7 @@ Plik JSON w UTF-8. Przykład – `longpack.json`:
 | `wzorNazwy` | tekst | wzór nazwy pliku bez `.pdf`, musi mieć `{projekt}` | tak |
 | `strona` | obiekt | wartości `{strona}`: `awersy`, `rewersy`, `razem` (jeden plik) | tak |
 | `komponent`, `jezyk` | tekst | wartości `{komponent}` i `{jezyk}` | tak |
-| `minTekstPt` | obiekt albo `null` | minimalny rozmiar tekstu, np. `{ "czarny": 6, "kontra": 8 }` | nie (opis) |
+| `minTekstPt` | obiekt albo `null` | minimalny rozmiar tekstu, np. `{ "czarny": 6, "kontra": 8 }` (`czarny` – tekst `#000`, `kontra` – każdy inny kolor) | Raport drukarni (od 0.7.6; `null` – 6 i 8 pt) |
 | `uwagi` | lista tekstów | wymagania drukarni pokazywane w oknie | tak (tylko pokazuje) |
 
 Nieznane pola są pomijane (zgodność w przód). Zła wartość znanego pola: w `wlasne.json` – KarKa bierze domyślne Własne ustawienia; w profilu wbudowanym (błąd paczki) – profile wbudowane nie pokazują się w oknie, a zlecenie z nimi kończy się `ok: false`.

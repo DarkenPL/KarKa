@@ -2101,8 +2101,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     if (!ow.ok) bledy.push('okno: ' + JSON.stringify(ow));
     // e) raport drukarni: sekcje tylko z drukarnia: true.
     const sekcje = await js(`(async () => ({ z: (await raportJson({ drukarnia: true })).map((x) => x.tytul), bez: (await raportJson({})).map((x) => x.tytul) }))()`);
-    drukarniaPdf.raport = { z: sekcje.z.filter((t) => t.startsWith('Drukarnia:')).length, pierwsze: sekcje.z.slice(0, 6).every((t) => t.startsWith('Drukarnia:')), bez: sekcje.bez.filter((t) => t.startsWith('Drukarnia:')).length };
-    drukarniaPdf.raport.ok = drukarniaPdf.raport.z === 6 && drukarniaPdf.raport.pierwsze && drukarniaPdf.raport.bez === 0;
+    drukarniaPdf.raport = { z: sekcje.z.filter((t) => t.startsWith('Drukarnia:')).length, pierwsze: sekcje.z.slice(0, 8).every((t) => t.startsWith('Drukarnia:')), bez: sekcje.bez.filter((t) => t.startsWith('Drukarnia:')).length };
+    drukarniaPdf.raport.ok = drukarniaPdf.raport.z === 8 && drukarniaPdf.raport.pierwsze && drukarniaPdf.raport.bez === 0;
     if (!drukarniaPdf.raport.ok) bledy.push('raport: ' + JSON.stringify(drukarniaPdf.raport));
     // Zmiana szablonu (tylko testowa kopia): tekst 1 mm od krawędzi, kolor „prawie czerń” – w pierwszej talii, przed jej [REWERS].
     if (!jestPrzykladem(szablon)) {
@@ -2751,7 +2751,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const r1 = await zlec('raport', 'drukarnia = tak\n');
       dr.raportTak = r1 && { ok: r1.ok, sekcje: (r1.raport || []).map((x) => x.tytul).filter((t) => t.startsWith('Drukarnia:')).length,
         pola: r1.drukarnia ? ['odstep', 'czern', 'krawedz', 'spad'].map((k) => Array.isArray(r1.drukarnia[k])) : null };
-      dr.raportTak.ok = !!(r1 && r1.ok && dr.raportTak.sekcje === 6 && dr.raportTak.pola && dr.raportTak.pola.every(Boolean));
+      dr.raportTak.ok = !!(r1 && r1.ok && dr.raportTak.sekcje === 8 && dr.raportTak.pola && dr.raportTak.pola.every(Boolean));
       const r2 = await zlec('raport');
       dr.raportBez = r2 && { ok: r2.ok, sekcje: (r2.raport || []).map((x) => x.tytul).filter((t) => t.startsWith('Drukarnia:')).length, wynikDrukarnia: 'drukarnia' in r2 };
       dr.raportBez.ok = !!(r2 && r2.ok && dr.raportBez.sekcje === 0 && !dr.raportBez.wynikDrukarnia);
@@ -3638,6 +3638,68 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     rewersyDodatki.menu = { jest: !!pozycja, wlacz: menuWl, wylacz: menuWyl };
     rewersyDodatki.ok = rewersyDodatki.ok && !!pozycja && menuWl && menuWyl;
   }
+  // Raport drukarni – rozmiar tekstu, obwódki przy cięciu, dpi ikon i zaokrąglenie dpi (#110; --test-edytor, każdy projekt):
+  // karta testowa (renderCard poza podglądem, pliki PNG z canvas dopisane na czas testu do files) o znanych wymiarach.
+  let raportProgi = null;
+  if (testBloku('raportProgi')) {
+    raportProgi = await wc.executeJavaScript(`(async () => {
+      const b = [], w = {}, dodane = ['Ikony/proba-64.png', 'Grafika/proba-815.png'];
+      const d = document.createElement('div');
+      try {
+        const png = async (x, y) => { const c = document.createElement('canvas'); c.width = x; c.height = y; const g = c.getContext('2d'); g.fillStyle = '#c33'; g.fillRect(0, 0, x, y);
+          return new File([await new Promise((r) => c.toBlob(r, 'image/png'))], 'p.png', { type: 'image/png', lastModified: 1 }); };
+        files.set(norm(dodane[0]), await png(64, 64)); files.set(norm(dodane[1]), await png(815, 600));
+        const icons = { proba: { url: fileUrl(dodane[0]), plik: dodane[0] } };
+        const dlugi = 'Bardzo długi opis karty, który nie mieści się w małym polu i musi zostać mocno zmniejszony przez dopasowanie. '.repeat(3);
+        const t = parseTemplate('[TALIA Próba]\\nKARTA = 63, 88, obwódka=0.5\\nTŁO = #f4ecd8\\n'
+          + 'TEKST = 10, 10, 43, 5, "' + dlugi + '", rozmiar=8\\n'                   // dopasowanie do min 0,6 → 4,8 pt, kolor domyślny – próg 8
+          + 'TEKST = 10, 20, 43, 10, "Duży <small>drobny</small>", rozmiar=9, kolor=#000\\n'   // <small> 5,4 pt < 6
+          + 'TEKST = 10, 32, 43, 8, "Kolorowy", rozmiar=7, kolor=#cc0000\\n'        // 7 < 8
+          + 'TEKST = 10, 42, 43, 8, "Czarny siedem", rozmiar=7, kolor=#000\\n'      // 7 ≥ 6 – bez uwagi
+          + 'PROSTOKĄT = 1, 1, 61, 86, obwódka=0.5\\n'                              // 1 mm – BŁĄD
+          + 'PROSTOKĄT = 4, 4, 55, 80, obwódka=0.3\\n'                              // 4 mm – UWAGA
+          + 'PROSTOKĄT = 20, 52, 20, 6, obwódka=0.3\\n'                             // daleko – bez uwagi
+          + 'PROSTOKĄT = -3, 60, 69, 10, kolor=#336699, obwódka=0.3\\n'             // boki w spadzie, góra/dół przechodzą przez cięcie – bez uwagi
+          + 'ELIPSA = 50, 30, 12, 12, obwódka=0.3\\n'                               // prawa 1 mm – BŁĄD
+          + 'LINIA = 10, 85, 50, 85\\n'                                             // dolna 2,85 mm – BŁĄD
+          + 'LINIA = 30, -3, 30, 15\\n'                                             // przez linię cięcia – bez uwagi
+          + 'IKONA = 20, 70, 15, 10, {proba}\\n'                                  // 64 px na 10 mm ≈ 162,5 dpi
+          + 'OBRAZEK = -3, 72, 69, 60, "' + dodane[1] + '", dopasuj=zmieść\\n', 'test.txt').talie[0];   // 815 px na 69 mm = 299,98 dpi – OK
+        const r = renderCard(t, t.awers, {}, { warn: new Set(), icons, label: 'Próba 1', plik: 'test.txt', kolumny: true, wbudowane: {} });
+        d.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden';
+        d.innerHTML = '<div class="karta" data-talia="Próba" title="Próba 1" style="' + esc(r.style) + '">' + r.html + '</div>';
+        document.body.appendChild(d);
+        const k = d.firstElementChild;
+        await waitForImages(d); fitAll(d); await ukladDoPomiaru([k]);
+        const maly = malyTekstKarty(k, { czarny: 6, kontra: 8 });
+        w.maly = maly.map((x) => x.tekst.slice(0, 12) + ':' + x.rozmiar + '/' + x.prog);
+        const dl = maly.find((x) => /^Bardzo/.test(x.tekst)), sm = maly.find((x) => x.tekst === 'drobny'), kol = maly.find((x) => x.tekst === 'Kolorowy');
+        if (!dl || dl.rozmiar > 5 || dl.prog !== 8 || !sm || Math.abs(sm.rozmiar - 5.4) > 0.05 || sm.prog !== 6 || !kol || kol.rozmiar !== 7 || kol.prog !== 8
+          || maly.some((x) => /^(Duży|Czarny)/.test(x.tekst))) b.push('mały tekst ' + JSON.stringify(w.maly));
+        const obw = obwodkiKarty(k);
+        w.obwodki = obw.map((x) => x.element + ':' + x.poziom + ':' + x.odstep + ':' + x.krawedz);
+        const jest = (re, poziom, od) => obw.some((x) => re.test(x.opis) && x.poziom === poziom && (od === undefined || Math.abs(x.odstep - od) < 0.11));
+        if (!jest(/^obwódka karty/, 'BŁĄD', 0) || !jest(/^PROSTOKĄT 1, 1,/, 'BŁĄD', 1) || !jest(/^PROSTOKĄT 4, 4,/, 'UWAGA', 4) || !jest(/^ELIPSA 50, 30/, 'BŁĄD', 1)
+          || !jest(/^LINIA 10, 85/, 'BŁĄD', 2.9) || obw.length !== 5) b.push('obwódki ' + JSON.stringify(w.obwodki));
+        const dpi = await obrazkiNiskiejRozdzielczosci(300, [k]);
+        w.dpi = dpi.map((x) => x.replace(/<[^>]*>/g, ''));
+        if (w.dpi.length !== 1 || !/^Ikony\\/proba-64\\.png \\(ikona\\) – 162,5 dpi/.test(w.dpi[0])) b.push('dpi ' + JSON.stringify(w.dpi));
+        // Sekcje raportu drukarni z wynikiem testowym (bez podglądu projektu).
+        const oryg = window.raportDrukarni;
+        window.raportDrukarni = async () => ({ margines: 3, karty: 1, niezmierzone: [], odstep: [], czern: [], krawedz: [], spad: [], spadSzablonu: { talie: {}, bez: [], pliki: [], zmiesc: [] },
+          progiTekstu: { czarny: 6, kontra: 8, profil: null }, malyTekst: [{ karta: 'Próba 1', talia: 'Próba', strona: 'awers', rozmiar: maly[0].rozmiar, prog: maly[0].prog, fragmenty: maly }],
+          obwodki: obw.map((x) => ({ talia: 'Próba', strona: 'awers', ...x, karty: ['Próba 1'] })) });
+        try {
+          const sek = await raportJson({ drukarnia: true });
+          const s1 = sek.find((x) => /^Drukarnia: tekst mniejszy niż 6 pt/.test(x.tytul)), s2 = sek.find((x) => x.tytul === 'Drukarnia: obwódki i ramki przy linii cięcia');
+          w.sekcje = { maly: s1 && s1.pozycje, obwodki: s2 && s2.pozycje };
+          if (!s1 || s1.ok || !/^\\d,\\d pt – Próba 1: „Bardzo/.test(s1.pozycje[0] || '') || !s2 || s2.ok || s2.pozycje.length !== 5 || !/^BŁĄD – Próba – awersy \\(1\\): obwódka karty/.test(s2.pozycje[0])) b.push('sekcje ' + JSON.stringify(w.sekcje));
+        } finally { window.raportDrukarni = oryg; }
+      } catch (e) { b.push('wyjątek: ' + ((e && e.stack) || e)); }
+      finally { d.remove(); dodane.forEach((p) => files.delete(norm(p))); }
+      return { ok: !b.length, bledy: b, ...w };
+    })()`);
+  }
   CZASY_TESTU.push([null, Date.now()]);                  // koniec ostatniego bloku
   await wc.executeJavaScript('buildPrint()');
   await pdfDoPliku(wc, wynik);
@@ -3649,8 +3711,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
     && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!filtrWTrakcie || filtrWTrakcie.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok);
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
