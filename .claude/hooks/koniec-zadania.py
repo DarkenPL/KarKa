@@ -58,7 +58,7 @@ if not braki:
 if zdarzenie == "Stop":
     open(znacznik, "w").close()
 tekst = (f"Hook koniec-zadania: gałąź {galaz} ma zmiany ({len(zmienione)} plików), a " + " i ".join(braki) +
-         ". Zasada z CLAUDE.md: każdy PR podnosi wersję (app/package.json + package-lock.json) i ma wpis w docs/historia.md – "
+         ". Zasada z CLAUDE.md: PR ze zmianą w app/ podnosi wersję (app/package.json + package-lock.json), a wpis w docs/historia.md ma każdy PR – "
          "uzupełnij to przed PR-em (albo powiedz właścicielowi, czemu nie).")
 wynik = {"systemMessage": tekst}
 if zdarzenie != "Stop":
