@@ -205,10 +205,10 @@ Otwarta aplikacja wykonuje polecenia zapisane w plikach – bez klikania. Służ
 - `pcio`: `talie` – tylko te talie (stos na talię), `id` – tylko karty o tych ID (każda w stosie swojej talii, ze wszystkimi kopiami); oba klucze razem – karty o tych ID z tych talii. Bez `talie` – talie zaznaczone ostatnio w oknie playingcards.io (domyślnie wszystkie). W wyniku: `talie` (np. `Rośliny: 12 kart`), `holdery` (liczba stosów), `karty` (liczba kart z kopiami); przy talii z różnymi rewersami – ostrzeżenie w `ostrzezenia`.
 - Brak klucza = ostatnie ustawienie z okna (Druk domowy A4 / PDF dla drukarni, Eksport obrazków, playingcards.io) albo domyślne. Zlecenie `pdf` bez `uklad` bierze układ okna druku użytego ostatnio (A4 albo drukarnia). Pola bierze z okna swojego układu (`uklad = a4` – z okna Druk domowy A4, `drukarnia` – z PDF dla drukarni); pól, których to okno nie ma (np. szkic przy drukarni), nie widać w nim, więc mają wartości domyślne. Bez zapisanych ustawień – domyślne jak do 0.6.6 (A4, spad 3 mm, strony osobno…). Zlecenie tych ustawień nie zmienia. Wyjątek: zlecenie zawsze bierze wszystkie karty (nie „zaznaczone”), chyba że `tylkoZmienione = tak`.
 - `plik` (PDF): ścieżka w folderze projektu, np. `plik = Druk/playtest 3.pdf`. Bez niej nazwa jak przy ręcznym zapisie (`Projekt – karty A4.pdf`, `Projekt – drukarnia.pdf`…) w folderze projektu.
-- `szablon` (każde polecenie, od 0.7.3): szablon, w którym ma się wykonać zlecenie – ścieżka względem `Szablony/` projektu, `.txt` można pominąć (`szablon = druk` → `Szablony/druk.txt`). Służy głównie [projektom bez zakładki](#gdy-projekt-nie-jest-otwarty). W otwartej zakładce:
+- `szablon` (każde polecenie poza `aktualizacja`, od 0.7.3): szablon, w którym ma się wykonać zlecenie – ścieżka względem `Szablony/` projektu, `.txt` można pominąć (`szablon = druk` → `Szablony/druk.txt`). Służy głównie [projektom bez zakładki](#gdy-projekt-nie-jest-otwarty). W otwartej zakładce:
   - ten sam szablon co w zakładce – zlecenie wykonuje się jak zwykle;
-  - inny szablon w nieprzejętej [zakładce otwartej przez zlecenie](#rodzaje-zakładek) – KarKa podmienia szablon i wykonuje zlecenie;
-  - inny szablon w Twojej zakładce – zlecenie nie jest wykonywane (`ok: false`), bo KarKa nie przełącza szablonu, na którym pracujesz.
+  - inny szablon w nieprzejętej [zakładce otwartej przez zlecenie](#rodzaje-zakładek) bez niezapisanych zmian – KarKa podmienia szablon i wykonuje zlecenie;
+  - inny szablon w Twojej zakładce (albo w zakładce ze zlecenia z niezapisanymi zmianami) – zlecenie nie jest wykonywane (`ok: false`, „projekt jest otwarty z innym szablonem…”), bo KarKa nie przełącza szablonu, na którym pracujesz.
 
   Brak takiego pliku w `Szablony/` daje `ok: false`.
 - `uklad = pojedyncze` (alias `osobne`; każda karta na osobnej stronie, bez spadu, awers i rewers na przemian): od 0.6.7 bez pozycji w oknach, działa jak dotąd, ale wynik ma ostrzeżenie w `ostrzezenia` – układ może zniknąć w kolejnej wersji. Zamiast niego: `uklad = drukarnia`, `strony = naprzemian`, `spad = 0` (spad zadeklarowany w szablonie ma pierwszeństwo).
@@ -317,7 +317,7 @@ fi
 
 ### Zaległe zlecenia
 
-Zlecenie starsze niż **10 min** (liczy się czas modyfikacji pliku) nie jest wykonywane. Reguła dotyczy wszystkich poleceń, także `aktualizacja`, i działa wszędzie: w zakładce aktywnej, w tle, w projekcie bez zakładki i przy starcie aplikacji. Dzięki temu PDF zamówiony kilka dni temu nie powstanie nagle przy otwarciu projektu.
+Zlecenie starsze niż **10 min** (liczy się czas modyfikacji pliku) nie jest wykonywane. Reguła dotyczy wszystkich poleceń, także `aktualizacja`, i działa w zakładce aktywnej, w tle, w projekcie bez zakładki i przy starcie aplikacji. Wyjątek: `aktualizacja` działa tylko w projekcie otwartym w zakładce – w projekcie bez zakładki KarKa jej nie widzi (ani nie wykonuje, ani nie odkłada). Dzięki temu PDF zamówiony kilka dni temu nie powstanie nagle przy otwarciu projektu.
 
 - Plik zlecenia jest **przenoszony**, a nie usuwany, do `.generator/zlecenia/przeterminowane/<RRRR-MM-DD-GG-MM>-<polecenie>`. Data to czas zlecenia, a przy powtórce nazwa dostaje `-2`, `-3`… KarKa tego folderu nie czyta, więc możesz go przejrzeć i usunąć.
 - Wynik `wynik-<polecenie>.json` ma `ok: false`, opis w `blad` (np. „zaległe zlecenie z 2026-10-27 14:05 (starsze niż 10 min) – nie wykonane, odłożone do …”) i ścieżkę odłożonego pliku w `przeterminowane`.
@@ -344,18 +344,18 @@ Od 0.7.3 KarKa zapisuje plik `~/Library/Application Support/KarKa/stan.json`. Pr
 |---|---|
 | `dziala` | `true` w trakcie pracy, `false` po normalnym zamknięciu aplikacji |
 | `wersja`, `pid` | wersja aplikacji i numer procesu |
-| `czas` | chwila ostatniego zapisu pliku |
+| `czas` | chwila ostatniego zapisu pliku – działająca KarKa odświeża go co kilka sekund |
 | `folderProjektow` | [Folder z projektami](#gdy-projekt-nie-jest-otwarty) albo `null`, gdy jest wyłączony |
 | `zakladki` | otwarte zakładki z projektem (bez pustych): nazwa, folder, szablon, [rodzaj](#rodzaje-zakładek), `zmiany` (niezapisany edytor), `zlecenie` (trwa zlecenie) |
-| `kolejka` | ile zleceń czekało na początku bieżącego przeglądu (0, gdy przegląd się skończył) |
+| `kolejka` | ile zleceń czekało na początku bieżącego przeglądu, razem z zaległymi, które za chwilę zostaną odłożone (0, gdy przegląd się skończył) |
 | `ostatnieZlecenie` | ostatnie zakończone zlecenie: polecenie, folder projektu, czas, `ok`, `blad`; także niewykonane (np. zaległe) |
 
-- KarKa zapisuje plik po każdej zmianie, ale nie częściej niż co 2 s. Zapis idzie przez plik tymczasowy, więc czytający nigdy nie trafi na połowę pliku.
-- **Po awarii albo zabiciu procesu `dziala` zostaje `true`.** Sprawdzaj więc też, czy proces `pid` żyje (`kill -0 <pid>`, przykład [wyżej](#gdy-karka-jest-zamknięta)). Pole `czas` pokazuje tylko ostatni zapis i nie jest sygnałem życia: działająca KarKa bez zmian nie zapisuje pliku.
+- KarKa zapisuje plik przy każdym przeglądzie zleceń (co ok. 3 s) i po każdej zmianie, ale nie częściej niż co 2 s. Zapis idzie przez plik tymczasowy, więc czytający nigdy nie trafi na połowę pliku.
+- **Po awarii albo zabiciu procesu `dziala` zostaje `true`.** Sprawdzaj więc też, czy proces `pid` żyje (`kill -0 <pid>`, przykład [wyżej](#gdy-karka-jest-zamknięta)), i czy `czas` jest świeży: `dziala: true` z `czas` starszym niż minuta oznacza, że KarKa nie działa (a numer `pid` mógł już dostać inny proces).
 - `kolejka` jest liczona raz, na początku przeglądu. W trakcie długiego zlecenia (np. PDF w CMYK) nie maleje.
 
 **Kolejność sprawdzania, gdy nie ma wyniku:**
-1. `dziala: false` albo martwy `pid` – KarKa nie działa: `open -g -a KarKa`. Brak pliku stanu oznacza, że KarKa nie była uruchomiona w wersji 0.7.3 lub nowszej. Starsze wersje nie znają Folderu z projektami, zaległych zleceń ani pliku stanu – zlecenia wykonują tylko w otwartych zakładkach (`wersjaAplikacji` w wyniku dowolnego zlecenia).
+1. `dziala: false`, martwy `pid` albo `czas` starszy niż minuta – KarKa nie działa: `open -g -a KarKa`. Brak pliku stanu oznacza, że KarKa nie była uruchomiona w wersji 0.7.3 lub nowszej. Starsze wersje nie znają Folderu z projektami, zaległych zleceń ani pliku stanu – zlecenia wykonują tylko w otwartych zakładkach (`wersjaAplikacji` w wyniku dowolnego zlecenia).
 2. Projekt nie ma zakładki, a `folderProjektow` jest `null` albo projekt leży poza nim – zlecenie nie zostanie zauważone.
 3. Projekt ma zakładkę z `"zlecenie": true` albo `kolejka` > 0 – zlecenie czeka albo trwa. Czekaj dalej: PDF w CMYK może trwać kilka minut.
 
