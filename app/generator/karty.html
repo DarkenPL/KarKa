@@ -370,7 +370,12 @@ $('filtr').onchange = () => { applyFilter(); odswiezRewersyKart(); };
 let SPRAWDZANIE = false;
 let TIK_UKRYTE = 0;
 let ZLECENIE_TRWA = false, ZLECENIE_Z_DYSKU = false;   // zlecenie z pliku – bez automatycznego odświeżania w trakcie
+// Zakładka otwarta w tle przez zlecenie (#90): nie sprawdza plików wcale – zlecenie i tak wczytuje je z dysku.
+// Ustawia main (ustawTlo) – po przejęciu albo pokazaniu zakładki wraca zwykłe odświeżanie.
+let W_TLE = false;
+window.ustawWTle = (b) => { const bylo = W_TLE; W_TLE = !!b; if (bylo && !W_TLE) sprawdzZmianyPlikow(true); };
 async function sprawdzZmianyPlikow(teraz = false) {
+  if (W_TLE) return;
   // Okno ukryte (także całkiem zasłonięte innym oknem albo na innym biurku – macOS) – rzadziej, co ~9 s (issue #30).
   if (!teraz && document.hidden && ++TIK_UKRYTE % 6) return;
   if (SPRAWDZANIE || !AUTO_ODSWIEZANIE || !serverPaths.length || PODGLAD_WERSJI || EKSPORT_TRWA || ZLECENIE_TRWA) return;
