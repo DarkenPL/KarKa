@@ -386,6 +386,6 @@ npm run dist       # budowanie .app (na macOS)
 
 ### Wydania
 
-Każda zmiana aplikacji w `main` podnosi wersję w `app/package.json` (0.4.3 → 0.4.4 …). Po scaleniu workflow sam tworzy wydanie `v<wersja>` z plikiem DMG, opisem (lista scalonych PR-ów) i oznaczeniem „najnowsze”, więc link do pobrania w README wskazuje ostatnią wersję. Gdy wersja nie została podniesiona, wydanie nie powstaje (ostrzeżenie „Wydanie … już istnieje” w Actions). Tak jest celowo przy zmianach bez plików aplikacji – sama dokumentacja, CI, skrypty testów (od #101): nie podbijają wersji, bo wydanie i aktualizacja bez zmian dla użytkownika nie mają sensu.
+Każda zmiana aplikacji w `main` podnosi wersję w `app/package.json` (0.4.3 → 0.4.4 …). Po scaleniu workflow sam tworzy wydanie `v<wersja>` z plikiem DMG, opisem (lista scalonych PR-ów) i oznaczeniem „najnowsze”, więc link do pobrania w README wskazuje ostatnią wersję. Gdy wersja nie została podniesiona, wydanie nie powstaje (ostrzeżenie „Wydanie … już istnieje” w Actions). Tak jest celowo przy zmianach bez plików aplikacji (od #101) – nie podbijają wersji, bo wydanie i aktualizacja bez zmian dla użytkownika nie mają sensu. Workflow uruchamia się tylko przy zmianach w `app/`, `przyklady/` albo w samym workflow: zmiana skryptów testów albo CI daje przebieg z tym ostrzeżeniem, a sama dokumentacja (`docs/`, README, `CLAUDE.md`) nie uruchamia go wcale – ani w pull requeście, ani na `main`.
 
 Ręcznie opublikowane wydanie albo wypchnięty tag `v*` też dostaną DMG – workflow dołączy plik po kilku minutach.
