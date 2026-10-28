@@ -3663,6 +3663,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
           + 'ELIPSA = 50, 30, 12, 12, obwódka=0.3\\n'                               // prawa 1 mm – BŁĄD
           + 'LINIA = 10, 85, 50, 85\\n'                                             // dolna 2,85 mm – BŁĄD
           + 'LINIA = 30, -3, 30, 15\\n'                                             // przez linię cięcia – bez uwagi
+          + 'LINIA = 40, 30, 40, 86\\n'                                             // prostopadła, koniec 2 mm przed cięciem (− grubość/2) – UWAGA
           + 'IKONA = 20, 70, 15, 10, {proba}\\n'                                  // 64 px na 10 mm ≈ 162,5 dpi (CI: 162,6 – układ w 1/64 px)
           + 'OBRAZEK = -3, 72, 69, 60, "' + dodane[1] + '", dopasuj=zmieść\\n', 'test.txt').talie[0];   // 815 px na 69 mm = 299,98 dpi – OK
         const r = renderCard(t, t.awers, {}, { warn: new Set(), icons, label: 'Próba 1', plik: 'test.txt', kolumny: true, wbudowane: {} });
@@ -3680,7 +3681,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         w.obwodki = obw.map((x) => x.element + ':' + x.poziom + ':' + x.odstep + ':' + x.krawedz);
         const jest = (re, poziom, od) => obw.some((x) => re.test(x.opis) && x.poziom === poziom && (od === undefined || Math.abs(x.odstep - od) < 0.11));
         if (!jest(/^obwódka karty/, 'BŁĄD', 0) || !jest(/^PROSTOKĄT 1, 1,/, 'BŁĄD', 1) || !jest(/^PROSTOKĄT 4, 4,/, 'UWAGA', 4) || !jest(/^ELIPSA 50, 30/, 'BŁĄD', 1)
-          || !jest(/^LINIA 10, 85/, 'BŁĄD', 2.9) || obw.length !== 5) b.push('obwódki ' + JSON.stringify(w.obwodki));
+          || !jest(/^LINIA 10, 85/, 'BŁĄD', 2.9) || !obw.some((x) => /^LINIA 40, 30/.test(x.opis) && x.poziom === 'UWAGA' && x.koniec && Math.abs(x.odstep - 1.85) < 0.1) || obw.length !== 6) b.push('obwódki ' + JSON.stringify(w.obwodki));
         const dpi = await obrazkiNiskiejRozdzielczosci(300, [k]);
         w.dpi = dpi.map((x) => x.replace(/<[^>]*>/g, ''));
         if (w.dpi.length !== 1 || !/^Ikony\\/proba-64\\.png \\(ikona\\) – 162,[4-6] dpi/.test(w.dpi[0])) b.push('dpi ' + JSON.stringify(w.dpi));
@@ -3693,7 +3694,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
           const sek = await raportJson({ drukarnia: true });
           const s1 = sek.find((x) => /^Drukarnia: tekst mniejszy niż 6 pt/.test(x.tytul)), s2 = sek.find((x) => x.tytul === 'Drukarnia: obwódki i ramki przy linii cięcia');
           w.sekcje = { maly: s1 && s1.pozycje, obwodki: s2 && s2.pozycje };
-          if (!s1 || s1.ok || !/^\\d,\\d pt – Próba 1: „Bardzo/.test(s1.pozycje[0] || '') || !s2 || s2.ok || s2.pozycje.length !== 5 || !/^BŁĄD – Próba – awersy \\(1\\): obwódka karty/.test(s2.pozycje[0])) b.push('sekcje ' + JSON.stringify(w.sekcje));
+          if (!s1 || s1.ok || !/^\\d,\\d pt – Próba 1: „Bardzo/.test(s1.pozycje[0] || '') || !s2 || s2.ok || s2.pozycje.length !== 6 || !s2.pozycje.some((t) => /^UWAGA 1,[89] mm .*LINIA 40, 30 .*kończy się bliżej niż 3 mm przed linią cięcia/.test(t)) || !/^BŁĄD – Próba – awersy \\(1\\): obwódka karty/.test(s2.pozycje[0])) b.push('sekcje ' + JSON.stringify(w.sekcje));
         } finally { window.raportDrukarni = oryg; }
       } catch (e) { b.push('wyjątek: ' + ((e && e.stack) || e)); }
       finally { d.remove(); dodane.forEach((p) => files.delete(norm(p))); }
