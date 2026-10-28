@@ -3663,7 +3663,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
           + 'ELIPSA = 50, 30, 12, 12, obwódka=0.3\\n'                               // prawa 1 mm – BŁĄD
           + 'LINIA = 10, 85, 50, 85\\n'                                             // dolna 2,85 mm – BŁĄD
           + 'LINIA = 30, -3, 30, 15\\n'                                             // przez linię cięcia – bez uwagi
-          + 'IKONA = 20, 70, 15, 10, {proba}\\n'                                  // 64 px na 10 mm ≈ 162,5 dpi
+          + 'IKONA = 20, 70, 15, 10, {proba}\\n'                                  // 64 px na 10 mm ≈ 162,5 dpi (CI: 162,6 – układ w 1/64 px)
           + 'OBRAZEK = -3, 72, 69, 60, "' + dodane[1] + '", dopasuj=zmieść\\n', 'test.txt').talie[0];   // 815 px na 69 mm = 299,98 dpi – OK
         const r = renderCard(t, t.awers, {}, { warn: new Set(), icons, label: 'Próba 1', plik: 'test.txt', kolumny: true, wbudowane: {} });
         d.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden';
@@ -3683,7 +3683,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
           || !jest(/^LINIA 10, 85/, 'BŁĄD', 2.9) || obw.length !== 5) b.push('obwódki ' + JSON.stringify(w.obwodki));
         const dpi = await obrazkiNiskiejRozdzielczosci(300, [k]);
         w.dpi = dpi.map((x) => x.replace(/<[^>]*>/g, ''));
-        if (w.dpi.length !== 1 || !/^Ikony\\/proba-64\\.png \\(ikona\\) – 162,5 dpi/.test(w.dpi[0])) b.push('dpi ' + JSON.stringify(w.dpi));
+        if (w.dpi.length !== 1 || !/^Ikony\\/proba-64\\.png \\(ikona\\) – 162,[4-6] dpi/.test(w.dpi[0])) b.push('dpi ' + JSON.stringify(w.dpi));
         // Sekcje raportu drukarni z wynikiem testowym (bez podglądu projektu).
         const oryg = window.raportDrukarni;
         window.raportDrukarni = async () => ({ margines: 3, karty: 1, niezmierzone: [], odstep: [], czern: [], krawedz: [], spad: [], spadSzablonu: { talie: {}, bez: [], pliki: [], zmiesc: [] },

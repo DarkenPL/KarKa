@@ -1447,7 +1447,7 @@ async function obrazkiNiskiejRozdzielczosci(prog = 300, karty = $('podglad').que
     if (!plik || /\.svg$/i.test(plik) || !(dpi > 0)) return;
     const x = naj.get(plik) || naj.set(plik, { dpi: Infinity, talie: new Set(), ikona }).get(plik);
     if (dpi < granica) x.talie.add(talia);
-    x.dpi = Math.min(x.dpi, dpi);
+    x.dpi = Math.min(x.dpi, dpi); x.ikona = x.ikona || ikona;
   };
   const wymiary = new Map();
   const rozmiar = (u) => wymiary.get(u) || wymiary.set(u, new Promise((r) => {
@@ -1581,7 +1581,8 @@ function progiTekstu() {
 function malyTekstKarty(k, progi = progiTekstu()) {
   const out = [];
   for (const el of k.querySelectorAll('.el.tekst')) {
-    if (getComputedStyle(el).display === 'none') continue;
+    const se = getComputedStyle(el);
+    if (se.display === 'none' || !(parseFloat(se.opacity) > 0)) continue;   // krycie=0 – niewidoczny
     const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     for (let n = w.nextNode(); n; n = w.nextNode()) {
       const tekst = n.nodeValue.trim();
@@ -1590,7 +1591,7 @@ function malyTekstKarty(k, progi = progiTekstu()) {
       if (!rgb || rgb[3] === 0) continue;
       const pt = parseFloat(st.fontSize) * 72 / 96;
       const czarny = rgb[0] === 0 && rgb[1] === 0 && rgb[2] === 0, prog = czarny ? progi.czarny : progi.kontra;
-      if (pt < prog - 0.05) out.push({ tekst: tekst.replace(/\s+/g, ' ').slice(0, 40), rozmiar: Math.round(pt * 10) / 10, prog, kolor: hexZRgb(rgb) });
+      if (pt < prog - 0.05) out.push({ tekst: tekst.replace(/\s+/g, ' ').slice(0, 40), rozmiar: Math.round(pt * 10) / 10, prog, czarny, kolor: hexZRgb(rgb) });
     }
   }
   return out.sort((a, b) => a.rozmiar - b.rozmiar);
@@ -1960,7 +1961,7 @@ async function sekcjeDrukarni(lista, o = {}) {
   const pg = r.progiTekstu || progiTekstu(), pt = (v) => String(v).replace('.', ',') + ' pt', maly = r.malyTekst || [];
   lista(`Drukarnia: tekst mniejszy niż ${pt(pg.czarny)} (czarny) / ${pt(pg.kontra)} (kolorowy)`, maly.slice(0, POKAZ).map((x) => {
     const f = x.fragmenty[0], reszta = x.fragmenty.length - 1;
-    return `<b>${pt(f.rozmiar)}</b> – ${esc(x.karta)}: „${esc(f.tekst)}” (${f.prog === pg.czarny ? 'czarny' : 'kolor ' + esc(f.kolor)}, próg ${pt(f.prog)})`
+    return `<b>${pt(f.rozmiar)}</b> – ${esc(x.karta)}: „${esc(f.tekst)}” (${f.czarny ? 'czarny' : 'kolor ' + esc(f.kolor)}, próg ${pt(f.prog)})`
       + (reszta ? ` <span class="opis">i ${reszta} ${reszta === 1 ? 'inny fragment' : 'innych fragmentów'}</span>` : '');
   }).concat(maly.length > POKAZ ? [`… i ${maly.length - POKAZ} kart więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : [])
     .concat(maly.length ? [`Rozmiar po dopasowaniu do pola (min= w szablonie, domyślnie 0,6 rozmiaru) i ze znacznikami &lt;small&gt; / &lt;rozmiar=&gt;. Tekst #000 (K100) może być mniejszy niż kolorowy`
