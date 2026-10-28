@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Testy aplikacji na kopiach przykładów (środowisko Linux z Xvfb, np. sesja Claude).
+# Testy aplikacji na kopiach przykładów (Linux z Xvfb, np. sesja Claude, albo macOS – okna na ekranie, bash 3.2 wystarczy).
 #   scripts/testuj.sh                 – wszystkie przykłady, tryb --test-edytor
 #   scripts/testuj.sh 03-ogrod        – wybrane przykłady (nazwy folderów z przyklady/)
 #   scripts/testuj.sh /ścieżka/do/gra.txt – dowolny projekt (kopiowany razem z folderem projektu)
@@ -14,10 +14,22 @@
 set -u
 cd "$(dirname "$0")/.."
 APP=$(pwd)
-TMP=${TMPDIR:-/tmp}/gk-testy
+TMP=${TMPDIR:-/tmp}; TMP=${TMP%/}/gk-testy
 RAZEM=${RAZEM:-5}
 LIMIT=${LIMIT:-600}
 rm -rf "$TMP"; mkdir -p "$TMP"
+# Electron: na Linuksie pod Xvfb i bez piaskownicy, na macOS wprost.
+ELECTRON=(./node_modules/.bin/electron)
+[ "$(uname)" = Darwin ] || ELECTRON=(xvfb-run -a "${ELECTRON[@]}" --no-sandbox)
+# Limit czasu: timeout (Linux), gtimeout (coreutils z Homebrew) albo Perl (macOS bez coreutils) – jak timeout:
+# po czasie SIGTERM (node_modules/.bin/electron przekazuje go Electronowi, SIGALRM już nie) i kod 124.
+limit() {
+  if command -v timeout >/dev/null; then timeout "$@"
+  elif command -v gtimeout >/dev/null; then gtimeout "$@"
+  else perl -e '$t = shift; $p = fork // die; exec @ARGV or exit 127 unless $p;
+      $SIG{ALRM} = sub { kill TERM => $p; $minal = 1 }; alarm $t;
+      1 while waitpid($p, 0) == -1 && $!{EINTR}; exit($minal ? 124 : $? >> 8)' "$@"; fi
+}
 npm run -s zasoby >/dev/null || { echo "zasoby: błąd"; exit 1; }
 node --check main.js && node --check preload.js || exit 1
 node -e "const h=require('fs').readFileSync('generator/karty.html','utf8');for(const m of h.matchAll(/<script>([\s\S]*?)<\/script>/g))new Function(m[1])" \
@@ -52,8 +64,9 @@ test1() {
     cp -r "../przyklady/$cel" "$TMP/$n"; arg="$TMP/$n"
   fi
   local opcje=($EDYTOR); [ -n "$bloki" ] && opcje+=(--test-bloki "$bloki")
-  timeout "$LIMIT" xvfb-run -a ./node_modules/.bin/electron --no-sandbox --user-data-dir="$TMP/ud-$n" \
-    --enable-logging=file --log-file="$TMP/$n.log" . "${opcje[@]}" --test-pdf "$arg" "$TMP/$n.pdf" 2>/dev/null | grep "^{" | tail -1 > "$TMP/$n.json"
+  # ${opcje[@]+…} – pusta tablica przy set -u w bashu 3.2 (macOS) to „unbound variable”.
+  limit "$LIMIT" "${ELECTRON[@]}" --user-data-dir="$TMP/ud-$n" \
+    --enable-logging=file --log-file="$TMP/$n.log" . ${opcje[@]+"${opcje[@]}"} --test-pdf "$arg" "$TMP/$n.pdf" 2>/dev/null | grep "^{" | tail -1 > "$TMP/$n.json"
   python3 - "$n" "$TMP/$n.json" "$TMP/$n.log" <<'PY'
 import json, sys, re
 n, plik, log = sys.argv[1:]
@@ -68,14 +81,27 @@ sys.exit(0 if d.get('ok') and not bledy else 1)
 PY
 }
 
-kod=0; aktywne=0
+# Bez `wait -n` (nie ma go w bashu 3.2 na macOS): czeka, aż skończy się którykolwiek z procesów `pidy`, i go usuwa.
+kod=0; pidy=()
+czekaj1() {
+  local p reszta
+  while :; do
+    for p in "${pidy[@]}"; do
+      kill -0 "$p" 2>/dev/null && continue
+      wait "$p" || kod=1
+      reszta=(); for q in "${pidy[@]}"; do [ "$q" = "$p" ] || reszta+=("$q"); done
+      pidy=(${reszta[@]+"${reszta[@]}"}); return
+    done
+    sleep 1
+  done
+}
 for z in "${zadania[@]}"; do
   IFS='|' read -r c n b <<< "$z"
   ( s=$(date +%s); test1 "$c" "$n" "$b"; k=$?; echo "   czas: $(( $(date +%s) - s )) s"; exit $k ) > "$TMP/$n.wynik" 2>&1 &
-  aktywne=$((aktywne + 1))
-  if [ $aktywne -ge $RAZEM ]; then wait -n || kod=1; aktywne=$((aktywne - 1)); fi
+  pidy+=($!)
+  [ ${#pidy[@]} -ge $RAZEM ] && czekaj1
 done
-while [ $aktywne -gt 0 ]; do wait -n || kod=1; aktywne=$((aktywne - 1)); done
+while [ ${#pidy[@]} -gt 0 ]; do czekaj1; done
 cat "$TMP"/*.wynik
 echo "Pliki testów (PDF, zrzuty, JSON, logi): $TMP"
 exit $kod
