@@ -1632,7 +1632,7 @@ function obwodkiKarty(k) {
     if (!x) return;
     const byl = wynik.find((y) => y.opis === x.opis);
     if (!byl) wynik.push(x);
-    else if ((x.poziom === 'BŁĄD' && byl.poziom !== 'BŁĄD') || (x.poziom === byl.poziom && x.odstep < byl.odstep)) Object.assign(byl, x);
+    else if ((x.poziom === 'BŁĄD' && byl.poziom !== 'BŁĄD') || (x.poziom === byl.poziom && x.odstep < byl.odstep)) { delete byl.koniec; Object.assign(byl, x); }
   };
   const widoczna = (el, st) => st.display !== 'none' && parseFloat(st.opacity) > 0;
   const mmTxt = (v) => String(r1(v)).replace('.', ',');
