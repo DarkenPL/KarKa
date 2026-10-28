@@ -5,14 +5,14 @@
 //   node scripts/grupy-testow.js        → wiersze „nazwa bloki” (dla powłoki)
 // Ostatnia grupa to dopełnienie (-nazwy wszystkich wcześniejszych), więc nowy blok zawsze się wykona.
 // Zależności między blokami (pomiar 27.10.2026, każdy blok osobno na kopii 07):
-// - zlecenia potrzebuje zmienione (zapamietajDruk() – bez tego „tylko zmienione” po PDF jednej talii nie jest puste),
+// - zlecenia od 0.7.3 (#102) samo robi zapamietajDruk() na starcie – nie potrzebuje już bloku zmienione,
 // - część CMYK w zlecenia (zlecenia z profilem) wykonuje się tylko z cmykTest w tym samym procesie – bez niego blok
 //   przechodzi bez tej części (cicha utrata pokrycia).
 // Pozostałe bloki przechodzą osobno. Czasy osobno (Linux, 2 rdzenie): ok. 87 / 92 / 85 s; całość w jednym procesie 392 s.
 'use strict';
 const GRUPY = [
-  ['zmienione', 'cmykTest', 'zlecenia'],
-  ['zakladki'],
+  ['cmykTest', 'zlecenia'],
+  ['zakladki', 'zleceniaWTle'],     // oba otwierają i zamykają zakładki (zleceniaWTle – #90)
 ];
 const NAZWY = ['zlecenia', 'zakladki', 'reszta'];
 

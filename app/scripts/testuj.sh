@@ -7,7 +7,7 @@
 #   BEZ_EDYTORA=1 scripts/testuj.sh   – szybszy test bez --test-edytor
 #   LIMIT=600 scripts/testuj.sh       – limit jednego uruchomienia w sekundach (domyślnie 600)
 # 07-gildie z --test-edytor idzie w trzech procesach jak w CI (#101): grupy z scripts/grupy-testow.js (zlecenia z
-# zmienione i cmykTest, zakladki, reszta = dopełnienie) – wynik „07-gildie-<grupa>”. Jedna grupa:
+# cmykTest, zakladki, reszta = dopełnienie) – wynik „07-gildie-<grupa>”. Jedna grupa:
 #   scripts/testuj.sh 07-gildie:zakladki   (nazwy grup: node scripts/grupy-testow.js)
 # Przed testami przebudowuje app/zasoby (test uruchamia kopię karty.html z zasobów, nie app/generator!).
 # Wynik: jeden wiersz na projekt (ok, Uwagi, nieudane części testu, błędy strony) i kod 0 / 1.
