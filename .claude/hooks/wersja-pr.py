@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Hook PreToolUse (Bash): przy `gh pr create` sprawdza wersję aplikacji (zasada z CLAUDE.md: każdy PR podnosi wersję).
-Blokuje PR, gdy: wersja w app/package.json jest taka sama jak na origin/main; package-lock.json ma inną wersję;
+"""Hook PreToolUse (Bash): przy `gh pr create` sprawdza wersję aplikacji (zasada z CLAUDE.md: PR ze zmianą w app/ podnosi wersję).
+Bez zmian w app/ (git diff --name-only origin/main...HEAD) milczy – wyjątek z #101. Inaczej blokuje PR, gdy: wersja w app/package.json jest taka sama jak na origin/main; package-lock.json ma inną wersję;
 tag v<wersja> już istnieje na GitHubie (wersja zajęta – np. przez inny PR); inny otwarty PR ma w app/package.json
 tę samą wersję (gałąź z head.ref; gdy gh nie odpowiada – tylko ostrzeżenie)."""
 import base64, json, os, re, subprocess, sys
@@ -23,6 +23,10 @@ def git(*args):
     except Exception:
         return ""
 
+git("fetch", "-q", "origin", "main")
+if not any(p.startswith("app/") for p in git("diff", "--name-only", "origin/main...HEAD").splitlines()):
+    sys.exit(0)   # PR bez zmian w app/ nie podbija wersji (decyzja właściciela 27.10.2026, #101)
+
 def blokuj(co, rada):
     print(f"ZABLOKOWANE przez .claude/hooks/wersja-pr.py: {co}. {rada} Nie obchodź tego zamka – powiedz właścicielowi.", file=sys.stderr)
     sys.exit(2)
@@ -39,13 +43,12 @@ try:
 except Exception as e:
     blokuj(f"nie mogę odczytać app/package.json albo package-lock.json ({e})", "Sprawdź pliki.")
 nowa = wersja_z(pkg)
-git("fetch", "-q", "origin", "main")
 stara = wersja_z(git("show", "origin/main:app/package.json"))
 if not nowa:
     blokuj("brak wersji w app/package.json", "Sprawdź plik.")
 if stara and nowa == stara:
     blokuj(f"wersja aplikacji nie została podniesiona (origin/main i gałąź: {stara})",
-           "Każdy PR do main podnosi wersję o najmniejszą podwersję w app/package.json i package-lock.json i dopisuje ją w docs/historia.md.")
+           "PR ze zmianą w app/ podnosi wersję o najmniejszą podwersję w app/package.json i package-lock.json i dopisuje ją w docs/historia.md.")
 lock_w = {lock.get("version"), (lock.get("packages") or {}).get("", {}).get("version")}
 if lock_w != {nowa}:
     blokuj(f"package-lock.json ma inną wersję ({', '.join(str(x) for x in lock_w if x)}) niż package.json ({nowa})",
