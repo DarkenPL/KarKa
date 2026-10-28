@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scripts/testuj.sh:*)",
+      "Bash(./scripts/testuj.sh:*)",
+      "Bash(bash scripts/testuj.sh:*)",
+      "Bash(npm run zasoby)",
+      "Bash(npm run -s zasoby)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git show:*)"
+    ],
+    "deny": [
+      "Bash(rm -r:*)",
+      "Bash(rm -rf:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/zamki-git.py", "timeout": 60 },
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/wersja-pr.py", "timeout": 60 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/testy-po-zmianie.py", "timeout": 200 }
+        ]
+      }
+    ]
+  }
+}
