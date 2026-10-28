@@ -308,7 +308,9 @@ open -g -a KarKa
 ```sh
 STAN="$HOME/Library/Application Support/KarKa/stan.json"
 PID=$(grep -o '"pid": *[0-9]*' "$STAN" 2>/dev/null | grep -o '[0-9]*$')
-if grep -q '"dziala": *true' "$STAN" 2>/dev/null && [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+# działa = "dziala": true, plik zapisany w ostatniej minucie (KarKa przepisuje go co ok. 3 s) i proces pid żyje
+if grep -q '"dziala": *true' "$STAN" 2>/dev/null && [ -n "$(find "$STAN" -mmin -1 2>/dev/null)" ] \
+   && [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
   echo "KarKa działa (pid $PID)"
 else
   open -g -a KarKa
