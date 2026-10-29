@@ -5,6 +5,8 @@
   "opis": "Offset – karty do gier (wytyczne „Games artwork guidelines” 2025-04-16)",
   "spad": 3,
   "strefa": 3,
+  "promienRogu": 5,
+  "promienRoguPotwierdzony": false,
   "icc": "iso300",
   "tac": 300,
   "pdfx": "PDF/X-4",

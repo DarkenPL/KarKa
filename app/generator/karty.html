@@ -1558,16 +1558,18 @@ const opisKarty = (k) => k.classList.contains('rewers')
 
 // Obwiednia glifów elementu (px, układ okna): prostokąty fragmentów tekstu z Range, w pionie
 // zawężone do wysokości znaków (measureText – actualBoundingBox), plus ikony (img, .ikona-kolor).
+// czesci (opcjonalnie): lista, do której trafia każdy prostokąt osobno – { l, t, r, b, n } (n = img / .ikona-kolor);
+// inny drugi argument (np. indeks z .map(obwiedniaGlifow)) – pomijany.
 let MIARKA = null;
-function obwiedniaGlifow(el) {
+function obwiedniaGlifow(el, czesci = null) {
   if (!MIARKA) MIARKA = document.createElement('canvas').getContext('2d');
   let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
-  const dodaj = (l, t, r, b) => { x1 = Math.min(x1, l); y1 = Math.min(y1, t); x2 = Math.max(x2, r); y2 = Math.max(y2, b); };
+  const dodaj = (l, t, r, b, n = null) => { x1 = Math.min(x1, l); y1 = Math.min(y1, t); x2 = Math.max(x2, r); y2 = Math.max(y2, b); if (Array.isArray(czesci)) czesci.push({ l, t, r, b, n }); };
   const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
   const zakres = document.createRange();
   for (let n = w.nextNode(); n; n = w.nextNode()) {
     if (n.nodeType === 1) {
-      if (n.matches('img.ikona, .ikona-kolor')) { const r = n.getBoundingClientRect(); if (r.width && r.height) dodaj(r.left, r.top, r.right, r.bottom); }
+      if (n.matches('img.ikona, .ikona-kolor')) { const r = n.getBoundingClientRect(); if (r.width && r.height) dodaj(r.left, r.top, r.right, r.bottom, n); }
       continue;
     }
     const tekst = n.nodeValue;
@@ -1623,9 +1625,12 @@ function odstepyKarty(k) {
 // po fitAll. Próg: czysta czerń #000 (w CMYK jedna farba K100) – czarny, każdy inny kolor (także biały na tle i
 // „prawie czerń”) – kontra. Progi z profilu drukarni wybranego w oknie PDF dla drukarni (minTekstPt), domyślnie 6 / 8 pt.
 const PROGI_TEKSTU = { czarny: 6, kontra: 8 };
+// Profil drukarni dla raportu – ten, który okno PDF dla drukarni pokaże jako wybrany (zapamietanaDrukarnia).
+function profilRaportu() {
+  try { const id = zapamietanaDrukarnia(ustawieniaOkna('drukarnia')); return profileDrukarni().find((x) => x && x.id === id) || null; } catch (e) { return null; }
+}
 function progiTekstu() {
-  let p = null;
-  try { const id = ustawieniaOkna('drukarnia').drukarnia; p = profileDrukarni().find((x) => x && x.id === id) || null; } catch (e) { /* bez profilu */ }
+  const p = profilRaportu();
   const m = (p && p.minTekstPt) || {};
   return { czarny: +m.czarny || PROGI_TEKSTU.czarny, kontra: +m.kontra || PROGI_TEKSTU.kontra, profil: p && p.minTekstPt ? p.nazwa : null };
 }
@@ -1709,9 +1714,11 @@ function obwodkiKarty(k) {
     const st = getComputedStyle(el);
     if (!widoczna(el, st)) continue;
     if (el.classList.contains('otok')) {
-      // OTOK (#132) sięga końca spadu – liczy się tylko wewnętrzna krawędź pasa: węższy niż linia bezpieczeństwa – UWAGA.
+      // OTOK (#132) sięga końca spadu – liczy się tylko wewnętrzna krawędź pasa: węższy niż linia bezpieczeństwa – UWAGA;
+      // szerszy (#146) – też UWAGA: zabiera pole karty (szerokość z szablonu – tolerancja 0,05 mm).
       const s = parseFloat(el.dataset.otok);
       if (s < MARGINES_DRUKARNI - 0.005) dodaj({ element: 'OTOK', opis: `OTOK ${mmTxt(s)} mm`, poziom: 'UWAGA', odstep: r1(s), krawedz: 'wewnętrzna' });
+      else if (s > MARGINES_DRUKARNI + 0.05) dodaj({ element: 'OTOK', opis: `OTOK ${mmTxt(s)} mm`, poziom: 'UWAGA', odstep: r1(s), krawedz: 'wewnętrzna', szerszy: true });
       continue;
     }
     if (el.classList.contains('linia')) {
@@ -1762,6 +1769,110 @@ function obwodkiKarty(k) {
     for (const [p, q] of [[A, B], [B, C], [C, D], [D, A]]) dodaj(odcinek(p, q, g, opis, nazwa, przedluzany));
   }
   return wynik.sort((a, b) => gorszy(b, a) || a.odstep - b.odstep);
+}
+
+// Elementy przy zaokrąglonym rogu (#146; decyzje 29.10.2026): wykrojnik tnie róg łukiem o promieniu r, więc strefa
+// bezpieczna w rogu to łuk o promieniu r − 3 mm. Punkt w kwadracie r × r przy rogu leży r − (odległość od środka łuku)
+// od linii cięcia: róg kwadratowej ikony 3 mm od obu krawędzi przy r = 5 mm – 2,2 mm (r − √2·(r − x) ≥ 3 → x ≥ 3,59).
+// r = większy z promienRogu profilu drukarni i KARTA … zaokrąglenie=; r ≤ MARGINES_DRUKARNI – bez pomiaru (róg strefy jest
+// wtedy kwadratowy, a odstęp od prostych krawędzi sprawdza sekcja tekstu). Liczone z kształtu, nie z prostokąta wokół:
+// tekst – prostokąty linii tekstu (obwiedniaGlifow), ikony obrazkowe i OBRAZEK – piksele z kryciem ≥ 50 % (płótno
+// NAROZNIK_DPI, tylko kwadrat rogu), PROSTOKĄT (też zaokrąglony) i ELIPSA – punkty obrysu po obrocie (kształt wypukły –
+// najbliższy łukowi punkt leży na obrysie). Najpierw prostokąt wokół elementu: gdy on jest dość daleko, kształt też.
+// Pomijane: tekst i ikony bliżej niż 3 mm od prostej krawędzi albo pod otokiem (są w swoich sekcjach), kształty
+// i obrazki dotykające krawędzi karty (tło, pasy do spadu), niewidoczne, LINIA, OTOK, obwódka karty. Obrazek obrócony,
+// odbity albo z kadr= – z prostokąta wokół niego. Wynik: [{ element, opis, naroznik, odstep (mm, ujemny = za łukiem), promien }].
+const NAROZNIK_DPI = 600;                 // kwadrat rogu 5 mm = 118 px – piksel 0,04 mm
+const NAROZNIKI = [['lewy górny', false, false], ['prawy górny', true, false], ['lewy dolny', false, true], ['prawy dolny', true, true]];
+function promienRoguKarty(k, profil = profilRaportu()) {
+  const rp = profil && typeof profil.promienRogu === 'number' ? profil.promienRogu : 0;
+  const rk = /mm$/.test(k.style.borderRadius) ? parseFloat(k.style.borderRadius) : 0;
+  return Math.max(rp, rk || 0);
+}
+function naroznikiKarty(k, r = promienRoguKarty(k)) {
+  const kr = k.getBoundingClientRect();
+  if (!(r > MARGINES_DRUKARNI + 0.005) || !k.isConnected || !kr.width || !kr.height) return [];
+  const [W, H] = cardMm(k), pxNaMm = kr.width / W, PX = 96 / 25.4, E = 0.05, wynik = [];
+  const r1 = (v) => Math.round(v * 10) / 10, mmTxt = (v) => String(r1(v)).replace('.', ',');
+  const wMm = (v, zapas) => /mm$/.test(v) ? parseFloat(v) : zapas;
+  const prost = (q) => ({ x1: (q.left - kr.left) / pxNaMm, y1: (q.top - kr.top) / pxNaMm, x2: (q.right - kr.left) / pxNaMm, y2: (q.bottom - kr.top) / pxNaMm });
+  // Punkt (mm karty) → odstęp od łuku przy rogu [nazwa, prawy, dolny] (Infinity – poza kwadratem rogu).
+  const odLuku = (x, y, [, pr, dl]) => { const u = pr ? W - x : x, v = dl ? H - y : y; return u < r && v < r ? r - Math.hypot(r - u, r - v) : Infinity; };
+  // Prostokąt: najbliższy łukowi jest jego wierzchołek od strony rogu.
+  const odProstokata = (p, rog) => odLuku(rog[1] ? p.x2 : p.x1, rog[2] ? p.y2 : p.y1, rog);
+  // Piksele obrazu img narysowanego w prostokącie (ix, iy, iw, ih) mm i przyciętego do ramki p (mm) – w kwadracie rogu.
+  const odObrazu = (img, ix, iy, iw, ih, p, rog) => {
+    const D = NAROZNIK_DPI / 25.4, x0 = rog[1] ? W - r : 0, y0 = rog[2] ? H - r : 0, n = Math.ceil(r * D);
+    const c = document.createElement('canvas'); c.width = c.height = n;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.beginPath(); g.rect((p.x1 - x0) * D, (p.y1 - y0) * D, (p.x2 - p.x1) * D, (p.y2 - p.y1) * D); g.clip();
+    g.drawImage(img, (ix - x0) * D, (iy - y0) * D, iw * D, ih * D);
+    const a = g.getImageData(0, 0, n, n).data;
+    let naj = Infinity;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (a[(j * n + i) * 4 + 3] >= 128) naj = Math.min(naj, odLuku(x0 + (i + 0.5) / D, y0 + (j + 0.5) / D, rog));
+    return naj;
+  };
+  // Najbliższy róg dla elementu: czesci – [{ p (prostokąt mm), dokladnie(rog) – odstęp z kształtu albo null }].
+  const zmierz = (czesci, element, opis) => {
+    let naj = null;
+    for (const rog of NAROZNIKI) for (const { p, dokladnie } of czesci) {
+      let d = odProstokata(p, rog);
+      if (d >= MARGINES_DRUKARNI - 0.005) continue;
+      if (dokladnie) { try { const x = dokladnie(rog); if (x !== null) d = x; } catch (e) { /* bez pikseli – prostokąt */ } }
+      if (d < MARGINES_DRUKARNI - 0.005 && (!naj || d < naj.odstep)) naj = { element, opis, naroznik: rog[0], odstep: d };
+    }
+    if (naj) wynik.push({ ...naj, odstep: Math.round(naj.odstep * 100) / 100, promien: r });
+  };
+  const otok = otokKarty(k), granica = Math.max(MARGINES_DRUKARNI, otok);
+  for (const el of k.querySelectorAll(':scope > .el')) {
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || !(parseFloat(st.opacity) > 0) || el.classList.contains('otok') || el.classList.contains('tlo')) continue;
+    if (el.classList.contains('tekst') || el.classList.contains('ikony')) {
+      const czesci = [], o = obwiedniaGlifow(el, czesci);
+      if (!o) continue;
+      const b = prost({ left: o.x1, top: o.y1, right: o.x2, bottom: o.y2 });
+      if (Math.min(b.x1, b.y1, W - b.x2, H - b.y2) < granica - 0.005) continue;   // w sekcji odstępu albo pod otokiem
+      const ikona = el.classList.contains('ikony');
+      zmierz(czesci.map((c) => {
+        const p = prost({ left: c.l, top: c.t, right: c.r, bottom: c.b });
+        const img = c.n && c.n.tagName === 'IMG' && c.n.complete && c.n.naturalWidth ? c.n : null;
+        return { p, dokladnie: img && ((rog) => odObrazu(img, p.x1, p.y1, p.x2 - p.x1, p.y2 - p.y1, p, rog)) };
+      }), ikona ? 'IKONA' : 'TEKST', ikona ? 'ikona ' + ([...el.querySelectorAll('img.ikona, .ikona-kolor')].map((n) => n.alt || n.title).filter(Boolean)[0] || '') : '„' + el.textContent.trim().replace(/\s+/g, ' ').slice(0, 40) + '”');
+      continue;
+    }
+    const obr = el.classList.contains('obrazek'), kszt = el.classList.contains('ksztalt');
+    if (!obr && !kszt) continue;
+    const p = prost(el.getBoundingClientRect());
+    if (p.x1 <= E || p.y1 <= E || p.x2 >= W - E || p.y2 >= H - E) continue;      // dotyka krawędzi – tło albo pas do spadu
+    const x = wMm(el.style.left, el.offsetLeft / PX), y = wMm(el.style.top, el.offsetTop / PX), w = wMm(el.style.width, el.offsetWidth / PX), h = wMm(el.style.height, el.offsetHeight / PX);
+    const m = st.transform && st.transform !== 'none' ? new DOMMatrix(st.transform) : null;
+    if (obr) {
+      const img = el.querySelector('img');
+      if (!img || !img.complete) continue;
+      const nw = img.naturalWidth, nh = img.naturalHeight, fit = img.style.objectFit;
+      let dokladnie = null;
+      if (!m && !img.style.transform && nw && nh) {
+        const sk = fit === 'contain' ? Math.min(w / nw, h / nh) : Math.max(w / nw, h / nh), [iw, ih] = fit === 'fill' ? [w, h] : [nw * sk, nh * sk];
+        const [ppx = 'center', ppy = 'center'] = (img.style.objectPosition || 'center center').split(/\s+/);
+        const f = (q) => (q.endsWith('%') ? parseFloat(q) / 100 : { left: 0, top: 0, center: 0.5, right: 1, bottom: 1 }[q] ?? 0.5);
+        dokladnie = (rog) => odObrazu(img, x + (w - iw) * f(ppx), y + (h - ih) * f(ppy), iw, ih, { x1: x, y1: y, x2: x + w, y2: y + h }, rog);
+      }
+      zmierz([{ p, dokladnie }], 'OBRAZEK', `OBRAZEK ${mmTxt(x)}, ${mmTxt(y)}, ${mmTxt(w)} × ${mmTxt(h)} mm`);
+      continue;
+    }
+    // Kształt: widoczny, gdy ma wypełnienie albo obwódkę.
+    const kb = rgbZCss(st.borderTopColor) || [0, 0, 0, 0], kt = rgbZCss(st.backgroundColor) || [0, 0, 0, 0];
+    if (!(kt[3] > 0 || (st.backgroundImage && st.backgroundImage !== 'none') || (parseFloat(st.borderTopWidth) > 0 && st.borderTopStyle !== 'none' && kb[3] > 0))) continue;
+    const elipsa = st.borderTopLeftRadius === '50%', rad = elipsa ? 0 : Math.min(wMm(el.style.borderRadius, 0) || 0, w / 2, h / 2);
+    const ox = x + w / 2, oy = y + h / 2, punkty = [];
+    if (elipsa) for (let i = 0; i < 360; i++) { const t = i * Math.PI / 180; punkty.push([ox + w / 2 * Math.cos(t), oy + h / 2 * Math.sin(t)]); }
+    else for (const [cx, cy, t0] of [[x + rad, y + rad, Math.PI], [x + w - rad, y + rad, 1.5 * Math.PI], [x + w - rad, y + h - rad, 0], [x + rad, y + h - rad, 0.5 * Math.PI]])
+      for (let i = 0; i <= (rad ? 90 : 0); i++) { const t = t0 + i * Math.PI / 180; punkty.push([cx + rad * Math.cos(t), cy + rad * Math.sin(t)]); }
+    const obrys = m ? punkty.map(([px, py]) => { const q = m.transformPoint(new DOMPoint(px - ox, py - oy)); return [q.x + ox, q.y + oy]; }) : punkty;
+    const nazwa = elipsa ? 'ELIPSA' : 'PROSTOKĄT';
+    zmierz([{ p, dokladnie: (rog) => Math.min(...obrys.map(([px, py]) => odLuku(px, py, rog))) }], nazwa, `${nazwa} ${mmTxt(x)}, ${mmTxt(y)}, ${mmTxt(w)} × ${mmTxt(h)} mm`);
+  }
+  return wynik.sort((a, b) => a.odstep - b.odstep);
 }
 
 // Styk krawędź w krawędź (#143): bok wypełnionego pola leży na wewnętrznej krawędzi OTOK albo na boku innego pola
@@ -2202,6 +2313,8 @@ async function raportDrukarniTeraz() {
     }
     const odstep = [], bezPomiaru = [], czern = new Map(), pasy = new Map(), spad = [], pliki = [], zmiesc = [], widziane = new Set();
     const progi = progiTekstu(), malyTekst = [], obwodki = new Map(), obwodkiInfo = new Map(), podOtokiem = [], liniiNiezmierzone = [], styk = new Map();
+    const profil = profilRaportu(), naroznik = new Map();
+    let promienRogu = 0;
     for (const k of karty) {
       const rewers = k.classList.contains('rewers');
       const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' + nrRewersu(k) : k.dataset.row);
@@ -2225,6 +2338,13 @@ async function raportDrukarniTeraz() {
       for (const x of [...obwodkiKarty(k), ...zObrazu]) {
         const kk = [k.dataset.talia, strona, x.opis, x.poziom, x.odstep, x.krawedz].join('|'), m = x.poziom === 'INFO' ? obwodkiInfo : obwodki;
         const y = m.get(kk) || m.set(kk, { talia: k.dataset.talia, strona, ...x, karty: [] }).get(kk);
+        y.karty.push(opisKarty(k));
+      }
+      const rRogu = promienRoguKarty(k, profil);                // łuk narożnika (#146)
+      if (rRogu > MARGINES_DRUKARNI + 0.005) promienRogu = Math.max(promienRogu, rRogu);
+      for (const x of naroznikiKarty(k, rRogu)) {
+        const kk = [k.dataset.talia, strona, x.opis, x.naroznik, x.odstep].join('|');
+        const y = naroznik.get(kk) || naroznik.set(kk, { talia: k.dataset.talia, strona, ...x, karty: [] }).get(kk);
         y.karty.push(opisKarty(k));
       }
       for (const x of stykiKarty(k)) {                         // styk krawędź w krawędź (#143)
@@ -2258,7 +2378,9 @@ async function raportDrukarniTeraz() {
     malyTekst.sort((a, b) => a.rozmiar - b.rozmiar);
     const obw = [...obwodki.values()].sort((a, b) => gorszy(b, a) || a.odstep - b.odstep);
     return { margines: MARGINES_DRUKARNI, karty: karty.length, niezmierzone: bezPomiaru, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad, spadSzablonu,
-      progiTekstu: progi, malyTekst, obwodki: obw, obwodkiInfo: [...obwodkiInfo.values()].sort((a, b) => a.odstep - b.odstep), liniiNiezmierzone, podOtokiem, styk: [...styk.values()] };
+      progiTekstu: progi, malyTekst, obwodki: obw, obwodkiInfo: [...obwodkiInfo.values()].sort((a, b) => a.odstep - b.odstep), liniiNiezmierzone, podOtokiem, styk: [...styk.values()],
+      naroznik: [...naroznik.values()].sort((a, b) => a.odstep - b.odstep), promienRogu,
+      profilRogu: profil && typeof profil.promienRogu === 'number' ? { nazwa: profil.nazwa, promien: profil.promienRogu, potwierdzony: profil.promienRoguPotwierdzony !== false } : null };
   });
   // Obrazki kart (html-to-image) czytają podgląd – na wyłączność, chyba że eksport już trwa.
   return (OSTATNI_RAPORT_DRUKARNI = EKSPORT_TRWA ? await praca() : await naWylacznosc(praca));
@@ -2311,6 +2433,7 @@ async function sekcjeDrukarni(lista, o = {}) {
     UWAGA: `${String(RAMKA_BLAD).replace('.', ',')}–${RAMKA_UWAGA} mm od linii cięcia – po cięciu (±1 mm) odstęp będzie widocznie nierówny; odsuń ją na ≥ ${RAMKA_UWAGA} mm (strefa bezpieczna) albo przedłuż do końca spadu`,
     SPAD: 'w spadzie tuż za linią cięcia – po cięciu (±1 mm) może wejść na kartę; przesuń ją do końca spadu albo ≥ 3 mm w głąb karty',
     OTOK: `bliżej niż ${MARGINES_DRUKARNI} mm od linii cięcia – po cięciu (±1 mm) pas będzie widocznie nierówny; poszerz otok do ${MARGINES_DRUKARNI} mm (linia bezpieczeństwa)`,
+    OTOK_SZERSZY: `szerszy niż strefa bezpieczna (${MARGINES_DRUKARNI} mm) – zabiera pole karty, a w talii z różnymi szerokościami otoku pola nie są równe; zalecany otok = ${MARGINES_DRUKARNI} mm (linia bezpieczeństwa)`,
     INFO: `${RAMKA_UWAGA}–${RAMKA_INFO} mm od linii cięcia – w strefie bezpiecznej, ale przy krzywym cięciu (±1 mm) różnica odstępu bywa widoczna`,
   };
   const urwana = (x) => `przechodzi przez linię cięcia i kończy się ${x.element === 'OBRAZ' ? '' : mm(x.odstep) + ' za nią, '}przed końcem spadu (${mm(x.spad)})`
@@ -2318,7 +2441,7 @@ async function sekcjeDrukarni(lista, o = {}) {
   const pozycjaObw = (x) => {
     const naglowek = x.element === 'KARTA' || x.urwana ? '' : ' ' + mm(Math.abs(x.odstep)) + (x.odstep < 0 ? ' za cięciem' : '');
     const gdzie = x.element === 'OBRAZ' ? `${x.opis}${x.urwana ? ` (${mm(x.u)} od rogu)` : ''}` : x.opis;
-    const rada = x.urwana ? urwana(x) : RADA_OBW[x.element === 'KARTA' || x.element === 'OTOK' ? x.element : x.koniec ? 'KONIEC' : x.odstep < 0 ? 'SPAD' : x.poziom];
+    const rada = x.urwana ? urwana(x) : RADA_OBW[x.szerszy ? 'OTOK_SZERSZY' : x.element === 'KARTA' || x.element === 'OTOK' ? x.element : x.koniec ? 'KONIEC' : x.odstep < 0 ? 'SPAD' : x.poziom];
     return `<b>${x.poziom}${naglowek}</b> – ${esc(x.talia)} – ${x.strona === 'rewers' ? 'rewers' : 'awersy (' + x.karty.length + ')'}: ${esc(gdzie)}`
       + (x.element === 'KARTA' ? ' ' : `, ${x.krawedz} krawędź – `) + rada + (x.strona === 'awers' ? `: ${ileKart(x.karty)}` : '');
   };
@@ -2328,6 +2451,18 @@ async function sekcjeDrukarni(lista, o = {}) {
     .concat((r.obwodki || []).length > POKAZ ? [`… i ${r.obwodki.length - POKAZ} pozycji więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
     `obwódki, ramki i linie (także w grafice) są co najmniej ${RAMKA_UWAGA} mm od linii cięcia albo przechodzą przez nią do końca spadu`,
     (r.obwodkiInfo || []).slice(0, POKAZ).map(pozycjaObw));
+  // Łuk narożnika (#146) – sekcja tylko, gdy są pozycje (promień ≤ 3 mm – bez pomiaru).
+  const nar = r.naroznik || [], pr = r.profilRogu;
+  if (nar.length) {
+    const minX = (rr) => String(Math.ceil((rr - (rr - MARGINES_DRUKARNI) / Math.SQRT2) * 10) / 10).replace('.', ',');
+    lista('Drukarnia: elementy przy zaokrąglonym rogu', nar.slice(0, POKAZ).map((x) =>
+      `<b>UWAGA ${x.odstep < 0 ? mm(-x.odstep) + ' za łukiem cięcia' : mm(x.odstep) + ' od łuku cięcia'}</b> – ${esc(x.talia)} – ${x.strona === 'rewers' ? 'rewers' : 'awersy (' + x.karty.length + ')'}: `
+        + `${esc(x.opis)}, ${x.naroznik} narożnik – wykrojnik tnie róg łukiem o promieniu ${mm(x.promien)}, więc element jest bliżej linii cięcia niż ${MARGINES_DRUKARNI} mm; `
+        + `odsuń go od rogu (kwadratowy – na ≥ ${minX(x.promien)} mm od obu krawędzi, okrągły wystarczy ${MARGINES_DRUKARNI} mm)` + (x.strona === 'awers' ? `: ${ileKart(x.karty)}` : ''))
+      .concat(nar.length > POKAZ ? [`… i ${nar.length - POKAZ} pozycji więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : [])
+      .concat([`Promień narożnika: ${mm(r.promienRogu)}` + (pr ? ` – profil ${esc(pr.nazwa)} ${mm(pr.promien)}${pr.potwierdzony ? '' : ' (nie potwierdzony przez drukarnię)'}` : '')
+        + (pr && r.promienRogu > pr.promien + 0.005 ? ', większy z szablonu (KARTA … zaokrąglenie=)' : '') + '. Liczony z kształtu: okrągła ikona w rogu jest dalej od łuku niż kwadratowa']), '');
+  }
   // Styk krawędź w krawędź (#143) – INFO pod sekcją (✓ zostaje); sekcja tylko, gdy są.
   const styk = r.styk || [], mm2 = (v) => String(Math.abs(v)).replace('.', ',') + ' mm';
   if (styk.length) lista('Drukarnia: pola stykające się krawędzią', [], 'nic do poprawienia przed drukiem – to kosmetyka', styk.slice(0, POKAZ).map((x) =>
@@ -3992,7 +4127,7 @@ const nazwaIcc = (icc) => NAZWY_ICC[icc] || 'plik: ' + String(icc).split('/').po
 // „Własne ustawienia” bez zapisanego pliku: pola okna PDF dla drukarni z 0.6.x (spad, strony, CMYK, profil, nadruk, rewersy).
 function wlasneZOkna() {
   const u = ustawieniaOkna('drukarnia');
-  return { format: 1, id: 'wlasne', nazwa: 'Własne ustawienia', opis: 'Wszystko do ustawienia ręcznie', spad: num(u.spad ?? SPAD_DRUKARNI), strefa: 3,
+  return { format: 1, id: 'wlasne', nazwa: 'Własne ustawienia', opis: 'Wszystko do ustawienia ręcznie', spad: num(u.spad ?? SPAD_DRUKARNI), strefa: 3, promienRogu: null, promienRoguPotwierdzony: true,
     icc: u.cmyk ? u.profil || 'fogra39' : 'rgb', tac: 300, pdfx: 'PDF/X-4', nadrukCzerni: u.nadrukCzerni !== false, rewersy: u.rewersy !== false,
     strony: u.strony === 'naprzemian' ? 'naprzemian' : 'osobno', wzorNazwy: '{projekt} – drukarnia{dopiski} – {strona}',
     strona: { awersy: 'awersy', rewersy: 'rewersy', razem: '' }, komponent: '', jezyk: '', minTekstPt: null, uwagi: [] };
@@ -4075,15 +4210,18 @@ function opisPlikowDrukarni(p) {
   return p.strony === 'dwapliki' ? `${n('awersy')}, ${n('rewersy')}` : p.strony === 'naprzemian' ? n('razem')
     : `${n('razem')} <span class="opis">(różne rewersy: ${n('awersy')}, ${n('rewersy')})</span>`;
 }
+// Id drukarni wybranej w oknie PDF dla drukarni. Bez zapamiętanego wyboru: „Własne ustawienia”, gdy projekt ma ustawienia
+// drukarni z 0.6.x (okno PDF dla drukarni albo dawne „Druk i PDF” z polami drukarni innymi niż domyślne) – PDF jak dotąd; inaczej LongPack.
+function zapamietanaDrukarnia(u) {
+  const dawne = USTAWIENIA_OKIEN.drukarnia || USTAWIENIA_OKIEN.druk || {};
+  const zDawnych = !!USTAWIENIA_OKIEN.drukarnia || dawne.uklad === 'drukarnia' || ['spad', 'strony', 'cmyk', 'profil', 'nadrukCzerni', 'rewersy'].some((k) => k in dawne && dawne[k] !== DRUK_DOMYSLNE[k]);
+  return u.drukarnia || (zDawnych ? 'wlasne' : 'longpack');
+}
 // Pole „Drukarnia” okna PDF dla drukarni: profile, podsumowanie wybranego, a przy „Własnych ustawieniach” – pola do zmiany.
 function poleDrukarni(u) {
   const gs = !!(CMYK_STAN && CMYK_STAN.gs && CMYK_STAN.gs.ok), lista = profileDrukarni();
   const dostepny = (p) => gs || p.icc === 'rgb';
-  // Bez zapamiętanego wyboru: „Własne ustawienia”, gdy projekt ma ustawienia drukarni z 0.6.x (okno PDF dla drukarni albo dawne
-  // „Druk i PDF” z polami drukarni innymi niż domyślne) – PDF jak dotąd; inaczej LongPack.
-  const dawne = USTAWIENIA_OKIEN.drukarnia || USTAWIENIA_OKIEN.druk || {};
-  const zDawnych = !!USTAWIENIA_OKIEN.drukarnia || dawne.uklad === 'drukarnia' || ['spad', 'strony', 'cmyk', 'profil', 'nadrukCzerni', 'rewersy'].some((k) => k in dawne && dawne[k] !== DRUK_DOMYSLNE[k]);
-  const zapamietany = u.drukarnia || (zDawnych ? 'wlasne' : 'longpack');
+  const zapamietany = zapamietanaDrukarnia(u);
   let id = (lista.find((p) => p.id === zapamietany && dostepny(p)) || lista.find(dostepny) || lista[lista.length - 1]).id;
   const radia = lista.map((p) => `<label><input type="radio" name="drukarnia" value="${esc(p.id)}"${p.id === id ? ' checked' : ''}${dostepny(p) ? '' : ' disabled'}> ${esc(p.nazwa)}</label>`).join(' ');
   const bezGs = gs ? '' : `<div class="opis">${esc((CMYK_STAN && CMYK_STAN.gs && CMYK_STAN.gs.powod) || 'Brak Ghostscripta. Zainstaluj: brew install ghostscript')} – profile drukarni w CMYK są niedostępne.</div>`;
@@ -4092,6 +4230,7 @@ function poleDrukarni(u) {
     const kolory = [`Spad ${mmTxt(p.spad)}`, nazwaIcc(p.icc), p.tac ? `TAC ≤ ${p.tac} %` : '', p.pdfx || '', p.nadrukCzerni ? 'nadruk czerni K100' : ''].filter(Boolean).join(' · ');
     return `<div class="profil-drukarni ramka-profilu" data-id="${esc(p.id)}"><div><b>${esc(p.opis || p.nazwa)}</b></div><div>${esc(kolory)}</div>` +
       `<div>${esc(OPIS_STRON[p.strony])}${p.rewersy ? '' : ' – bez rewersów'}</div><div>Pliki: ${opisPlikowDrukarni(p)}</div>` +
+      (typeof p.promienRogu === 'number' ? `<div>Narożniki: promień ${mmTxt(p.promienRogu)}${p.promienRoguPotwierdzony === false ? ' <span class="opis">– promień narożnika nie potwierdzony przez drukarnię</span>' : ''}</div>` : '') +
       (p.uwagi.length ? `<ul class="opis">${p.uwagi.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '') +
       `<div class="spad-profilu">${opisSpaduProfilu(p.spad)}</div></div>`;
   }).join('');
@@ -4107,6 +4246,8 @@ function polaWlasnych(p) {
     `<label><input type="checkbox" name="wlPdfx"${p.pdfx ? ' checked' : ''}> PDF/X-4 <span class="opis">– Output Intent z profilem kolorów, metadane PDF/X (przezroczystość zostaje)</span></label> ` +
     `<label>Limit farby (TAC) <input type="number" name="wlTac" min="100" max="400" step="10" value="${esc(p.tac || 300)}" style="width:4.5em"> % <span class="opis">– pomiar po konwersji, ostrzeżenie powyżej limitu</span></label></fieldset>` +
     poleOkna('rewersy', 'drukarnia', uw) +
+    `<fieldset><legend>Narożniki</legend><label>Promień <input type="number" name="wlPromien" min="0" max="20" step="0.5" value="${esc(p.promienRogu ?? '')}" style="width:4.5em"> mm ` +
+    `<span class="opis">– wykrojnik drukarni; Raport drukarni sprawdza odstęp od łuku w rogach (puste – bez sprawdzania)</span></label></fieldset>` +
     `<fieldset><legend>Nazwy plików</legend><label>Wzór <input type="text" name="wlWzor" value="${esc(p.wzorNazwy)}" style="width:22em"></label>` +
     `<label>Komponent <input type="text" name="wlKomponent" value="${esc(p.komponent)}" style="width:8em"></label> <label>Język <input type="text" name="wlJezyk" value="${esc(p.jezyk)}" style="width:3em"></label>` +
     `<div class="opis">{projekt} {komponent} {strona} {jezyk} {wersja} {dopiski} – pusty człon znika razem ze znakiem przed nim.</div></fieldset>`;
@@ -4119,6 +4260,7 @@ function wlasneZFormularza(form, p) {
   return { ...p, spad: liczbaPola('wlSpad', 0, 10, p.spad), strony: (form.querySelector('[name=strony]:checked') || {}).value || p.strony,
     icc: cmyk ? icc : 'rgb', nadrukCzerni: v('nadrukCzerni') && !v('nadrukCzerni').disabled ? v('nadrukCzerni').checked : p.nadrukCzerni,
     pdfx: v('wlPdfx').checked ? 'PDF/X-4' : null, tac: liczbaPola('wlTac', 100, 400, p.tac || 300), rewersy: v('rewersy').checked,
+    promienRogu: String(v('wlPromien').value).trim() === '' ? null : liczbaPola('wlPromien', 0, 20, p.promienRogu ?? null),
     wzorNazwy: v('wlWzor').value.includes('{projekt}') ? v('wlWzor').value.trim() : p.wzorNazwy, komponent: v('wlKomponent').value.trim(), jezyk: v('wlJezyk').value.trim() };
 }
 function poleOkna(nazwa, rodzaj, u) {

@@ -13,7 +13,7 @@ const WLASNE = 'wlasne';
 // Domyślne „Własne ustawienia” – jak okno PDF dla drukarni do 0.6.8 (nazwy plików „Gra – drukarnia – awersy.pdf”), z PDF/X-4.
 const DOMYSLNE = {
   format: FORMAT, id: WLASNE, nazwa: 'Własne ustawienia', opis: 'Wszystko do ustawienia ręcznie',
-  spad: 3, strefa: 3, icc: 'fogra39', tac: 300, pdfx: 'PDF/X-4', nadrukCzerni: true, rewersy: true, strony: 'osobno',
+  spad: 3, strefa: 3, promienRogu: null, promienRoguPotwierdzony: true, icc: 'fogra39', tac: 300, pdfx: 'PDF/X-4', nadrukCzerni: true, rewersy: true, strony: 'osobno',
   wzorNazwy: '{projekt} – drukarnia{dopiski} – {strona}', strona: { awersy: 'awersy', rewersy: 'rewersy', razem: '' },
   komponent: '', jezyk: '', minTekstPt: null, uwagi: [],
 };
@@ -28,6 +28,8 @@ function sprawdz(obj, zrodlo = 'profil') {
   p.nazwa = tekst(p.nazwa, p.id); p.opis = tekst(p.opis);
   if (typeof p.spad !== 'number' || !(p.spad >= 0 && p.spad <= 10)) zle('spad', 'liczba mm od 0 do 10');
   if (p.strefa != null && (typeof p.strefa !== 'number' || p.strefa < 0)) zle('strefa', 'liczba mm albo null');
+  if (p.promienRogu != null && (typeof p.promienRogu !== 'number' || !(p.promienRogu >= 0 && p.promienRogu <= 20))) zle('promienRogu', 'liczba mm od 0 do 20 albo null');
+  if (typeof p.promienRoguPotwierdzony !== 'boolean') zle('promienRoguPotwierdzony', 'true albo false');
   // icc: klucz profilu z eci.org, „rgb” (bez konwersji) albo ścieżka do pliku .icc (tylko Własne ustawienia).
   if (typeof p.icc !== 'string' || !(PROFILE_ICC.includes(p.icc) || /\.ic[cm]$/i.test(p.icc))) zle('icc', `${PROFILE_ICC.join(', ')} albo ścieżka do pliku .icc`);
   if (p.tac != null && (typeof p.tac !== 'number' || p.tac < 100 || p.tac > 400)) zle('tac', 'limit w % od 100 do 400 albo null');

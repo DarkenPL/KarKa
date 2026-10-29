@@ -24,6 +24,8 @@ Plik JSON w UTF-8. Przykład – `longpack.json`:
   "opis": "Offset – karty do gier",
   "spad": 3,
   "strefa": 3,
+  "promienRogu": 5,
+  "promienRoguPotwierdzony": false,
   "icc": "iso300",
   "tac": 300,
   "pdfx": "PDF/X-4",
@@ -46,6 +48,8 @@ Plik JSON w UTF-8. Przykład – `longpack.json`:
 | `nazwa`, `opis` | tekst | nazwa w oknie i w komunikatach, opis w podsumowaniu | tak |
 | `spad` | mm, 0–10 | spad w PDF (strona = karta + 2 × spad) | tak |
 | `strefa` | mm albo `null` | strefa bezpieczna od linii cięcia | nie (opis; dla narzędzia sprawdzającego) |
+| `promienRogu` | mm, 0–20, albo `null` | promień narożnika wykrojnika – LongPack i Printnet: 5 mm z rysunku formatów Fabryki Kart (2019, s. 7), drukarnie go nie podają | Raport drukarni (od 0.7.18): odstęp od łuku w rogach ([drukarnia.md](drukarnia.md#zaokrąglone-rogi-od-0718-issue-146)); `null` – tylko `KARTA … zaokrąglenie=` z szablonu; w oknie: „Narożniki: promień …” |
+| `promienRoguPotwierdzony` | `true`/`false` | `false` – w oknie i w raporcie dopisek „nie potwierdzony przez drukarnię” | tak (domyślnie `true`) |
 | `icc` | tekst | `iso300` (ISO Coated v2 300 % ECI), `fogra39`, `fogra51`, `rgb` (bez konwersji) albo ścieżka do pliku `.icc` (tylko Własne) | tak |
 | `tac` | % albo `null` | limit całkowitego pokrycia farbą – pomiar po konwersji, przekroczenie = ostrzeżenie | tak |
 | `pdfx` | `"PDF/X-4"` albo `null` | metadane PDF/X-4 po konwersji CMYK | tak |

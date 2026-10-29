@@ -3802,6 +3802,75 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       return { ok: !b.length, bledy: b, ...w };
     })()`);
   }
+  // Łuk narożnika i szeroki otok (#146): promień 5 mm – kwadratowa ikona / obrazek / prostokąt 3 mm od obu krawędzi → ~2,2 mm
+  // od łuku, 3,6 mm → nic; okrągła ikona SVG i ELIPSA w (3, 3) → nic (z kształtu); promień 3 → nic; profil bez promienia
+  // i KARTA … zaokrąglenie=6 → promień 6; kształt przy krawędzi – pomijany; OTOK 5 mm – UWAGA „szerszy”; sekcja raportu.
+  let naroznikTest = null;
+  if (testBloku('naroznik')) {
+    naroznikTest = await wc.executeJavaScript(`(async () => {
+      const b = [], w = {}, dodane = ['Ikony/kw.png', 'Ikony/kolo.svg', 'Ikony/kw.svg'];
+      const d = document.createElement('div');
+      try {
+        const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); g.fillStyle = '#c33'; g.fillRect(0, 0, 64, 64);
+        files.set(norm(dodane[0]), new File([await new Promise((r) => c.toBlob(r, 'image/png'))], 'kw.png', { type: 'image/png', lastModified: 1 }));
+        const svg = (x) => new File(['<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">' + x + '</svg>'], 'i.svg', { type: 'image/svg+xml', lastModified: 1 });
+        files.set(norm(dodane[1]), svg('<circle cx="50" cy="50" r="50" fill="#336699"/>'));
+        files.set(norm(dodane[2]), svg('<rect width="100" height="100" fill="#336699"/>'));
+        const icons = { kw: { url: fileUrl(dodane[0]), plik: dodane[0] }, kolo: { url: fileUrl(dodane[1]), plik: dodane[1] }, kws: { url: fileUrl(dodane[2]), plik: dodane[2] } };
+        const karta = (tpl, n) => { const t = parseTemplate(tpl, 'rog.txt'); if (t.bledy.length) b.push('parser ' + JSON.stringify(t.bledy));
+          const tal = t.talie[0]; return renderCard(tal, tal.awers, {}, { warn: new Set(), icons, label: 'Róg ' + n, plik: 'rog.txt', kolumny: true, wbudowane: {} }); };
+        const ra = karta('[TALIA Róg]\\nKARTA = 63, 88\\nTŁO = #ffffff\\n'
+          + 'IKONA = 3, 3, 5, 5, {kw}\\n'                              // lewy górny: 2,2 mm od łuku
+          + 'IKONA = 54.4, 3.6, 5, 5, {kw}\\n'                         // prawy górny: 3,6 mm od krawędzi – nic
+          + 'ELIPSA = 3, 80, 5, 5, kolor=#336699\\n'                   // lewy dolny: okrąg – 3,2 mm od łuku, nic
+          + 'IKONA = 55, 80, 5, 5, {kws}\\n'                           // prawy dolny: kwadratowy SVG – 2,2 mm
+          + 'PROSTOKĄT = 0, 40, 5, 8, kolor=#336699\\n', 1);            // przy krawędzi – pomijany
+        const rb = karta('[TALIA Róg]\\nKARTA = 63, 88\\nTŁO = #ffffff\\n'
+          + 'IKONA = 3, 3, 5, 5, {kolo}\\n'                            // lewy górny: okrągły SVG – nic
+          + 'OBRAZEK = 55, 3, 5, 5, "' + dodane[0] + '", dopasuj=rozciągnij\\n'   // prawy górny: 2,2 mm
+          + 'PROSTOKĄT = 3, 80, 5, 5, kolor=#336699\\n'                // lewy dolny: 2,2 mm
+          + 'OTOK = 5, #8a7f72\\n', 2);                                // szerszy niż strefa – UWAGA
+        const rc = karta('[TALIA Róg]\\nKARTA = 63, 88, zaokrąglenie=6\\nTŁO = #ffffff\\nIKONA = 3.6, 3.6, 5, 5, {kw}\\n', 3);   // promień 6: 3,6 mm za mało (≥ 3,88)
+        d.style.cssText = 'position:fixed;left:-3000px;top:0';
+        d.innerHTML = [ra, rb, rc].map((r, i) => '<div class="karta" data-talia="Róg" title="Róg ' + (i + 1) + '" style="' + esc(r.style) + '">' + r.html + '</div>').join('');
+        document.body.appendChild(d);
+        const [ka, kb, kc] = d.children;
+        await waitForImages(d); fitAll(d); await ukladDoPomiaru([ka, kb, kc]);
+        const opis = (l) => l.map((x) => x.element + ':' + x.naroznik + ':' + x.odstep);
+        const t0 = performance.now();
+        const na = naroznikiKarty(ka, 5), nb = naroznikiKarty(kb, 5);
+        w.czas = Math.round(performance.now() - t0);
+        w.a = opis(na); w.b = opis(nb);
+        const jest = (l, el, rog) => l.some((x) => x.element === el && x.naroznik === rog && Math.abs(x.odstep - 2.2) < 0.1);
+        if (na.length !== 2 || !jest(na, 'IKONA', 'lewy górny') || !jest(na, 'IKONA', 'prawy dolny')) b.push('karta 1 ' + JSON.stringify(w.a));
+        if (nb.length !== 2 || !jest(nb, 'OBRAZEK', 'prawy górny') || !jest(nb, 'PROSTOKĄT', 'lewy dolny')) b.push('karta 2 ' + JSON.stringify(w.b));
+        w.r3 = opis(naroznikiKarty(ka, 3));
+        if (w.r3.length) b.push('promień 3 ' + JSON.stringify(w.r3));
+        w.promien = [promienRoguKarty(ka, { promienRogu: 5 }), promienRoguKarty(ka, null), promienRoguKarty(kc, null), promienRoguKarty(kc, { promienRogu: 5 })];
+        if (w.promien.join() !== '5,0,6,6') b.push('promienRoguKarty ' + JSON.stringify(w.promien));
+        w.c = opis(naroznikiKarty(kc, promienRoguKarty(kc, null)));
+        if (w.c.length !== 1 || !/^IKONA:lewy górny:/.test(w.c[0]) || !(parseFloat(w.c[0].split(':')[2]) < 3)) b.push('zaokrąglenie=6 ' + JSON.stringify(w.c));
+        w.otok = obwodkiKarty(kb).map((x) => x.element + ':' + x.poziom + ':' + x.odstep + ':' + !!x.szerszy);
+        if (w.otok.join() !== 'OTOK:UWAGA:5:true') b.push('otok ' + JSON.stringify(w.otok));
+        // Sekcje raportu z wynikiem testowym.
+        const oryg = window.raportDrukarni;
+        window.raportDrukarni = async () => ({ margines: 3, karty: 2, niezmierzone: [], odstep: [], czern: [], krawedz: [], spad: [], spadSzablonu: { talie: {}, bez: [], pliki: [], zmiesc: [] },
+          progiTekstu: { czarny: 6, kontra: 8, profil: null }, malyTekst: [], obwodki: obwodkiKarty(kb).map((x) => ({ talia: 'Róg', strona: 'awers', ...x, karty: ['Róg 2'] })),
+          naroznik: [...na, ...nb].map((x, i) => ({ talia: 'Róg', strona: 'awers', ...x, karty: ['Róg ' + (i < na.length ? 1 : 2)] })), promienRogu: 5,
+          profilRogu: { nazwa: 'LongPack', promien: 5, potwierdzony: false } });
+        try {
+          const sek = await raportJson({ drukarnia: true });
+          const s1 = sek.find((x) => x.tytul === 'Drukarnia: elementy przy zaokrąglonym rogu'), s2 = sek.find((x) => x.tytul === 'Drukarnia: obwódki i ramki przy linii cięcia');
+          w.sekcje = { naroznik: s1 && s1.pozycje, obwodki: s2 && s2.pozycje };
+          if (!s1 || s1.ok || s1.pozycje.length !== 5 || !/^UWAGA 2,2 mm od łuku cięcia – Róg – awersy \\(1\\): .*(lewy górny|prawy dolny) narożnik – .*promieniu 5,0 mm.*≥ 3,6 mm od obu krawędzi/.test(s1.pozycje[0])
+            || !/^Promień narożnika: 5,0 mm – profil LongPack 5,0 mm \\(nie potwierdzony przez drukarnię\\)/.test(s1.pozycje[4])) b.push('sekcja narożników ' + JSON.stringify(w.sekcje.naroznik));
+          if (!s2 || !s2.pozycje.some((t) => /^UWAGA 5,0 mm – Róg – awersy \\(1\\): OTOK 5 mm, wewnętrzna krawędź – szerszy niż strefa bezpieczna/.test(t))) b.push('sekcja obwódek ' + JSON.stringify(w.sekcje.obwodki));
+        } finally { window.raportDrukarni = oryg; }
+      } catch (e) { b.push('wyjątek: ' + ((e && e.stack) || e)); }
+      finally { d.remove(); dodane.forEach((p) => files.delete(norm(p))); }
+      return { ok: !b.length, bledy: b, ...w };
+    })()`);
+  }
   // OTOK (#132): geometria z obrazu 600 dpi (pas 3,00 mm na czterech bokach, promień rogu 3 mm), karta ze spadem
   // (pas do końca spadu, rogi bez prześwitu), jeśli= i kolor z pustej kolumny, Raport drukarni (otok 2 mm – UWAGA,
   // otok 3 mm – nic, tekst pod otokiem – osobna sekcja zamiast odstępu od cięcia).
@@ -4035,7 +4104,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       // Styk krawędź w krawędź (#143) – przykłady bez styków.
       const styk = r.styk.map((x) => x.talia + '/' + x.strona + ' ' + x.krawedz + ' ' + x.odstep + ': ' + x.opis + ' z ' + x.z + ' (' + x.karty.slice(0, 3).join(', ') + ')');
       return { ok: !obraz.length && !r.liniiNiezmierzone.length && !styk.length, karty: r.karty, ms, ms2, obraz: obraz.map(wpis), szablon: r.obwodki.filter((x) => x.element !== 'OBRAZ').map(wpis),
-        info: r.obwodkiInfo.map(wpis), niezmierzone: r.liniiNiezmierzone, styk };
+        info: r.obwodkiInfo.map(wpis), niezmierzone: r.liniiNiezmierzone, styk, promienRogu: r.promienRogu,
+        naroznik: r.naroznik.map((x) => x.odstep + ' ' + x.talia + '/' + x.strona + ' ' + x.naroznik + ': ' + x.opis + ' (' + x.karty.slice(0, 3).join(', ') + (x.karty.length > 3 ? ' +' + (x.karty.length - 3) : '') + ')') };   // łuk narożnika (#146) – lista, bez wpływu na ok
     })()`);
   }
   CZASY_TESTU.push([null, Date.now()]);                  // koniec ostatniego bloku
@@ -4049,8 +4119,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
     && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!filtrWTrakcie || filtrWTrakcie.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!otokTest || otokTest.ok) && (!stykTest || stykTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!naroznikTest || naroznikTest.ok) && (!otokTest || otokTest.ok) && (!stykTest || stykTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok);
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, naroznik: naroznikTest, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
