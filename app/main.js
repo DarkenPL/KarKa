@@ -2708,35 +2708,44 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const sekcje = document.querySelectorAll('#podglad .talia').length, awersy = document.querySelectorAll('#podglad .karta:not(.rewers)').length;
       const ustaw = (v) => { $('filtr').value = v; $('filtr').dispatchEvent(new Event('change')); };
       const widoczne = () => visibleSections().map((s) => s.dataset.talia).join('|');
-      // Start pracy = klasa na #podglad (przed #114: wyczyszczone pole filtra) – dopiero wtedy zmiana filtra „w trakcie”.
-      const wTrakcie = async () => { for (let i = 0; i < 2000; i++) { if ($('podglad').classList.contains('wszystkie-talie') || !$('filtr').value) return true; await new Promise((r) => setTimeout(r, 2)); } return false; };
+      // Start pracy = klasa na #podglad (przed #114: wyczyszczone pole filtra). Obserwator klasy woła wPracy (domyślnie
+      // zmiana filtra na B) w mikrozadaniu zaraz po jej dodaniu, przed dalszym ciągiem pracy (#152): sprawdzanie co 2 ms
+      // nie trafiało w raport, który przy pełnej pamięci LINIE_KART kończy się bez oddania pętli zdarzeń. → [wynik, start]
+      const wTrakcie = async (praca, wPracy = () => ustaw(B)) => {
+        let start = false;
+        const obs = new MutationObserver(() => {
+          if (start || !$('podglad').classList.contains('wszystkie-talie')) return;
+          start = true; obs.disconnect(); wPracy();
+        });
+        obs.observe($('podglad'), { attributes: true, attributeFilter: ['class'] });
+        try { return [await praca().catch(blad), start]; } finally { obs.disconnect(); }
+      };
       const po = () => ({ filtr: $('filtr').value === B, widoczne: widoczne() === B, bezKlasy: !$('podglad').classList.contains('wszystkie-talie') });
       const raportOk = (r) => !!r && !r.blad && r.karty === wszystkie && r.niezmierzone.length === 0;
       const blad = (e) => ({ blad: String((e && (e.message || e.type)) || e) });
       const w = {}, start = { filtr: $('filtr').value, rewersy: POKAZ_REWERSY };   // stan strony – przywracany na końcu
       try {
-        ustaw(A); let p = raportDrukarni().catch(blad); w.raportStart = await wTrakcie(); ustaw(B);
-        let r = await p; w.raport = { karty: r.karty, wszystkie, niezmierzone: r.niezmierzone && r.niezmierzone.length, blad: r.blad, ...po() };
+        ustaw(A); let [r, s] = await wTrakcie(raportDrukarni); w.raportStart = s;
+        w.raport = { karty: r.karty, wszystkie, niezmierzone: r.niezmierzone && r.niezmierzone.length, blad: r.blad, ...po() };
         w.raport.ok = w.raportStart && raportOk(r) && w.raport.filtr && w.raport.widoczne && w.raport.bezKlasy;
-        ustaw(A); p = katalogPng({}).catch(blad); w.katalogStart = await wTrakcie(); ustaw(B);
-        const k0 = await p, k = Array.isArray(k0) ? k0 : [], talieKat = [...new Set(k.map((x) => x.talia))];
+        // Katalog na wyłączność jak w aplikacji (zapiszKatalog): przebudowa w trakcie zwalnia adresy blob: obrazków (#152).
+        ustaw(A); const [k0, ks] = await wTrakcie(() => naWylacznosc(() => katalogPng({}))); w.katalogStart = ks;
+        const k = Array.isArray(k0) ? k0 : [], talieKat = [...new Set(k.map((x) => x.talia))];
         w.katalog = { blad: k0 && k0.blad, talie: talieKat.length, oczekiwane: talie.length, puste: k.filter((x) => !x.blob || x.blob.size < 1000).length, ...po() };
         w.katalog.ok = w.katalogStart && talieKat.length === talie.length && w.katalog.puste === 0 && w.katalog.filtr && w.katalog.widoczne && w.katalog.bezKlasy;
         pokazRewersyKart(true);
-        ustaw(A); p = raportDrukarni().catch(blad); w.rewersyStart = await wTrakcie(); ustaw(B);
-        r = await p; pokazRewersyKart(false);
+        ustaw(A); [r, s] = await wTrakcie(raportDrukarni); w.rewersyStart = s;
+        pokazRewersyKart(false);
         w.rewersy = { karty: r.karty, niezmierzone: r.niezmierzone && r.niezmierzone.length, blad: r.blad, ...po() };
         w.rewersy.ok = w.rewersyStart && raportOk(r) && w.rewersy.filtr && w.rewersy.bezKlasy;
         if (${!jestPrzykladem(szablon)}) {
-          ustaw(A); p = exportPcio().catch(blad); w.pcioStart = await wTrakcie();
-          const q = raportDrukarni().catch(blad);                          // w trakcie eksportu – bez kolejki (EKSPORT_TRWA)
-          ustaw(B);
-          const [x, rz] = await Promise.all([p, q]);
+          let q;                                                           // raport w trakcie eksportu – bez kolejki (EKSPORT_TRWA)
+          ustaw(A); const [x, ps] = await wTrakcie(exportPcio, () => { q = raportDrukarni().catch(blad); ustaw(B); }); w.pcioStart = ps;
+          const rz = await q;
           w.pcio = { blad: (x && x.blad) || (rz && rz.blad), holdery: x && x.holdery, sekcje, karty: x && x.karty, awersy, raport: rz && rz.karty, niezmierzone: rz && rz.niezmierzone && rz.niezmierzone.length, ...po() };
           w.pcio.ok = w.pcioStart && !!x && x.holdery === sekcje && x.karty === awersy && raportOk(rz) && w.pcio.filtr && w.pcio.widoczne && w.pcio.bezKlasy;
           // Eksport obrazków (JPG) przy filtrze na jedną talię: karty talii ukrytych filtrem też (html-to-image – karta z wymiarami).
-          ustaw(A); p = eksportObrazkow({ zlecenie: true, rewersy: false }).catch(blad); w.obrazkiStart = await wTrakcie(); ustaw(B);
-          const o = await p;
+          ustaw(A); const [o, os] = await wTrakcie(() => eksportObrazkow({ zlecenie: true, rewersy: false })); w.obrazkiStart = os;
           w.obrazki = { blad: o && o.blad, pliki: o && o.pliki, awersy, ...po() };
           w.obrazki.ok = w.obrazkiStart && !!o && !o.blad && o.pliki === awersy && w.obrazki.filtr && w.obrazki.widoczne && w.obrazki.bezKlasy;
         }
