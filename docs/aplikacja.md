@@ -161,7 +161,7 @@ Od 0.5.8 każdy projekt otwiera się we własnej zakładce, więc w jednym oknie
   - w pozostałych przypadkach powstaje nowa zakładka na końcu paska.
 - **Zamykanie:** ⌘W, `×` albo środkowy przycisk myszy. Przy niezapisanych zmianach w edytorze aplikacja pyta. Po zamknięciu aktywna staje się sąsiednia zakładka: po prawej, a gdy jej nie ma, po lewej. Ostatnia zakładka zostaje pusta, ⇧⌘W zamyka okno, a ⌘Q kończy pracę.
 - **Przełączanie:** kliknięcie, ⌃Tab / ⌃⇧Tab, ⌘1–9 albo lista zakładek w menu **Okno**.
-- **Limit: 8 zakładek.** Przy próbie otwarcia dziewiątej aplikacja proponuje zamknięcie najdawniej używanej zakładki bez niezapisanych zmian. Gdy każda ma zmiany albo trwa w niej zlecenie, aplikacja odmawia.
+- **Limit: 8 zakładek.** Przy próbie otwarcia dziewiątej aplikacja najpierw zamyka bez pytania [zakładkę otwartą przez zlecenie](#rodzaje-zakładek), której nie oglądałeś (od 0.7.10; wróci przy następnym zleceniu). Gdy takiej nie ma, proponuje zamknięcie najdawniej używanej zakładki bez niezapisanych zmian. Gdy każda ma zmiany albo trwa w niej zlecenie, aplikacja odmawia.
 - **Po starcie** wracają zakładki z poprzedniego uruchomienia i aktywna jest ta sama co wtedy. Nie wracają przykłady, puste zakładki i nieprzejęte zakładki otwarte przez zlecenie (niżej).
 - Niewidoczna zakładka sprawdza pliki rzadziej, co kilka sekund zamiast co 1,5 s. Po przełączeniu na nią karty są aktualne od razu.
 
@@ -273,7 +273,7 @@ Fragment wyniku `wynik-pdf.json`:
 
 Bez dodatkowych ustawień zlecenia wykonują się tylko w projektach otwartych w zakładkach. Od 0.7.3 KarKa może sama otwierać projekty, w których czeka zlecenie:
 
-1. **KarKa → Folder z projektami → Wybierz…** i wskaż folder, w którym trzymasz gry (np. `~/Projekty-kart`). Wybrany folder widać w tym samym podmenu. **Wyłącz** przywraca pracę tylko z otwartymi zakładkami. Domyślnie ustawienie jest wyłączone.
+1. **KarKa → Folder z projektami → Wybierz…** i wskaż folder, w którym trzymasz gry (np. `~/Projekty-kart`). Wybrany folder widać w tym samym podmenu. **Wyłącz** przywraca pracę tylko z otwartymi zakładkami. Domyślnie ustawienie jest wyłączone. Od 0.7.10 KarKa ostrzega i pyta („Wybierz mimo to” / „Anuluj”), gdy wskażesz folder domowy, cały dysk, `/Users`, `/Volumes`, folder z przykładami albo folder z ponad 200 podfolderami – przegląd co 3 s takiego folderu niepotrzebnie obciąża dysk.
 2. Co 3 s KarKa sprawdza `.generator/zlecenia/` w podfolderach tego folderu i jeden poziom niżej, np. `Projekty-kart/Ogród/` i `Projekty-kart/Próby/Ogród/`. Pomija:
    - foldery ukryte i zaczynające się od `_`;
    - `Szablony`, `Export`, `Ikony`/`Icons` i `node_modules`;
@@ -342,6 +342,7 @@ Od 0.7.3 KarKa zapisuje plik `~/Library/Application Support/KarKa/stan.json`. Pr
     { "nazwa": "Wyprawa", "folder": "/Users/ja/Projekty-kart/Wyprawa", "szablon": "/Users/ja/Projekty-kart/Wyprawa/Szablony/wyprawa.txt",
       "rodzaj": "otwarta przez zlecenie", "zmiany": false, "zlecenie": true } ],
   "kolejka": 2,
+  "ostatnieWykonane": { "polecenie": "pdf", "folder": "…/Projekty-kart/Wyprawa", "czas": "2026-10-28T09:14:40.002Z", "ok": true, "blad": null },
   "ostatnieZlecenie": { "polecenie": "pdf", "folder": "/Users/ja/Projekty-kart/Wyprawa", "czas": "2026-10-28T09:14:40.002Z", "ok": true, "blad": null } }
 ```
 
@@ -352,12 +353,13 @@ Od 0.7.3 KarKa zapisuje plik `~/Library/Application Support/KarKa/stan.json`. Pr
 | `czas` | chwila ostatniego zapisu pliku – działająca KarKa odświeża go co kilka sekund |
 | `folderProjektow` | [Folder z projektami](#gdy-projekt-nie-jest-otwarty) albo `null`, gdy jest wyłączony |
 | `zakladki` | otwarte zakładki z projektem (bez pustych): nazwa, folder, szablon, [rodzaj](#rodzaje-zakładek), `zmiany` (niezapisany edytor), `zlecenie` (trwa zlecenie) |
-| `kolejka` | ile zleceń czekało na początku bieżącego przeglądu, razem z zaległymi, które za chwilę zostaną odłożone (0, gdy przegląd się skończył) |
+| `kolejka` | ile zleceń z bieżącego przeglądu jeszcze czeka, razem z zaległymi, które za chwilę zostaną odłożone; maleje po każdym zakończonym zleceniu (od 0.7.10), 0 – przegląd się skończył |
 | `ostatnieZlecenie` | ostatnie zakończone zlecenie: polecenie, folder projektu, czas, `ok`, `blad`; także niewykonane (np. zaległe) |
+| `ostatnieWykonane` | (od 0.7.10) ostatnie zlecenie, które naprawdę się wykonało (`ok` może być `false` przy błędzie w trakcie) – bez zaległych i odrzuconych przed wykonaniem; `null`, gdy od startu żadnego nie było |
 
 - KarKa zapisuje plik przy każdym przeglądzie zleceń (co ok. 3 s) i po każdej zmianie, ale nie częściej niż co 2 s. Zapis idzie przez plik tymczasowy, więc czytający nigdy nie trafi na połowę pliku.
 - **Po awarii albo zabiciu procesu `dziala` zostaje `true`.** Sprawdzaj więc też, czy proces `pid` żyje (`kill -0 <pid>`, przykład [wyżej](#gdy-karka-jest-zamknięta)), i czy `czas` jest świeży: `dziala: true` z `czas` starszym niż minuta oznacza, że KarKa nie działa (a numer `pid` mógł już dostać inny proces).
-- `kolejka` jest liczona raz, na początku przeglądu. W trakcie długiego zlecenia (np. PDF w CMYK) nie maleje.
+- `kolejka` jest liczona na początku przeglądu i maleje po każdym zakończonym zleceniu. Nowe zlecenia zapisane w trakcie przeglądu doliczają się dopiero w następnym. W trakcie długiego zlecenia (np. PDF w CMYK) liczba stoi.
 
 **Kolejność sprawdzania, gdy nie ma wyniku:**
 1. `dziala: false`, martwy `pid` albo `czas` starszy niż minuta – KarKa nie działa: `open -g -a KarKa --args --w-tle`. Brak pliku stanu oznacza, że KarKa nie była uruchomiona w wersji 0.7.3 lub nowszej. Starsze wersje nie znają Folderu z projektami, zaległych zleceń ani pliku stanu – zlecenia wykonują tylko w otwartych zakładkach (`wersjaAplikacji` w wyniku dowolnego zlecenia).

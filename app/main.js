@@ -169,7 +169,10 @@ function ulozWidok() {
   const [width, height] = okno.getContentSize();
   const gora = pasekWidoczny() ? PASEK_WYSOKOSC : 0;
   if (pasek) pasek.setBounds({ x: 0, y: 0, width, height: gora });
-  if (aktywny && aktywny.widok) aktywny.widok.setBounds({ x: 0, y: gora, width, height: Math.max(0, height - gora) });
+  // Wszystkie widoki, także odpięte zakładki w tle – zlecenie w tle (raport drukarni, układ stron) liczy w rozmiarze okna (#118, pkt 1).
+  const obszar = { x: 0, y: gora, width, height: Math.max(0, height - gora) };
+  for (const p of projekty) if (p.widok) p.widok.setBounds(obszar);
+  if (aktywny && aktywny.widok) aktywny.widok.setBounds(obszar);
 }
 // Tytuł okna, plik w pasku tytułu i kropka niezapisanych zmian – z aktywnego projektu.
 function odswiezOkno() {
@@ -247,7 +250,7 @@ function zapiszZakladki() {
   u.aktywnaZakladka = Math.max(0, lista.indexOf(aktywny));
   zapiszUstawienia(u);
 }
-const tenSamFolder = (a, b) => !!a && !!b && (path.resolve(a) === path.resolve(b) || realna(a) === realna(b));
+const tenSamFolder = (a, b) => !!a && !!b && (path.resolve(a).normalize('NFC') === path.resolve(b).normalize('NFC') || realna(a) === realna(b));
 
 // Nowa pusta zakładka (⌘T, +): ekran startowy, z którego wybór projektu wczytuje go w tej zakładce.
 // Przy limicie pyta o zamknięcie najdawniej używanej zakładki; null = nie otwarto.
@@ -262,6 +265,9 @@ async function nowaZakladka() {
 // Limit zakładek: propozycja zamknięcia najdawniej używanej bez niezapisanych zmian i bez trwającego zlecenia;
 // gdy takiej nie ma – sama odmowa (nic nie znika bez wiedzy użytkownika).
 async function zwolnijZakladke() {
+  // Najpierw nieprzejęta zakładka ze zlecenia – bez pytania, jak przy limicie w zleceniu (#118, pkt 6 – decyzja 29.10.2026).
+  const zeZlecenia = zakladkaZeZleceniaDoZamkniecia();
+  if (zeZlecenia) return zamknijZakladke(zeZlecenia);
   const kandydat = projekty.filter((p) => !p.zmiany && !p.zlecenieTrwa).sort((a, b) => a.uzyty - b.uzyty)[0] || null;
   let zgoda = false;
   if (testowy) { TEST.limit = { liczba: projekty.length, kandydat: kandydat ? kandydat.nazwaZakladki : null, odmowa: !kandydat }; zgoda = !!kandydat && TEST.odpowiedzLimit; }
@@ -687,8 +693,11 @@ function czytajZlecenie(tekst) {
   return o;
 }
 const plain = (k) => String(k).trim().toLowerCase();
-const realna = (d) => { try { return fs.realpathSync(d); } catch (e) { return path.resolve(d); } };
-const STAN = { kolejka: 0, ostatnie: null };       // do pliku stanu (stan.json): zlecenia czekające i ostatnie wykonane
+// W NFC: polskie znaki w nazwach przychodzą w NFD (Finder, open, readdir folderu założonego w Finderze) i w NFC (ustawienia, zlecenia) – #118, pkt 3.
+const realna = (d) => { try { return fs.realpathSync(d).normalize('NFC'); } catch (e) { return path.resolve(d).normalize('NFC'); } };
+const STAN = { kolejka: 0, ostatnie: null, wykonane: null };   // do pliku stanu (stan.json): zlecenia czekające, ostatnie zlecenie i ostatnie wykonane
+// Zlecenie zakończone (wykonane albo z wynikiem bez wykonania) – kolejka maleje w trakcie przeglądu (#118, pkt 2).
+const zlecenieZakonczone = () => { STAN.kolejka = Math.max(0, STAN.kolejka - 1); zapiszStan(); };
 // Wynik zlecenia (wynik-<polecenie>.json; katalog też dawny wynik.json – zgodność z v0.4.6–0.4.10).
 function plikiWyniku(folderZl, polecenie) {
   const w = [path.join(folderZl, `wynik-${polecenie}.json`)];
@@ -706,7 +715,7 @@ function wynikBezWykonania(folder, polecenie, blad, dodatki = {}, p = null) {
     for (const w of plikiWyniku(folderZl, polecenie)) fs.writeFileSync(w, JSON.stringify(wynik, null, 1));
   } catch (e) { /* trudno – folder zniknął */ }
   STAN.ostatnie = { polecenie, folder, czas: wynik.czas, ok: false, blad };
-  zapiszStan();
+  zlecenieZakonczone();
   return wynik;
 }
 // Zaległe zlecenie (#90, pkt 4): plik starszy niż 10 min (mtime) nie jest wykonywany, tylko przenoszony do
@@ -824,7 +833,8 @@ async function wykonajPlikZlecenia(p, polecenie) {
     for (const w of wyniki) fs.writeFileSync(w, JSON.stringify(wynik, null, 1));
   } catch (e) { /* trudno – folder zniknął */ }
   STAN.ostatnie = { polecenie, folder: p.folder, czas: wynik.czas, ok: !!wynik.ok, blad: wynik.blad || null };
-  zapiszStan();
+  STAN.wykonane = STAN.ostatnie;                          // bez zaległych i odrzuconych (#118, pkt 4)
+  zlecenieZakonczone();
   return true;
 }
 // Znak „trwa zlecenie” tylko przy prawdziwym zleceniu (nie przez cały przegląd folderu) – kropka w pasku nie miga.
@@ -845,13 +855,13 @@ function folderyZeZleceniami() {
   const korzen = ustawienia().folderProjektow;
   if (!korzen) return [];
   let kr;
-  try { kr = fs.realpathSync(korzen); } catch (e) { return []; }
+  try { kr = fs.realpathSync(korzen).normalize('NFC'); } catch (e) { return []; }
   const otwarte = new Set(projekty.filter((p) => p.folder).map((p) => realna(p.folder)));
   const wynik = [], byly = new Set();
   const podfoldery = (d) => { try { return fs.readdirSync(d).filter((n) => !n.startsWith('.') && !n.startsWith('_') && !POMIJANE_FOLDERY.has(n.toLowerCase())); } catch (e) { return []; } };
   const sprawdz = (d, poziom) => {
     let real;
-    try { real = fs.realpathSync(d); } catch (e) { return; }
+    try { real = fs.realpathSync(d).normalize('NFC'); } catch (e) { return; }
     if (!real.startsWith(kr + path.sep) || byly.has(real) || !jestFolderem(real)) return;
     byly.add(real);
     if (!jestPrzykladem(real) && !otwarte.has(real)) { const l = oczekujace(real); if (l.length) wynik.push({ folder: real, lista: l }); }
@@ -862,15 +872,17 @@ function folderyZeZleceniami() {
 }
 // Projekt bez zakładki: zakładka w tle (dopisana z prawej, aktywna bez zmian). Przy limicie zamykana jest najdawniej
 // używana nieprzejęta zakładka ze zlecenia bez zmian; gdy takiej nie ma – błąd „limit zakładek” bez okna (pkt 3).
+const zakladkaZeZleceniaDoZamkniecia = () => projekty.filter((x) => x.zeZlecenia && x !== aktywny && !x.zmiany && !x.zlecenieTrwa)
+  .sort((a, b) => a.ostatnieZlecenie - b.ostatnieZlecenie)[0] || null;
 async function otworzWTle(folder, klucz) {
   const szablon = szablonDlaZlecenia(folder, klucz);
   if (projekty.length >= LIMIT_ZAKLADEK) {
-    const k = projekty.filter((x) => x.zeZlecenia && x !== aktywny && !x.zmiany && !x.zlecenieTrwa).sort((a, b) => a.ostatnieZlecenie - b.ostatnieZlecenie)[0];
+    const k = zakladkaZeZleceniaDoZamkniecia();
     if (!k || !(await zamknijZakladke(k))) throw new Error('limit zakładek');
   }
   const p = await new Projekt().uruchom();
   p.zeZlecenia = true;
-  if (aktywny && aktywny.widok) p.widok.setBounds(aktywny.widok.getBounds());   // rozmiar strony jak w oknie, choć widok nie jest przypięty
+  ulozWidok();                                             // rozmiar strony jak w oknie, choć widok nie jest przypięty
   p.wc.setBackgroundThrottling(false);                     // wczytanie i pierwsza budowa kart bez ściśniętych timerów
   try {
     await otworzSzablon(szablon, p);
@@ -945,7 +957,7 @@ function trescStanu(dziala = true) {
   return { dziala, wersja: WERSJA, pid: process.pid, czas: new Date().toISOString(), folderProjektow: ustawienia().folderProjektow || null,
     zakladki: projekty.filter((p) => p.szablon).map((p) => ({ nazwa: p.nazwaZakladki, folder: p.folder, szablon: p.szablon, rodzaj: rodzajZakladki(p),
       zmiany: !!p.zmiany, zlecenie: !!p.zlecenieTrwa })),
-    kolejka: STAN.kolejka, ostatnieZlecenie: STAN.ostatnie };
+    kolejka: STAN.kolejka, ostatnieZlecenie: STAN.ostatnie, ostatnieWykonane: STAN.wykonane };
 }
 function zapiszStanTeraz(dziala = true) {
   if (!app.hasSingleInstanceLock()) return;                // drugi proces (zaraz się zamknie) nie nadpisuje stanu działającej KarKi
@@ -970,7 +982,26 @@ async function wybierzFolderProjektow() {
     message: 'Zlecenia z plików w projektach z tego folderu (i jeden poziom niżej) wykonują się w zakładkach w tle.',
     defaultPath: u.folderProjektow || app.getPath('documents'), properties: ['openDirectory', 'createDirectory'] });
   if (r.canceled || !r.filePaths[0]) return;
+  const powod = ryzykownyFolder(r.filePaths[0]);
+  if (powod) {
+    const o = await dialog.showMessageBox(okno, { type: 'warning', buttons: ['Wybierz mimo to', 'Anuluj'], defaultId: 1, cancelId: 1,
+      message: 'Ten folder raczej nie nadaje się na Folder z projektami.',
+      detail: `${powod} KarKa przegląda Folder z projektami co 3 s, razem z podfolderami na dwóch poziomach. Lepiej wybrać folder, w którym są tylko projekty kart.` });
+    if (o.response !== 0) return;
+  }
   ustawFolderProjektow(r.filePaths[0]);
+}
+// Folder zbyt duży albo nietypowy na przegląd co 3 s (#118, pkt 5): powód do ostrzeżenia albo null.
+const PODFOLDERY_LIMIT = 200;
+function ryzykownyFolder(folder) {
+  const f = realna(folder), prz = realna(PRZYKLADY);
+  if (f === path.parse(f).root || ['/Users', '/Volumes'].includes(f)) return 'To cały dysk albo folder ze wszystkimi użytkownikami.';
+  if (f === realna(app.getPath('home'))) return 'To Twój folder domowy.';
+  if (f === prz || f.startsWith(prz + path.sep) || prz.startsWith(f + path.sep)) return 'To folder z przykładami KarKi (albo folder, w którym leżą).';
+  let n = 0;
+  try { n = fs.readdirSync(f, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.')).length; } catch (e) { /* brak dostępu */ }
+  if (n > PODFOLDERY_LIMIT) return `Ma ${n} podfolderów (więcej niż ${PODFOLDERY_LIMIT}).`;
+  return null;
 }
 function ustawFolderProjektow(folder) {
   const u = ustawienia();
@@ -1618,10 +1649,22 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       && sB.szablon === path.join('Szablony', 'wyprawa.txt') && sB.projekt === 'Wyprawa')
       && z.dwa.liczba === 2 && z.dwa.aktywna && z.dwa.naKoncu && z.dwa.nieprzypiete && z.dwa.zeZlecenia && z.dwa.wTle === true
       && z.dwa.rozmiar && z.dwa.rozmiar[0] > 0 && z.dwa.ustawienia === 0 && z.dwa.ostatnie === 0;
+    // 1a. Zmiana rozmiaru okna: zakładka w tle (odpięta) dostaje rozmiar obszaru pod paskiem (#118, pkt 1).
+    const [w0, h0] = okno.getContentSize();
+    okno.setContentSize(w0 + 60, h0 + 40); ulozWidok(); await czekaj(400);
+    const [w1, h1] = okno.getContentSize();
+    z.rozmiarOkna = { okno: [w1, h1 - PASEK_WYSOKOSC], tlo: PA ? await js(PA, '[innerWidth, innerHeight]') : null };
+    okno.setContentSize(w0, h0); ulozWidok(); await czekaj(200);
+    z.rozmiarOkna.ok = !!z.rozmiarOkna.tlo && w1 !== w0 && Math.abs(z.rozmiarOkna.tlo[0] - w1) <= 1 && Math.abs(z.rozmiarOkna.tlo[1] - (h1 - PASEK_WYSOKOSC)) <= 1;
     // 2. Praca w zakładce nigdy niepokazanej: raport drukarni (klatki – ukladDoPomiaru) i PDF.
+    await przegladKoniec();                                // bez przeglądu w toku – kolejka liczona od nowa z obu zleceń
     zapisz(A, 'raport', 'drukarnia = tak\n'); zapisz(A, 'pdf', 'uklad = a4\nplik = Export/tlo.pdf\n');
+    const probki = [], probkuj = setInterval(() => { if (probki[probki.length - 1] !== STAN.kolejka) probki.push(STAN.kolejka); }, 10);
     sprawdzZlecenia();
     const rA = await czekajNa(A, 'raport'), pA = await czekajNa(A, 'pdf');
+    clearInterval(probkuj);
+    // Kolejka w stanie maleje między dwoma zleceniami jednego przeglądu (#118, pkt 2): 2 → 1 → 0.
+    z.kolejka = { probki, ok: probki.indexOf(2) >= 0 && probki.indexOf(1) > probki.indexOf(2) };
     const pdfTlo = path.join(A, 'Export', 'tlo.pdf');
     await czekaj(300);
     z.praca = { raport: rA && { ok: rA.ok, karty: rA.drukarnia && rA.drukarnia.karty, niezmierzone: rA.drukarnia && (rA.drukarnia.niezmierzone || []).length, blad: rA.blad },
@@ -1634,6 +1677,25 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     await przegladKoniec(); await przegladKoniec();
     z.dowiazanie = { wynik: !!czytaj(zewn, 'stan'), zlecenie: fs.existsSync(path.join(zl(zewn), 'stan')), zakladka: !!zakladka(realna(zewn)) };
     z.dowiazanie.ok = !z.dowiazanie.wynik && z.dowiazanie.zlecenie && !z.dowiazanie.zakladka;
+    // 3a. Folder z nazwą w NFD na dysku, zakładka otwarta ścieżką w NFC: otwarcie tej samej ścieżki w NFD (jak z Findera)
+    // przełącza na tę zakładkę, zlecenie wykonuje się w niej – bez drugiej zakładki dla tego samego folderu (#118, pkt 3).
+    const nazwaNfc = 'Żółw-ęś';
+    fs.cpSync(path.join(PRZYKLADY, '01-wyprawa'), path.join(baza, nazwaNfc.normalize('NFD')), { recursive: true });
+    const nfc = path.join(fs.realpathSync(baza), nazwaNfc);
+    const PN = await otworzWZakladce(path.join(nfc, 'Szablony', 'wyprawa.txt'));
+    if (PN) await czekajNaStrone(PN);
+    pokazProjekt(P);
+    const PN2 = await otworzWZakladce(path.join(fs.realpathSync(baza), nazwaNfc.normalize('NFD'), 'Szablony', 'wyprawa.txt'));
+    const tenSam = !!PN && PN2 === PN;
+    pokazProjekt(P);
+    zapisz(nfc, 'stan'); sprawdzZlecenia();
+    const sN = await czekajNa(nfc, 'stan');
+    z.nfd = { naDysku: fs.readdirSync(baza).some((n) => n !== n.normalize('NFC')), tenSam, wynik: sN && { ok: sN.ok, zakladka: sN.zakladka },
+      zakladki: projekty.filter((x) => x.folder && realna(x.folder) === realna(nfc)).length };
+    if (PN && projekty.includes(PN)) await zamknijZakladke(PN);
+    for (const x of [...projekty]) if (x.folder && realna(x.folder) === realna(nfc)) await zamknijZakladke(x);
+    pokazProjekt(P);
+    z.nfd.ok = !!(PN && tenSam && sN && sN.ok && sN.zakladka === 'w tle') && z.nfd.zakladki === 1;
     // 4. Zaległe (sprzed godziny): w otwartej zakładce i w projekcie bez zakładki (jak przy starcie – świeże wykonane,
     // zaległe odłożone do przeterminowane/).
     zapisz(A, 'stan', '', 3600e3);
@@ -1647,6 +1709,14 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     z.zalegle.ok = !!(zA && !zA.ok && /zaległe/.test(zA.blad || '') && /^\.generator\/zlecenia\/przeterminowane\/\d{4}-\d\d-\d\d-\d\d-\d\d-stan$/.test(zA.przeterminowane || '')
       && zDp && !zDp.ok && /-pdf$/.test(zDp.przeterminowane || '') && zDs && zDs.ok && zDs.zakladka === 'otwarta przez zlecenie')
       && z.zalegle.odlozoneA.length === 1 && z.zalegle.odlozoneD.length === 1 && !z.zalegle.pdf && z.zalegle.zostaly.every((x) => !x);
+    // 4a. Zaległe po wykonanym: ostatnieZlecenie = zaległe (ok: false), ostatnieWykonane bez zmian (#118, pkt 4).
+    await przegladKoniec();
+    const wykonanePrzed = STAN.wykonane;
+    zapisz(A, 'stan', '', 3600e3);
+    sprawdzZlecenia();
+    const zA2 = await czekajNa(A, 'stan');
+    z.wykonane = { przed: wykonanePrzed && wykonanePrzed.polecenie, po: STAN.wykonane && STAN.wykonane.polecenie, ostatnie: STAN.ostatnie && STAN.ostatnie.ok };
+    z.wykonane.ok = !!(zA2 && !zA2.ok && wykonanePrzed && wykonanePrzed.ok && STAN.wykonane === wykonanePrzed && STAN.ostatnie && STAN.ostatnie.ok === false);
     // 5. Klucz szablon =: zakładka ze zlecenia – podmiana; zakładka właściciela z innym szablonem – błąd bez podmiany;
     // nieistniejący szablon – błąd.
     zapisz(B, 'stan', 'szablon = zapasowy\n');
@@ -1679,9 +1749,10 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     let st = null;
     try { st = JSON.parse(fs.readFileSync(plikStanu(), 'utf8')); } catch (e) { /* brak */ }
     z.stanPlik = st && { dziala: st.dziala, wersja: st.wersja, pid: st.pid === process.pid, folder: st.folderProjektow === baza,
-      rodzaje: [...new Set(st.zakladki.map((x) => x.rodzaj))].sort(), ostatnie: st.ostatnieZlecenie && st.ostatnieZlecenie.polecenie, kolejka: st.kolejka };
+      rodzaje: [...new Set(st.zakladki.map((x) => x.rodzaj))].sort(), ostatnie: st.ostatnieZlecenie && st.ostatnieZlecenie.polecenie, kolejka: st.kolejka,
+      wykonane: !!(st.ostatnieWykonane && st.ostatnieWykonane.ok) };
     z.stanPlik = { ...z.stanPlik, ok: !!(st && st.dziala === true && st.wersja === WERSJA && z.stanPlik.pid && z.stanPlik.folder && z.stanPlik.rodzaje.includes('aktywna')
-      && z.stanPlik.rodzaje.includes('otwarta przez zlecenie') && z.stanPlik.rodzaje.includes('w tle') && z.stanPlik.ostatnie && Number.isInteger(st.kolejka)) };
+      && z.stanPlik.rodzaje.includes('otwarta przez zlecenie') && z.stanPlik.rodzaje.includes('w tle') && z.stanPlik.ostatnie && z.stanPlik.wykonane && Number.isInteger(st.kolejka)) };
     // 8. Samozamykanie (czas skrócony do 0): nieprzejęte zakładki ze zleceń znikają, przejęta zostaje.
     TEST.bezczynnosc = 0;
     await przegladKoniec();
@@ -1712,15 +1783,30 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     if (ostPusta && PD) { pokazProjekt(ostPusta); await zamknijZakladke(ostPusta); }
     z.limit.sasiad = { aktywnaZeZlecenia: !!(aktywny && aktywny.zeZlecenia), pdNadal: !!PD && PD.zeZlecenia && projekty.includes(PD), aktywnaToPd: aktywny === PD };
     pokazProjekt(P);
+    // ⌘T przy limicie z nieprzejętą zakładką ze zlecenia: zamknięta bez pytania (TEST.limit = null), nowa pusta otwarta (#118, pkt 6).
+    while (projekty.length < LIMIT_ZAKLADEK) { const n = await nowaZakladka(); if (!n) break; puste.push(n); }
+    TEST.limit = null;
+    const nowaPrzyLimicie = await nowaZakladka();
+    if (nowaPrzyLimicie) puste.push(nowaPrzyLimicie);
+    z.limit.cmdT = { nowa: !!nowaPrzyLimicie, pytanie: TEST.limit, pdZamknieta: !!PD && !projekty.includes(PD), liczba: projekty.length };
+    pokazProjekt(P);
     z.limit.ok = !!(l1 && l1.ok && poPierwszym.liczba === LIMIT_ZAKLADEK && poPierwszym.bZamknieta && poPierwszym.dOtwarta
       && l2 && !l2.ok && l2.blad === 'limit zakładek') && z.limit.liczba === LIMIT_ZAKLADEK && z.limit.pytania === 0 && !z.limit.zlecenie && z.limit.aktywna
-      && !z.limit.sasiad.aktywnaZeZlecenia && z.limit.sasiad.pdNadal && !z.limit.sasiad.aktywnaToPd;
+      && !z.limit.sasiad.aktywnaZeZlecenia && z.limit.sasiad.pdNadal && !z.limit.sasiad.aktywnaToPd
+      && z.limit.cmdT.nowa && z.limit.cmdT.pytanie === null && z.limit.cmdT.pdZamknieta && z.limit.cmdT.liczba === LIMIT_ZAKLADEK;
+    // 10. Ostrzeżenie przy wyborze Folderu z projektami (#118, pkt 5).
+    const duzo = path.join(baza, '_duzo');
+    for (let i = 0; i <= PODFOLDERY_LIMIT; i++) fs.mkdirSync(path.join(duzo, `f${i}`), { recursive: true });
+    z.ryzykowny = { dom: ryzykownyFolder(app.getPath('home')), dysk: ryzykownyFolder('/'), uzytkownicy: ryzykownyFolder('/Users'),
+      przyklady: ryzykownyFolder(PRZYKLADY), przyklad: ryzykownyFolder(path.join(PRZYKLADY, '01-wyprawa')), duzo: ryzykownyFolder(duzo), zwykly: ryzykownyFolder(baza) };
+    fs.rmSync(duzo, { recursive: true, force: true });
+    z.ryzykowny.ok = ['dom', 'dysk', 'uzytkownicy', 'przyklady', 'przyklad', 'duzo'].every((k) => typeof z.ryzykowny[k] === 'string') && z.ryzykowny.zwykly === null;
     // Sprzątanie: folder wyłączony, zakładki spoza stanu sprzed bloku zamknięte, aktywny projekt testowy.
     ustawFolderProjektow(null);
     for (const x of [...projekty]) if (!przed.includes(x)) await zamknijZakladke(x);
     pokazProjekt(P);
     z.sprzatanie = { liczba: projekty.length === przed.length, pytania: TEST.pytania - pytania, folder: !ustawienia().folderProjektow };
-    z.ok = !!(z.dwa.ok && z.praca.ok && z.dowiazanie.ok && z.zalegle.ok && z.szablon.ok && z.przejecie.ok && z.stanPlik.ok && z.samozamykanie.ok && z.limit.ok
+    z.ok = !!(z.dwa.ok && z.rozmiarOkna.ok && z.kolejka.ok && z.nfd.ok && z.wykonane.ok && z.ryzykowny.ok && z.praca.ok && z.dowiazanie.ok && z.zalegle.ok && z.szablon.ok && z.przejecie.ok && z.stanPlik.ok && z.samozamykanie.ok && z.limit.ok
       && z.sprzatanie.liczba && z.sprzatanie.pytania === 0 && z.sprzatanie.folder);
     zleceniaWTle = z;
   }
