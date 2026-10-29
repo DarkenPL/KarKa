@@ -302,8 +302,8 @@ const plan = (pliki, plikiStron) => ({ uklad: 'drukarnia', szer: 69, wys: 94, sp
     const ctx = doc.context, s = doc.addPage([300, 300]);
     const obraz = await doc.embedPng(pngRgb(64, 64));
     await doc.flush();
-    const im = ctx.register(ctx.obj({ Type: 'XObject', Subtype: 'Image', Width: 8, Height: 8, ImageMask: true, BitsPerComponent: 1 }));
-    // Forma ×2 (/Matrix), w niej obrazek na 36 pt → 72 pt na stronie = 64 ppi; maska pomijana.
+    const im = ctx.register(ctx.obj({ Type: 'XObject', Subtype: 'Image', Width: 64, Height: 64, ImageMask: true, BitsPerComponent: 1 }));
+    // Forma ×2 (/Matrix), w niej obrazek na 36 pt → 72 pt na stronie = 64 ppi; maska 64 × 64 px (8 ppi) pomijana jako maska.
     const forma = ctx.register(ctx.stream('q 36 0 0 36 0 0 cm /Im0 Do Q q 400 0 0 400 0 0 cm /Mk Do Q', {
       Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 100, 100], Matrix: [2, 0, 0, 2, 0, 0],
       Resources: { XObject: { Im0: obraz.ref, Mk: im } } }));

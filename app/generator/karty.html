@@ -3590,7 +3590,7 @@ async function zapiszPdf(o = {}) {
     // Obrazki < 300 ppi po konwersji (#112) – ostrzeżenie; zwykle gradienty CSS/SVG zamienione przez Ghostscripta na obrazki.
     const niskie = c ? c.pliki.filter((x) => x.obrazkiNiskiePpi && x.obrazkiNiskiePpi.length) : [];
     const ileNiskich = niskie.reduce((a, x) => a + x.obrazkiNiskiePpi.length, 0);
-    plan.ostrzezeniaPpi = ileNiskich ? [`obrazki poniżej 300 ppi: ${ileNiskich} (najniżej ${Math.min(...niskie.map((x) => x.minPpi))} ppi; ${niskie.map((x) => String(x.plik).split('/').pop()).join(', ')}) – gradienty CSS/SVG Ghostscript zamienia w CMYK na obrazki w niskiej rozdzielczości`] : [];
+    plan.ostrzezeniaPpi = ileNiskich ? [`obrazki poniżej 300 ppi: ${ileNiskich} (najniżej ${niskie.reduce((a, x) => Math.min(a, x.minPpi), Infinity)} ppi; ${niskie.map((x) => String(x.plik).split('/').pop()).join(', ')}) – gradienty CSS/SVG Ghostscript zamienia w CMYK na obrazki w niskiej rozdzielczości`] : [];
     const wszystkie = [...(plan.ostrzezenia || []), ...plan.ostrzezeniaTAC, ...plan.ostrzezeniaPpi];
     const uwagi = (pliki && wszystkie.length ? ' · Uwaga: ' + wszystkie.join('; ') : '') + (pliki && plan.informacje && plan.informacje.length ? ' · ' + plan.informacje.join('; ') : '');
     status(pliki ? `Zapisano PDF${OSTATNI_CMYK ? ' w CMYK (' + OSTATNI_CMYK.profil + (OSTATNI_CMYK.pdfx ? ', ' + OSTATNI_CMYK.pdfx : '') + ')' : ''}${o.profilDrukarni ? ' dla drukarni ' + o.profilDrukarni.nazwa : ''}: ` + pliki.join(', ') + uwagi : 'Zapis PDF anulowany.');

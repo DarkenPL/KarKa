@@ -318,10 +318,12 @@ function sprawdzPdf(buf, PDFLib) {
       const [x1, y1, x2, y2] = obiekt(t).asArray().map((n) => obiekt(n).asNumber());
       if (x1 >= m.x - 0.01 && y1 >= m.y - 0.01 && x2 <= m.x + m.width + 0.01 && y2 <= m.y + m.height + 0.01 && x2 > x1 && y2 > y1) wynik.trimBox++;
     }
-    // ppi obrazków (#112) – ostrzeżenie, nie wpływa na ok.
-    const ppi = ppiObrazkow(doc, PDFLib);
-    wynik.minPpi = ppi.length ? Math.min(...ppi.map((x) => Math.min(...x.ppi))) : null;
-    wynik.obrazkiNiskiePpi = ppi.filter((x) => Math.min(...x.ppi) < PROG_PPI);
+    // ppi obrazków (#112) – ostrzeżenie, nie wpływa na ok; błąd tej kontroli nie blokuje zapisu (bez wyniku ppi).
+    let ppi = [];
+    try { ppi = ppiObrazkow(doc, PDFLib); } catch (e) { ppi = []; }
+    wynik.minPpi = ppi.reduce((a, x) => Math.min(a, x.ppi[0], x.ppi[1]), Infinity);
+    if (wynik.minPpi === Infinity) wynik.minPpi = null;
+    wynik.obrazkiNiskiePpi = ppi.filter((x) => Math.min(x.ppi[0], x.ppi[1]) < PROG_PPI);
     wynik.ok = wynik.rgb === 0 && wynik.przestrzenieRgb === 0 && wynik.obrazki.inne.length === 0 && wynik.trimBox === wynik.strony;
     return wynik;
   });
