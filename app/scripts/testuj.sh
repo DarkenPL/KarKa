@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Testy aplikacji na kopiach przykładów (Linux z Xvfb, np. sesja Claude, albo macOS – okna na ekranie, bash 3.2 wystarczy).
-#   scripts/testuj.sh                 – wszystkie przykłady, tryb --test-edytor
-#   scripts/testuj.sh 03-ogrod        – wybrane przykłady (nazwy folderów z przyklady/)
-#   scripts/testuj.sh /ścieżka/do/gra.txt – dowolny projekt (kopiowany razem z folderem projektu)
+#   scripts/testuj.sh                 – wszystkie przykłady według planu z scripts/grupy-testow.js (jak CI w PR, #136):
+#                                       --test-edytor na 03-ogrod i 07-gildie, bloki na danych 05 i 08, reszta --test-pdf
+#   scripts/testuj.sh 03-ogrod        – wybrane przykłady (nazwy folderów z przyklady/), też według planu
+#   scripts/testuj.sh /ścieżka/do/gra.txt – dowolny projekt (kopiowany razem z folderem projektu), tryb --test-edytor
 #   RAZEM=1 scripts/testuj.sh         – ile testów naraz (domyślnie 5: test głównie czeka, 5 przykładów ≈ 1,5 min zamiast 5)
-#   BEZ_EDYTORA=1 scripts/testuj.sh   – szybszy test bez --test-edytor
+#   PELNY=1 scripts/testuj.sh         – --test-edytor na każdym przykładzie (jak przed #136, ok. 10–15 min)
+#   BEZ_EDYTORA=1 scripts/testuj.sh   – szybszy test bez --test-edytor (także na 03 i 07)
 #   LIMIT=600 scripts/testuj.sh       – limit jednego uruchomienia w sekundach (domyślnie 600)
 # 07-gildie z --test-edytor idzie w trzech procesach jak w CI (#101): grupy z scripts/grupy-testow.js (zlecenia z
 # cmykTest, zakladki, reszta = dopełnienie) – wynik „07-gildie-<grupa>”. Jedna grupa:
@@ -37,33 +39,25 @@ node -e "const h=require('fs').readFileSync('generator/karty.html','utf8');for(c
 
 cele=("$@")
 [ ${#cele[@]} -eq 0 ] && cele=($(ls ../przyklady))
-EDYTOR=--test-edytor; [ -n "${BEZ_EDYTORA:-}" ] && EDYTOR=
-
-# Zadania: „cel|nazwa|bloki” (bloki = wartość --test-bloki, puste = wszystkie).
+# Zadania: „cel|nazwa|opcje” (opcje aplikacji przed --test-pdf, rozdzielone spacjami – plan z scripts/grupy-testow.js).
 zadania=()
 for c in "${cele[@]}"; do
-  p=${c%%:*}; g=; [ "$p" != "$c" ] && g=${c#*:}
-  if [ -n "$EDYTOR" ] && [ "$p" = 07-gildie ]; then
-    znaleziona=
-    while read -r nazwa bloki; do
-      [ -z "$g" ] || [ "$g" = "$nazwa" ] || continue
-      zadania+=("$p|$p-$nazwa|$bloki"); znaleziona=1
-    done < <(node scripts/grupy-testow.js)
-    [ -n "$znaleziona" ] || { echo "07-gildie: nieznana grupa „$g” (node scripts/grupy-testow.js)"; exit 1; }
+  if [ -n "${BEZ_EDYTORA:-}" ]; then zadania+=("${c%%:*}|$(basename "${c%%:*}")|")
+  elif [ -e "$c" ]; then zadania+=("$c|$(basename "$c")|--test-edytor")
   else
-    zadania+=("$c|$(basename "$c")|")
+    plan=$(node scripts/grupy-testow.js plan "$c" ${PELNY:+pelny}) || exit 1
+    while read -r nazwa opcje; do zadania+=("${c%%:*}|$nazwa|$opcje"); done <<< "$plan"
   fi
 done
 
 test1() {
-  local cel=$1 n=$2 bloki=$3 kat arg
+  local cel=$1 n=$2 opcje=($3) kat arg
   if [ -f "$cel" ]; then                         # szablon spoza przykładów: kopiujemy folder projektu
     kat=$(dirname "$cel"); [ "$(basename "$kat")" = Szablony ] && kat=$(dirname "$kat")
     n=$(basename "$kat"); cp -r "$kat" "$TMP/$n"; arg="$TMP/$n/${cel#$kat/}"
   else
     cp -r "../przyklady/$cel" "$TMP/$n"; arg="$TMP/$n"
   fi
-  local opcje=($EDYTOR); [ -n "$bloki" ] && opcje+=(--test-bloki "$bloki")
   # ${opcje[@]+…} – pusta tablica przy set -u w bashu 3.2 (macOS) to „unbound variable”.
   limit "$LIMIT" "${ELECTRON[@]}" --user-data-dir="$TMP/ud-$n" \
     --enable-logging=file --log-file="$TMP/$n.log" . ${opcje[@]+"${opcje[@]}"} --test-pdf "$arg" "$TMP/$n.pdf" 2>/dev/null | grep "^{" | tail -1 > "$TMP/$n.json"

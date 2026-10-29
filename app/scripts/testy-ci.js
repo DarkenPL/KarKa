@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Testy przykładów w CI (#88): plan uruchomień zależny od trybu, kilka procesów naraz, czasy w podsumowaniu przebiegu.
 //   node scripts/testy-ci.js <tryb> --bin "<polecenie aplikacji>" --tmp <katalog> [--razem 4] [--limit 600]
-// tryb: pr    – 07-gildie w trzech procesach (grupy z scripts/grupy-testow.js, ostatnia = dopełnienie; razem pełny
-//               --test-edytor),
-//               08-wieze – bloki spadSzablonu i profileDrukarni (#85), pozostałe przykłady --test-pdf (renderowanie, PDF, eksport);
+// tryb: pr    – plan z scripts/grupy-testow.js (#136 etap A, wspólny z scripts/testuj.sh): pełny --test-edytor na 03-ogrod,
+//               07-gildie w trzech procesach (ostatnia grupa = dopełnienie), bloki na danych 05 i 08 (--test-bloki),
+//               pozostałe przykłady --test-pdf (renderowanie, PDF, eksport);
 //       pelny – --test-edytor na każdym przykładzie (jak do 0.6.2).
 // --bin: w CI ścieżka do KarKa w .app; lokalnie np. "xvfb-run -a ./node_modules/.bin/electron --no-sandbox ."
 // Każde uruchomienie ma własną kopię przykładu i własny --user-data-dir (procesy równoległe się nie blokują).
@@ -27,21 +27,13 @@ if (!['pr', 'pelny'].includes(tryb) || !bin.length) {
   process.exit(2);
 }
 
-// 07-gildie w trzech procesach (#101, A0): grupy w scripts/grupy-testow.js (wspólne z scripts/testuj.sh) – zlecenia
-// razem z zmienione i cmykTest, osobno zakladki, reszta jako dopełnienie (-nazwy), więc nowy blok zawsze się wykona.
-const { GRUPY_07 } = require('./grupy-testow');
+// Plan przykładów (#136 etap A) i grupy 07-gildie (#101, A0) – scripts/grupy-testow.js, wspólne z scripts/testuj.sh.
+const { planPrzykladu } = require('./grupy-testow');
 
 function plan() {
   const przyklady = fs.readdirSync(PRZYKLADY).filter((n) => fs.statSync(path.join(PRZYKLADY, n)).isDirectory()).sort();
   if (tryb === 'pelny') return przyklady.map((n) => ({ nazwa: n, przyklad: n, opcje: ['--test-edytor'], waga: 1 }));
-  const lista = [];
-  for (const n of przyklady) {
-    if (n === '07-gildie') for (const g of GRUPY_07)
-      lista.push({ nazwa: n + '-' + g.nazwa, przyklad: n, opcje: ['--test-edytor', '--test-bloki', g.bloki], waga: 2 });
-    else if (n === '05-zaklecia') lista.push({ nazwa: n, przyklad: n, opcje: ['--test-edytor', '--test-bloki', 'raportStart'], waga: 1 });   // #111
-    else if (n === '08-wieze') lista.push({ nazwa: n, przyklad: n, opcje: ['--test-edytor', '--test-bloki', 'spadSzablonu,profileDrukarni'], waga: 1 });
-    else lista.push({ nazwa: n, przyklad: n, opcje: [], waga: 0 });
-  }
+  const lista = przyklady.flatMap((n) => planPrzykladu(n));
   // Najdłuższe najpierw (grupy 07) – krótkie wypełniają wolne miejsca.
   return lista.sort((a, b) => b.waga - a.waga);
 }
