@@ -1,55 +1,84 @@
 #!/usr/bin/env node
-// Plan testów przykładów (#101, #136 etap A) – jedno źródło dla scripts/testy-ci.js (CI) i scripts/testuj.sh (lokalnie).
-//   require('./grupy-testow').GRUPY_07           → [{ nazwa, bloki }]   (bloki = wartość --test-bloki)
-//   require('./grupy-testow').planPrzykladu(n)   → [{ nazwa, przyklad, opcje, waga }]   (uruchomienia jednego przykładu)
-//   node scripts/grupy-testow.js                 → wiersze „nazwa bloki” grup 07 (dla powłoki)
+// Plan testów przykładów (#101, #136) – jedno źródło dla scripts/testy-ci.js (CI) i scripts/testuj.sh (lokalnie).
+//   require('./grupy-testow').planPrzykladu(n)   → [{ nazwa, grupa, przyklad, opcje, waga }]   (uruchomienia jednego przykładu)
+//   require('./grupy-testow').sprawdzPlan()      → [] albo lista błędów przypisania bloków
+//   node scripts/grupy-testow.js                 → wiersze „uruchomienie bloki” całego planu (dla ludzi)
 //   node scripts/grupy-testow.js plan <przykład>[:grupa] [pelny] → wiersze „nazwa opcje…” (dla scripts/testuj.sh)
-// Etap A (#136): bloki testują aplikację, nie przykład, więc pełny --test-edytor idzie tylko na 03-ogrod (kilka talii,
-// rewersy, jeśli=) i 07-gildie (w grupach niżej). Pozostałe przykłady – --test-pdf (budowa kart, Uwagi, PDF) z blokami
-// zależnymi od ich danych przez --test-bloki (BLOKI_PRZYKLADOW, BLOKI_KAZDEGO). Tryb pelny: --test-edytor na każdym przykładzie.
-// 07-gildie w trzech procesach (#101, A0). Ostatnia grupa to dopełnienie (-nazwy wszystkich wcześniejszych), więc nowy
-// blok zawsze się wykona. Zależności między blokami (pomiar 27.10.2026, każdy blok osobno na kopii 07):
-// - zlecenia od 0.7.3 (#102) samo robi zapamietajDruk() na starcie – nie potrzebuje już bloku zmienione,
+// Etap B (#136): każdy blok --test-edytor ma jeden przykład macierzysty (BLOKI) i w pełnym zestawie idzie dokładnie raz.
+// Blok w main.js bez przypisania, przypisany dwa razy albo nazwa spoza main.js = błąd planu (testuj.sh i CI kończą się
+// błędem) – nowy blok musi trafić do BLOKI. Bez przypisania zostają tylko bloki z BLOKI_KAZDEGO (na każdym przykładzie).
+// Klucz „przykład:grupa” = osobny proces (07-gildie w trzech, #101); przykład bez wpisu – --test-edytor z samymi
+// BLOKI_KAZDEGO (budowa kart, Uwagi, PDF). Tryb pelny: --test-edytor (wszystkie bloki) na każdym przykładzie.
+// Podział (pomiar 29.10.2026, macOS, 5 procesów naraz): bloki z danymi przykładu tam, gdzie te dane są; pozostałe
+// rozłożone tak, żeby 03 i grupy 07 trwały podobnie (ok. 1 min). Ten sam blok na 03 (26 kart z obrazkami) trwa kilka
+// razy dłużej niż na 07 (okna 28 / 1 s, katalog 28 / 3 s) – ciężkie bloki ogólne idą na 07. Wyjątek: filtrWTrakcie (58 s na 03).
+// Zależności między blokami (każdy blok osobno na kopii 07, 27.10.2026):
 // - część CMYK w zlecenia (zlecenia z profilem) wykonuje się tylko z cmykTest w tym samym procesie – bez niego blok
-//   przechodzi bez tej części (cicha utrata pokrycia).
-// Pozostałe bloki przechodzą osobno. Czasy osobno (Linux, 2 rdzenie): ok. 87 / 92 / 85 s; całość w jednym procesie 392 s.
+//   przechodzi bez tej części (cicha utrata pokrycia),
+// - zakladki i zleceniaWTle otwierają i zamykają zakładki (zleceniaWTle – #90) – razem.
 'use strict';
-const GRUPY = [
-  ['cmykTest', 'zlecenia'],
-  ['zakladki', 'zleceniaWTle'],     // oba otwierają i zamykają zakładki (zleceniaWTle – #90)
-];
-const NAZWY = ['zlecenia', 'zakladki', 'reszta'];
+const fs = require('fs');
+const path = require('path');
 
-const GRUPY_07 = [
-  ...GRUPY.map((b, i) => ({ nazwa: NAZWY[i], bloki: b.join(',') })),
-  { nazwa: NAZWY[GRUPY.length], bloki: GRUPY.flat().map((b) => '-' + b).join(',') },
-];
-
-// Pełny --test-edytor (wszystkie bloki) – poza 07, które idzie w grupach.
-const PELNE = ['03-ogrod'];
-// Bloki na danych konkretnego przykładu bez pełnego edytora.
-const BLOKI_PRZYKLADOW = {
-  '05-zaklecia': ['raportStart'],                     // tekst ok. 2 mm od krawędzi (#111)
-  '08-wieze': ['spadSzablonu', 'profileDrukarni'],    // spad w szablonie (#84), profile drukarni (#85)
+const BLOKI = {
+  '03-ogrod': ['edytor', 'wybor', 'drukarnia', 'drukarniaPdf', 'oknaDruku',    // kilka talii, rewersy, jeśli=
+    'filtrWTrakcie'],   // na 07 bez innych bloków przed nim bywa czerwony (praca kończy się, zanim test złapie „w trakcie”)
+  '05-zaklecia': ['raportStart'],                                       // tekst ok. 2 mm od krawędzi (#111)
+  '07-gildie:zlecenia': ['cmykTest', 'zlecenia', 'hist', 'zmienione', 'katalog'],
+  '07-gildie:zakladki': ['zakladki', 'zleceniaWTle'],
+  '07-gildie:reszta': ['arkusze', 'rewersy', 'rewersyDodatki',          // talia Magowie – rewersy zależne od karty (#47)
+    'spadTest', 'okna', 'podfolder',
+    'formatowanie', 'uklad', 'jesli', 'rozmiary', 'akapity',            // karty testowe poza projektem
+    'raportProgi', 'naroznik', 'otok', 'ramkiObraz', 'styk'],
+  '08-wieze': ['spadSzablonu', 'profileDrukarni'],                      // spad w szablonie (#84), profile drukarni (#85)
 };
-// Bloki na danych każdego przykładu (poza pełnymi – tam i tak są): raport drukarni bez UWAG z pomiaru obrazu (#138).
+// Bloki na danych każdego przykładu: raport drukarni bez UWAG z pomiaru obrazu (#138). Na przykładzie w kilku
+// procesach (07) – w ostatnim.
 const BLOKI_KAZDEGO = ['ramkiPrzyklad'];
+
+// Lista bloków z main.js – to samo wyrażenie co BLOKI_TESTU() w main.js.
+const blokiMain = () => [...new Set([...fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')
+  .matchAll(/\(testBloku\('(\w+)'\)/g)].map((m) => m[1]))];
+
+function sprawdzPlan(znane = blokiMain()) {
+  const bledy = [], gdzie = {};
+  for (const [k, lista] of Object.entries(BLOKI)) for (const b of lista) (gdzie[b] = gdzie[b] || []).push(k);
+  for (const b of BLOKI_KAZDEGO) (gdzie[b] = gdzie[b] || []).push('BLOKI_KAZDEGO');
+  for (const [b, k] of Object.entries(gdzie)) {
+    if (!znane.includes(b)) bledy.push(`blok „${b}” (${k.join(', ')}) – nie ma go w main.js`);
+    if (k.length > 1) bledy.push(`blok „${b}” przypisany kilka razy: ${k.join(', ')}`);
+  }
+  for (const b of znane) if (!gdzie[b]) bledy.push(`blok „${b}” bez przykładu macierzystego – dopisz go w BLOKI (scripts/grupy-testow.js)`);
+  return bledy;
+}
 
 // Uruchomienia jednego przykładu; waga – kolejność w CI (najdłuższe najpierw).
 function planPrzykladu(n, pelny = false) {
-  if (n === '07-gildie') return GRUPY_07.map((g) =>
-    ({ nazwa: n + '-' + g.nazwa, grupa: g.nazwa, przyklad: n, opcje: ['--test-edytor', '--test-bloki', g.bloki], waga: 2 }));
-  if (pelny || PELNE.includes(n)) return [{ nazwa: n, przyklad: n, opcje: ['--test-edytor'], waga: 3 }];   // najdłuższe
-  return [{ nazwa: n, przyklad: n, opcje: ['--test-edytor', '--test-bloki', [...(BLOKI_PRZYKLADOW[n] || []), ...BLOKI_KAZDEGO].join(',')], waga: 1 }];
+  if (pelny) return [{ nazwa: n, przyklad: n, opcje: ['--test-edytor'], waga: 1 }];
+  const bledy = sprawdzPlan();
+  if (bledy.length) throw new Error('Plan testów (scripts/grupy-testow.js):\n  ' + bledy.join('\n  '));
+  const klucze = Object.keys(BLOKI).filter((k) => k.split(':')[0] === n);
+  const procesy = klucze.length ? klucze : [n];
+  return procesy.map((k, i) => {
+    const grupa = k.includes(':') ? k.split(':')[1] : undefined;
+    const bloki = [...(BLOKI[k] || []), ...(i === procesy.length - 1 ? BLOKI_KAZDEGO : [])];
+    return { nazwa: grupa ? n + '-' + grupa : n, grupa, przyklad: n, opcje: ['--test-edytor', '--test-bloki', bloki.join(',')],
+      waga: (BLOKI[k] || []).length > 1 ? 2 : 1 };
+  });
 }
 
-module.exports = { GRUPY_07, PELNE, BLOKI_PRZYKLADOW, BLOKI_KAZDEGO, planPrzykladu };
+module.exports = { BLOKI, BLOKI_KAZDEGO, sprawdzPlan, planPrzykladu };
 
 if (require.main === module) {
-  if (process.argv[2] === 'plan') {
-    const [p, g] = String(process.argv[3] || '').split(':');
-    const lista = planPrzykladu(p, process.argv[4] === 'pelny').filter((u) => !g || u.grupa === g);
-    if (!p || !lista.length) { console.error(`${p}: nieznana grupa „${g}” (node scripts/grupy-testow.js)`); process.exit(1); }
-    for (const u of lista) console.log([u.nazwa, ...u.opcje].join(' '));
-  } else for (const g of GRUPY_07) console.log(g.nazwa + ' ' + g.bloki);
+  try {
+    if (process.argv[2] === 'plan') {
+      const [p, g] = String(process.argv[3] || '').split(':');
+      const lista = planPrzykladu(p, process.argv[4] === 'pelny').filter((u) => !g || u.grupa === g);
+      if (!p || !lista.length) { console.error(`${p}: nieznana grupa „${g}” (node scripts/grupy-testow.js)`); process.exit(1); }
+      for (const u of lista) console.log([u.nazwa, ...u.opcje].join(' '));
+    } else {
+      const przyklady = fs.readdirSync(path.join(__dirname, '..', '..', 'przyklady')).sort();
+      for (const u of przyklady.flatMap((n) => planPrzykladu(n))) console.log(u.nazwa + ' ' + u.opcje[2]);
+    }
+  } catch (e) { console.error(e.message); process.exit(1); }
 }
