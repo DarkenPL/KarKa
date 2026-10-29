@@ -1413,7 +1413,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   // Raport drukarni zaraz po starcie (#111): zlecenie raport (drukarnia = tak), gdy tylko strona przyjmuje zlecenia
   // (warunek jak w wykonajPlikZlecenia), potem panel Raport, zlecenie i przebudowa naraz z filtrem podglądu, na końcu
   // raport po ustaleniu się strony. Te same pozycje odstępu, żadnej karty niezmierzonej, filtr bez zmian; karta odpięta
-  // od strony = niezmierzona (nie „OK”). 05-zaklecia ma stopkę „nr [ID]” 2,15 mm od dolnej krawędzi – tam pozycje muszą być.
+  // od strony = niezmierzona (nie „OK”). Kopia 05-zaklecia ma tekst „próba odstępu” ok. 2 mm od dolnej krawędzi (dopisany przy starcie) – tam pozycje muszą być.
   let raportStart = null;
   if (testBloku('raportStart') && folder !== '-') {
     for (let i = 0; i < 2400 && !(await wc.executeJavaScript('!!(window.wykonajZlecenie && window.zbudowano)').catch(() => false)); i++) await czekaj(25);
@@ -1451,7 +1451,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       return { start: opis(start), naraz: opis(z.drukarnia), potem: opis(potem), filtr: filtrPo === filtr, panelBezBledu: !panel,
         zgodne: lista(start) === lista(potem) && lista(z.drukarnia) === lista(potem), odpieta: !!(odpieta && odpieta.niezmierzona), bledy };
     })()`);
-    const r = raportStart, stopka = /"nr \[ID\]"/.test(fs.readFileSync(szablon, 'utf8'));
+    const r = raportStart, stopka = /"próba odstępu"/.test(fs.readFileSync(szablon, 'utf8'));
     r.ok = !!(r.start && r.naraz && r.potem) && [r.start, r.naraz, r.potem].every((x) => x.karty > 0 && x.niezmierzone === 0)
       && r.zgodne && r.filtr && r.panelBezBledu && r.odpieta && Object.values(r.bledy).every(Boolean) && (!stopka || r.start.odstep > 0);
   }
@@ -2210,11 +2210,13 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       await wpisz(oryginal); await czekaj(3500);
       const po = await js('raportDrukarni()');
       if (!edytorByl) await js('przelaczEdytor(false)');
-      const probaOdstep = (r) => r.odstep.filter((x) => x.tekst === 'Próba drukarni');
+      // Talia z OTOK (przykłady od 0.7.13, #109): tekst przy krawędzi leży pod otokiem – raport podaje go w podOtokiem, nie w odstep.
+      const odstepy = (r) => [...r.odstep, ...(r.podOtokiem || [])];
+      const probaOdstep = (r) => odstepy(r).filter((x) => x.tekst === 'Próba drukarni');
       drukarniaPdf.szablon = { talia,
-        zmiana: { odstep: z.odstep.filter((x) => x.talia === talia).map((x) => x.odstep).slice(0, 3), czern: z.czern.map((x) => x.kolor) },
+        zmiana: { odstep: odstepy(z).filter((x) => x.talia === talia).map((x) => x.odstep).slice(0, 3), czern: z.czern.map((x) => x.kolor) },
         po: { odstepProba: probaOdstep(po).length, czern: po.czern.map((x) => x.kolor) } };
-      drukarniaPdf.szablon.ok = z.odstep.some((x) => x.talia === talia && x.odstep >= 0.8 && x.odstep <= 1.6) && z.czern.some((x) => x.kolor.toLowerCase() === '#2a1a3a')
+      drukarniaPdf.szablon.ok = odstepy(z).some((x) => x.talia === talia && x.odstep >= 0.8 && x.odstep <= 1.6) && z.czern.some((x) => x.kolor.toLowerCase() === '#2a1a3a')
         && !po.czern.some((x) => x.kolor.toLowerCase() === '#2a1a3a') && !probaOdstep(po).some((x) => x.odstep < 1.6);
       if (!drukarniaPdf.szablon.ok) bledy.push('szablon: ' + JSON.stringify(drukarniaPdf.szablon));
     }
@@ -3958,6 +3960,12 @@ app.whenReady().then(async () => {
       // projekt testowy otwiera się jako kolejna zakładka, a sprawdzane liczby uwzględniają przywrócone.
       const przywrocone = await oknoZZakladkami(null, argi.includes('--test-przywroc'));
       const plik = tn >= 0 ? utworzProjekt(path.resolve(argi[tn + 1])) : argi[t + 1] === '-' ? null : path.resolve(argi[t + 1]);
+      // raportStart (#111) potrzebuje tekstu bliżej niż 3 mm od cięcia już przy starcie. 05-zaklecia ma go od 0.7.13 tylko
+      // w kopii testowej (#109: stopka „nr [ID]” w strefie bezpiecznej) – dopisek na koniec szablonu trafia do [AWERS].
+      const sz = plik && naSzablon(plik);
+      if (sz && argi.includes('--test-edytor') && (() => { const w = wybraneBlokiTestu(); return !w || ((!w.tylko || w.tylko.includes('raportStart')) && !w.bez.includes('raportStart')); })()
+        && /"nr \[ID\]"/.test(fs.readFileSync(sz, 'utf8')))
+        fs.appendFileSync(sz, '\nTEKST = 4, 64, 36, 3, "próba odstępu", rozmiar=5   ; test raportStart – ok. 2 mm od dolnej krawędzi (dalej niż próba drukarniPdf)\n');
       const p = plik ? await otworzWZakladce(plik) : aktywny;
       if (!p) throw new Error('nie udało się otworzyć projektu testowego');
       p.wc.once('did-finish-load', () => trybTestowy(tn >= 0 ? argi[tn + 1] : argi[t + 1], path.resolve(argi[t + 2]), przywrocone).catch(bladTestu));

@@ -131,5 +131,6 @@ Kopie ikon z przykładów 01, 02, 04 i 05 (te same pliki i licencja).
 | `Ikony/kowadlo.svg` | [anvil](https://game-icons.net/1x1/lorc/anvil.html) | Lorc |
 | `Ikony/slady.svg` | [boot-prints](https://game-icons.net/1x1/lorc/boot-prints.html) | Lorc |
 | `Ikony/tarcza.svg` | [checked-shield](https://game-icons.net/1x1/lorc/checked-shield.html) | Lorc |
+| `Ikony/tarcza-biala.svg` | [checked-shield](https://game-icons.net/1x1/lorc/checked-shield.html) | Lorc |
 | `Ikony/ksiega.svg` | [spell-book](https://game-icons.net/1x1/delapouite/spell-book.html) | Delapouite |
 | `Ikony/runa.svg` | [rune-stone](https://game-icons.net/1x1/lorc/rune-stone.html) | Lorc |

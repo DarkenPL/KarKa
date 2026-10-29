@@ -9,14 +9,15 @@ DANE  = przedmioty.csv
 KARTA = 63, 88
 
 KOLOR = broń,   #C0504D
-KOLOR = zbroja, #7F8C8D
-KOLOR = magia,  #8E6FB5
+KOLOR = zbroja, #3E6FA8
+KOLOR = magia,  #1E9A8A
 
-CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#1d1b19
+CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#000
 
 ; ── Awers ─────────────────────────────────────────────────────────
-TŁO       = [Rodzaj] | #bbbbbb
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=#ffffff, zaokrąglenie=4
+TŁO  = #ffffff
+; Otok: pas od końca spadu do linii bezpieczeństwa (3 mm od cięcia), zawsze na wierzchu karty
+OTOK = 3, [Rodzaj] | #bbbbbb
 
 ; Koszt (z lewej) i Punkty (z prawej) w jednym wierszu. Grupa „góra” sprawia,
 ; że na wszystkich kartach ikony mają ten sam rozmiar i się nie nachodzą.
@@ -32,6 +33,5 @@ TEKST = 6, 74, 51, 8,  [Opis], rozmiar=8, kursywa, wyrównanie=środek
 ; ── Rewers ────────────────────────────────────────────────────────
 [REWERS]
 TŁO       = #3d3a36
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=brak, obwódka=0.6, kolor_obwódki=#ffffff80, zaokrąglenie=4
 IKONA     = 0, 26, 63, 22, {kowadlo}
 TEKST     = 0, 52, 63, 10, "Kuźnia", czcionka="Patrick Hand, cursive", rozmiar=26, kolor=#ffffff, wyrównanie=środek, pion=środek, interlinia=1

@@ -3,5 +3,4 @@
        w miejscu pasa z tła (7 i 19 mm w pliku) – w PDF dla drukarni mają się pokrywać z tłem. -->
   <rect x="0" y="6.7" width="69" height="0.6" fill="#000"/>
   <rect x="0" y="18.7" width="69" height="0.6" fill="#000"/>
-  <rect x="6.5" y="6.5" width="56" height="81" fill="none" stroke="#3b2f22" stroke-width="0.5" rx="2"/>
 </svg>

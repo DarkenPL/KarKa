@@ -32,7 +32,7 @@ KOMENDA = argument, argument, opcja=wartość, flaga
 | `STAŁA = margines, 4` | Stała: `[=margines]` w dowolnej komendzie zostaje zamienione na `4`. Wygodne dla powtarzanych liczb i kolorów (`STAŁA = złoty, #C9A227` → `kolor=[=złoty]`). Stała działa w całym pliku szablonu, także w taliach i rewersach. |
 | `NAZWA = Przedmioty` | Nazwa talii (podgląd, pliki JPG, eksport). Domyślnie nazwa z `[TALIA …]` albo z nazwy pliku. |
 | `DANE = przedmioty.csv, przedmioty.xlsx` | Plik(i) z kartami. Pierwszy znaleziony wygrywa. Plik może leżeć w podfolderze projektu: `DANE = dane/przedmioty.csv`. |
-| `KARTA = 63, 88, zaokrąglenie=3, obwódka=0.7, kolor_obwódki=#222222` | Szerokość i wysokość karty w mm. Opcjonalnie zaokrąglone rogi i obwódka całej karty (rysowana na wierzchu). W sekcji `[REWERS]` ustawia tylko rogi i obwódkę rewersu; rozmiar jest zawsze jak awersu. **`spad=3`** (od 0.6.2, mm od 0 do 10, kropka dziesiętna: `spad=2.5`) deklaruje spad do druku w drukarni – patrz [Spad](#spad-w-szablonie-od-062). Spad w części wspólnej dziedziczą talie bez własnej `KARTA` (własna `KARTA` w talii bez `spad=` oznacza talię bez spadu); w `[REWERS]` `spad=` jest błędem (rewers ma spad awersu). |
+| `KARTA = 63, 88, zaokrąglenie=3, obwódka=0.7, kolor_obwódki=#222222` | Szerokość i wysokość karty w mm. Opcjonalnie zaokrąglone rogi i obwódka całej karty (rysowana na wierzchu). **Obwódka `KARTA` leży na linii cięcia** – w druku w drukarni wyjdzie nierówna; zamiast niej użyj `OTOK` albo ramki ≥ 3 mm od cięcia. W sekcji `[REWERS]` ustawia tylko rogi i obwódkę rewersu; rozmiar jest zawsze jak awersu. **`spad=3`** (od 0.6.2, mm od 0 do 10, kropka dziesiętna: `spad=2.5`) deklaruje spad do druku w drukarni – patrz [Spad](#spad-w-szablonie-od-062). Spad w części wspólnej dziedziczą talie bez własnej `KARTA` (własna `KARTA` w talii bez `spad=` oznacza talię bez spadu); w `[REWERS]` `spad=` jest błędem (rewers ma spad awersu). |
 | `KOLOR = las, #7BA05B` | Nazwany kolor (paleta wspólna dla wszystkich szablonów). Nazwy można używać w danych i szablonie zamiast kodu, np. `TŁO = [Kolor] \| las`, a także jako ikony-prostokąta `{kolor-las}` (`{kolor-las-mix}` jest w połowie biały). |
 | `PCIO`, `STÓŁ` | Nieużywane (dawny eksport do istniejącego pokoju playingcards.io). Teraz eksport tworzy nowy pokój bez dodatkowych komend – patrz [playingcards.md](playingcards.md). |
 
@@ -81,7 +81,7 @@ Wstawiasz je jak kolumny, ale z podkreślnikiem. Nie muszą istnieć w pliku dan
 | `[_talia]`, `[_projekt]` | Nazwa talii i projektu. |
 | `[_data]` | Dzisiejsza data, np. 9.10.2026. |
 
-Przykład stopki do testów: `TEKST = 6, 82, 51, 3, "[_wersja] · [_numer]/[_liczba]", rozmiar=5, kolor=#999999, wyrównanie=prawo`.
+Przykład stopki do testów: `TEKST = 6, 82, 51, 3, "[_wersja] · [_numer]/[_liczba]", rozmiar=5, kolor=#999999, wyrównanie=prawo`. Taka stopka jest **tylko do playtestów** – tekst 5 pt w kolorze jest za mały do druku w drukarni (próg 6 pt, kolorowy 8 pt); przed drukiem w drukarni ją usuń.
 
 Numery liczą się w kolejności wierszy pliku danych. Data to dzień wygenerowania kart.
 
@@ -341,7 +341,7 @@ Spad to pas obrazu poza linią cięcia (zwykle 3 mm z każdej strony), który za
 - Obrazki `OBRAZEK` z `dopasuj=wypełnij` albo `rozciągnij` (bez `kadr=` i `obrót=`), które dotykają krawędzi karty, mają ramkę przedłużoną o spad po stronach, których dotykają – plik też ma zawierać spad.
 - **Nakładka ze spadem potrzebuje `dopasuj=wypełnij`** (albo `rozciągnij`). Domyślne `zmieść` nie przedłuża ramki o spad, więc plik ze spadem (np. 69 × 94 mm) zostaje **pomniejszony** do ramki karty (63 × 88 mm) i rozjeżdża się z tłem – w PDF dla drukarni widać to jako przesuniętą kopię krawędzi. Dobrze: `OBRAZEK = 0, 0, 63, 88, Art/ramka.png, dopasuj=wypełnij`. Raport w trybie drukarni i zlecenie `pdf` ostrzegają, gdy obrazek „zmieść” przy krawędzi karty ma plik o proporcjach ramki ze spadem (od 0.6.6).
 - Podgląd, druk A4, obrazki JPG/PNG, katalog i playingcards.io przycinają do linii cięcia (karta ma `overflow: hidden`), więc wyglądają jak dotąd. PDF dla drukarni rysuje tło i obrazki w całości, bez skalowania. Kolorowe `TŁO` i `PROSTOKĄT` działają jak dawniej.
-- Projektowanie: tło prowadź do krawędzi spadu, ważne elementy (tekst, twarze, ikony) trzymaj min. 3 mm od linii cięcia.
+- Projektowanie: tło prowadź do krawędzi spadu, ważne elementy (tekst, twarze, ikony) trzymaj min. 3 mm od linii cięcia. Pole przy krawędzi (np. `PROSTOKĄT = 0, 0, 44, 32`) rysuj **bez `zaokrąglenie=`** – kształt zaokrąglony nie jest przedłużany o spad. Cienkie ramki blisko linii cięcia (`PROSTOKĄT … obwódka=`, ramki w plikach SVG) zdradzają krzywe cięcie (±1 mm) – zamiast nich użyj `OTOK` albo zrezygnuj z ramki.
 - PDF dla drukarni bierze spad z szablonu (największy zadeklarowany) – ma pierwszeństwo przed oknem i kluczem `spad` zlecenia. Gdy żadna talia nie deklaruje spadu, używa spadu z okna/zlecenia i dorabia go (z ostrzeżeniem); talia ze spadem innym niż w PDF też dostaje ostrzeżenie.
 - Przykład: [`08-wieze`](../przyklady/08-wieze).
 
@@ -363,10 +363,11 @@ Każdy element może mieć opcję `jeśli=`:
 | `jeśli=[Typ]=burza` | wartość jest równa (bez względu na wielkość liter; `001` = `1`) |
 | `jeśli=[Typ]!=burza` | wartość jest inna |
 
-Przykład – złota ramka tylko dla rzadkich kart:
+Przykład – złoty otok tylko dla rzadkich kart (drugi `OTOK` jest na wierzchu pierwszego):
 
 ```
-PROSTOKĄT = 1.5, 1.5, 60, 85, kolor=brak, obwódka=1.2, kolor_obwódki=#C9A227, jeśli=[Rzadka]=tak
+OTOK = 3, [Grządka]
+OTOK = 3, #C9A227, jeśli=[Rzadka]=tak
 ```
 
 ### Pusta kolumna

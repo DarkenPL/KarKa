@@ -3,14 +3,14 @@
 ;  • dwie talie z jednego pliku XLSX – każda z innego arkusza (#Towary, #Kontrakty),
 ;  • STAŁA i [=nazwa] – powtarzane liczby i kolory w jednym miejscu,
 ;  • gradient tła (kolory rozdzielone „>”), obrót tekstu, krycie, ELIPSA,
-;  • LINIA ze strzałką i kropką, przerywane obwódki (styl_obwódki),
+;  • LINIA ze strzałką i kropką, przerywana obwódka (styl_obwódki),
 ;  • WERSJA i pola wbudowane w stopce: [_wersja], [_numer]/[_liczba],
 ;  • karta z Ilość = 0 (Przemyt) jest pominięta – zobacz Raport.
 ; ═══════════════════════════════════════════════════════════════════
 
 PROJEKT  = Karawana
 WERSJA   = v0.2
-CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#3b2614
+CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#000
 
 ; Paleta: nazwy regionów z danych zamieniają się w kolory
 KOLOR = wschód, #D9822B
@@ -20,7 +20,7 @@ KOLOR = oaza,   #4E9F6E
 ; Stałe – zmiana w jednym miejscu zmienia wszystkie karty
 STAŁA = piasek,   #F6E7C1
 STAŁA = ciemny,   #3b2614
-STAŁA = margines, 3
+STAŁA = margines, 3.5
 
 
 ; ═══════════════════════════════════════════════════════════════════
@@ -35,25 +35,24 @@ TŁO = [=piasek] > [Region], kierunek=160
 ELIPSA  = 9, 16, 45, 45, kolor=#ffffff, krycie=0.45
 OBRAZEK = 14, 21, 35, 35, [Obrazek]
 
-TEKST = [=margines], [=margines], 46, 10, [Nazwa], czcionka="Patrick Hand, cursive", rozmiar=17, pion=środek
+TEKST = 5, [=margines], 44, 10, [Nazwa], czcionka="Patrick Hand, cursive", rozmiar=17, pion=środek
 ; Region pionowo wzdłuż prawej krawędzi (obrót wokół środka pola)
 TEKST = 39, 30, 36, 6, [Region], rozmiar=8, kolor=#ffffff, wersaliki, wyrównanie=środek, pion=środek, obrót=90
 
 ; Cena i waga w kółkach w górnym prawym rogu
-ELIPSA = 50, 3, 10, 10, kolor=[=ciemny]
-TEKST  = 50, 3, 10, 10, [Cena], kolor=#ffffff, rozmiar=13, pogrubienie, wyrównanie=środek, pion=środek
+ELIPSA = 49.5, 3.5, 10, 10, kolor=[=ciemny]
+TEKST  = 49.5, 3.5, 10, 10, [Cena], kolor=#ffffff, rozmiar=13, pogrubienie, wyrównanie=środek, pion=środek
 
 ; Ramka na opis – przerywana obwódka
-PROSTOKĄT = [=margines], 62, 57, 18, kolor=#ffffffcc, obwódka=0.3, kolor_obwódki=[=ciemny], styl_obwódki=przerywana, zaokrąglenie=2
-TEKST     = 5, 63, 53, 16, [Opis], rozmiar=9, ikony=1.2, pion=środek, min=0.7
-TEKST     = 5, 56, 30, 5, "Waga: [Waga]", rozmiar=8, kolor=[=ciemny], jeśli=[Waga]!=0
+PROSTOKĄT = [=margines], 62, 56, 18, kolor=#ffffffcc, obwódka=0.3, kolor_obwódki=#7a4a1e, styl_obwódki=przerywana, zaokrąglenie=2
+TEKST     = 5.5, 63, 52, 16, [Opis], rozmiar=9, ikony=1.2, pion=środek, min=0.7
+TEKST     = 5, 56, 30, 5, "Waga: [Waga]", rozmiar=8, jeśli=[Waga]!=0
 
-; Stopka z wersją i numerem karty – do playtestów
-TEKST = 5, 82, 53, 4, "[_wersja] · [_numer]/[_liczba]", rozmiar=5.5, kolor=#3b261499, wyrównanie=prawo
+; Stopka z wersją i numerem karty – tylko do playtestów, przed drukiem w drukarni usuń (tekst 5,5 pt)
+TEKST = 5, 82, 53, 4, "[_wersja] · [_numer]/[_liczba]", rozmiar=5.5, kolor=#000, wyrównanie=prawo
 
 [REWERS]
 TŁO       = [=ciemny] > #7a4a1e
-PROSTOKĄT = [=margines], [=margines], 57, 82, kolor=brak, obwódka=0.5, kolor_obwódki=[=piasek], styl_obwódki=kropkowana, zaokrąglenie=2
 IKONA     = 0, 26, 63, 26, {karawana}
 TEKST     = 0, 56, 63, 10, "Karawana", czcionka="Patrick Hand, cursive", rozmiar=22, kolor=[=piasek], wyrównanie=środek, pion=środek
 
@@ -64,26 +63,26 @@ DANE  = karawana.xlsx#Kontrakty
 KARTA = 88, 63, zaokrąglenie=3
 
 TŁO       = [=piasek]
-PROSTOKĄT = [=margines], [=margines], 82, 57, kolor=brak, obwódka=0.4, kolor_obwódki=[=ciemny], styl_obwódki=przerywana, zaokrąglenie=2
 
 TEKST = 6, 5, 76, 9, [Nazwa], czcionka="Patrick Hand, cursive", rozmiar=16, wyrównanie=środek, pion=środek
 
 ; Trasa: kropka w mieście startowym, przerywana linia, pełna strzałka do celu
 LINIA = 16, 28, 72, 28, grubość=0.6, kolor=#7a4a1e, styl=przerywana, początek=kropka, koniec=strzałka_pełna
-TEKST = 4, 31, 26, 6, [Z],  rozmiar=9, wyrównanie=środek
+TEKST = 5, 31, 25, 6, [Z],  rozmiar=9, wyrównanie=środek
 TEKST = 58, 31, 26, 6, [Do], rozmiar=9, wyrównanie=środek
 IKONA = 38, 18, 12, 9, {wielblad}
 
 ; Kreska oddzielająca warunek od nagrody (zwykła linia bez zakończeń)
-LINIA = 10, 42, 78, 42, grubość=0.25, kolor=#3b261466
+LINIA = 10, 42, 78, 42, grubość=0.3, kolor=#b9a383
 
 TEKST = 8, 44, 50, 12, "Dostarcz: **[Towar]**", rozmiar=11, pion=środek
 TEKST = 56, 44, 26, 12, "[Nagroda] {monety}", rozmiar=14, ikony=1.1, pogrubienie, wyrównanie=prawo, pion=środek
 
-TEKST = 6, 57, 76, 3.5, "[_wersja] · [_numer]/[_liczba]", rozmiar=5.5, kolor=#3b261499, wyrównanie=prawo
+; Stopka – tylko do playtestów, przed drukiem w drukarni usuń
+TEKST = 6, 56, 76, 3.5, "[_wersja] · [_numer]/[_liczba]", rozmiar=5.5, kolor=#000, wyrównanie=prawo
 
 [REWERS]
-KARTA     = 88, 63, zaokrąglenie=3, obwódka=1, kolor_obwódki=[=piasek]
+KARTA     = 88, 63, zaokrąglenie=3
 TŁO       = #2f6b4f > #1d4433, kierunek=90
 IKONA     = 0, 12, 88, 24, {waga}
 TEKST     = 0, 40, 88, 10, "Kontrakt", czcionka="Patrick Hand, cursive", rozmiar=22, kolor=[=piasek], wyrównanie=środek, pion=środek

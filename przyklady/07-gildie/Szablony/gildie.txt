@@ -7,14 +7,19 @@
 ;    dwustronnego z odwracaniem wzdłuż dłuższej krawędzi).
 ;  • Magowie – rewers zależny od karty: kolumny i jeśli= w [REWERS] (dwie szkoły
 ;    i jedna karta dwustronna z tłem i tekstem rewersu z danych).
-;  Napis „↑ góra” na rewersach pomaga sprawdzić wydruk próbny: po odwróceniu
-;  karty strzałka ma wskazywać tę samą stronę co góra awersu.
+;  • Awersy: białe tło i OTOK w kolorze talii (pas od końca spadu do linii
+;    bezpieczeństwa 3 mm od cięcia), rewersy bez ramek – przy cięciu ±1 mm
+;    ramka blisko krawędzi zdradza krzywe cięcie.
+;  Napis „↑ góra” na rewersach pomaga sprawdzić wydruk próbny A4: po odwróceniu
+;  karty strzałka ma wskazywać tę samą stronę co góra awersu – przed drukiem
+;  w drukarni usuń. Stopki „Talia [ID]” (6–7 pt) – tylko do playtestów,
+;  przed drukiem w drukarni usuń.
 ; ═══════════════════════════════════════════════════════════════════
 
 ; ── Wspólne ───────────────────────────────────────────────────────
 PROJEKT  = Gildie                          ; nazwa gry w plikach JPG i PDF
 KARTA    = 63, 88, zaokrąglenie=3
-CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#1d1b19
+CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#000
 
 STAŁA = tytuł, "Patrick Hand, cursive"
 
@@ -23,16 +28,15 @@ STAŁA = tytuł, "Patrick Hand, cursive"
 [TALIA Ratusz]
 DANE = ratusz.csv
 
-TŁO       = #8a7f72
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=#ffffff, zaokrąglenie=4
+TŁO       = #ffffff
+OTOK      = 3, #8a7f72
 TEKST     = 6, 6, 51, 10, [Nazwa], czcionka=[=tytuł], rozmiar=18, wyrównanie=środek, pion=środek
 OBRAZEK   = 14, 20, 35, 32, Ikony/mapa.svg
 TEKST     = 7, 56, 49, 20, [Opis], wyrównanie=środek
 TEKST     = 6, 78, 51, 5, "Ratusz [ID]", rozmiar=7, kolor=#8a7f72, wyrównanie=środek
 
 [REWERS]
-TŁO       = #5b5248
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=brak, obwódka=0.6, kolor_obwódki=#ffffff80, zaokrąglenie=4
+TŁO       = #2B5370
 TEKST     = 0, 6, 63, 8, "↑ góra", rozmiar=10, kolor=#ffffff, wyrównanie=środek, pion=środek
 TEKST     = 0, 38, 63, 12, "Ratusz", czcionka=[=tytuł], rozmiar=24, kolor=#ffffff, wyrównanie=środek, pion=środek
 
@@ -41,8 +45,8 @@ TEKST     = 0, 38, 63, 12, "Ratusz", czcionka=[=tytuł], rozmiar=24, kolor=#ffff
 [TALIA Kupcy]
 DANE = kupcy.csv
 
-TŁO       = #d4a64a
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=#ffffff, zaokrąglenie=4
+TŁO       = #ffffff
+OTOK      = 3, #d4a64a
 TEKST     = 6, 6, 51, 10, [Nazwa], czcionka=[=tytuł], rozmiar=18, wyrównanie=środek, pion=środek
 OBRAZEK   = 14, 20, 35, 32, Ikony/monety.svg
 TEKST     = 7, 56, 49, 20, [Opis], wyrównanie=środek
@@ -50,7 +54,6 @@ TEKST     = 6, 78, 51, 5, "Kupcy [ID]", rozmiar=7, kolor=#a07a2c, wyrównanie=ś
 
 [REWERS]
 TŁO       = #a07a2c
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=brak, obwódka=0.6, kolor_obwódki=#ffffff80, zaokrąglenie=4
 TEKST     = 0, 6, 63, 8, "↑ góra", rozmiar=10, kolor=#ffffff, wyrównanie=środek, pion=środek
 IKONA     = 0, 22, 63, 22, {monety}
 TEKST     = 0, 50, 63, 12, "Kupcy", czcionka=[=tytuł], rozmiar=24, kolor=#ffffff, wyrównanie=środek, pion=środek
@@ -60,16 +63,15 @@ TEKST     = 0, 50, 63, 12, "Kupcy", czcionka=[=tytuł], rozmiar=24, kolor=#fffff
 [TALIA Kowale]
 DANE = kowale.csv
 
-TŁO       = #b5523b
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=#ffffff, zaokrąglenie=4
+TŁO       = #ffffff
+OTOK      = 3, #b5523b
 TEKST     = 6, 6, 51, 10, [Nazwa], czcionka=[=tytuł], rozmiar=18, wyrównanie=środek, pion=środek
 OBRAZEK   = 14, 20, 35, 32, Ikony/kowadlo.svg
 TEKST     = 7, 56, 49, 20, [Opis], wyrównanie=środek
 TEKST     = 6, 78, 51, 5, "Kowale [ID]", rozmiar=7, kolor=#b5523b, wyrównanie=środek
 
 [REWERS]
-TŁO       = #7d3324
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=brak, obwódka=0.6, kolor_obwódki=#ffffff80, zaokrąglenie=4
+TŁO       = #A8321E
 TEKST     = 0, 6, 63, 8, "↑ góra", rozmiar=10, kolor=#ffffff, wyrównanie=środek, pion=środek
 IKONA     = 0, 22, 63, 22, {kowadlo}
 TEKST     = 0, 50, 63, 12, "Kowale", czcionka=[=tytuł], rozmiar=24, kolor=#ffffff, wyrównanie=środek, pion=środek
@@ -80,8 +82,8 @@ TEKST     = 0, 50, 63, 12, "Kowale", czcionka=[=tytuł], rozmiar=24, kolor=#ffff
 [TALIA Złodzieje]
 DANE = zlodzieje.csv
 
-TŁO       = #4b4f58
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=#ffffff, zaokrąglenie=4
+TŁO       = #ffffff
+OTOK      = 3, #4b4f58
 TEKST     = 6, 6, 51, 10, [Nazwa], czcionka=[=tytuł], rozmiar=18, wyrównanie=środek, pion=środek
 OBRAZEK   = 14, 20, 35, 32, Ikony/slady.svg
 TEKST     = 7, 56, 49, 20, [Opis], wyrównanie=środek
@@ -93,8 +95,8 @@ TEKST     = 6, 78, 51, 5, "Złodzieje [ID]", rozmiar=7, kolor=#4b4f58, wyrównan
 DANE  = herby.csv
 KARTA = 88, 63, zaokrąglenie=3                     ; karta pozioma
 
-TŁO       = #3f7a5a
-PROSTOKĄT = 3, 3, 82, 57, kolor=#ffffff, zaokrąglenie=3
+TŁO       = #ffffff
+OTOK      = 3, #3f7a5a
 OBRAZEK   = 7, 9, 26, 26, Ikony/tarcza.svg
 TEKST     = 37, 7, 46, 10, [Nazwa], czcionka=[=tytuł], rozmiar=16, pion=środek
 TEKST     = 37, 18, 46, 30, [Opis]
@@ -102,9 +104,8 @@ TEKST     = 7, 52, 74, 5, "Herby [ID]", rozmiar=7, kolor=#3f7a5a
 
 [REWERS]
 TŁO       = #2a5640
-PROSTOKĄT = 3.5, 3.5, 81, 56, kolor=brak, obwódka=0.6, kolor_obwódki=#ffffff80, zaokrąglenie=4
 TEKST     = 0, 5, 88, 8, "↑ góra", rozmiar=10, kolor=#ffffff, wyrównanie=środek, pion=środek
-IKONA     = 0, 16, 88, 20, {tarcza}
+IKONA     = 0, 16, 88, 20, {tarcza-biala}
 TEKST     = 0, 40, 88, 12, "Herby", czcionka=[=tytuł], rozmiar=22, kolor=#ffffff, wyrównanie=środek, pion=środek
 
 
@@ -112,8 +113,8 @@ TEKST     = 0, 40, 88, 12, "Herby", czcionka=[=tytuł], rozmiar=22, kolor=#fffff
 [TALIA Magowie]
 DANE = magowie.csv
 
-TŁO       = #6a5a9e
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=#ffffff, zaokrąglenie=4
+TŁO       = #ffffff
+OTOK      = 3, #6a5a9e
 TEKST     = 6, 6, 51, 10, [Nazwa], czcionka=[=tytuł], rozmiar=18, wyrównanie=środek, pion=środek
 OBRAZEK   = 14, 20, 35, 32, Ikony/ksiega.svg
 TEKST     = 7, 56, 49, 20, [Opis], wyrównanie=środek
@@ -125,14 +126,13 @@ TEKST     = 6, 78, 51, 5, "Magowie [ID]", rozmiar=7, kolor=#6a5a9e, wyrównanie=
 [REWERS]
 TŁO       = #45396e
 TŁO       = [TłoRewersu]                           ; karta dwustronna – własne tło (puste = tło wyżej)
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=brak, obwódka=0.6, kolor_obwódki=#ffffff80, zaokrąglenie=4
 TEKST     = 0, 6, 63, 8, "↑ góra", rozmiar=10, kolor=#ffffff, wyrównanie=środek, pion=środek
 IKONA     = 0, 22, 63, 22, {ksiega}, jeśli=[Szkoła]=Księgi
 IKONA     = 0, 22, 63, 22, {runa}, jeśli=[Szkoła]=Runy
 TEKST     = 0, 50, 63, 12, "Magowie", czcionka=[=tytuł], rozmiar=24, kolor=#ffffff, wyrównanie=środek, pion=środek, jeśli=[Rodzaj]!=dwustronna
 TEKST     = 0, 63, 63, 7, "szkoła [Szkoła]", rozmiar=10, kolor=#ffffffcc, wyrównanie=środek, pion=środek
-TEKST     = 6, 18, 51, 14, [RewersNazwa], czcionka=[=tytuł], rozmiar=20, kolor=#2b2410, wyrównanie=środek, pion=środek, jeśli=[Rodzaj]=dwustronna
-TEKST     = 8, 36, 47, 40, [RewersOpis], rozmiar=11, kolor=#2b2410, wyrównanie=środek, jeśli=[Rodzaj]=dwustronna
+TEKST     = 6, 18, 51, 14, [RewersNazwa], czcionka=[=tytuł], rozmiar=20, kolor=#000, wyrównanie=środek, pion=środek, jeśli=[Rodzaj]=dwustronna
+TEKST     = 8, 36, 47, 40, [RewersOpis], rozmiar=11, kolor=#000, wyrównanie=środek, jeśli=[Rodzaj]=dwustronna
 
 
 ; ═══════════════════════════════════════════════════════════════════
@@ -140,10 +140,10 @@ TEKST     = 8, 36, 47, 40, [RewersOpis], rozmiar=11, kolor=#2b2410, wyrównanie=
 [TALIA Zwoje]
 DANE  = zwoje.csv
 KARTA = 44, 68, zaokrąglenie=2
-CZCIONKA = "EB Garamond, Georgia, serif", 8, kolor=#1d1b19
+CZCIONKA = "EB Garamond, Georgia, serif", 8, kolor=#000
 
-TŁO       = #3b8ea5
-PROSTOKĄT = 2.5, 2.5, 39, 63, kolor=#ffffff, zaokrąglenie=3
+TŁO       = #ffffff
+OTOK      = 3, #3b8ea5
 TEKST     = 4, 4, 36, 8, [Nazwa], czcionka=[=tytuł], rozmiar=13, wyrównanie=środek, pion=środek
 OBRAZEK   = 11, 14, 22, 20, Ikony/runa.svg
 TEKST     = 5, 37, 34, 20, [Opis], wyrównanie=środek
@@ -151,7 +151,6 @@ TEKST     = 4, 60, 36, 4, "Zwoje [ID]", rozmiar=6, kolor=#3b8ea5, wyrównanie=ś
 
 [REWERS]
 TŁO       = #255e6e
-PROSTOKĄT = 2.5, 2.5, 39, 63, kolor=brak, obwódka=0.5, kolor_obwódki=#ffffff80, zaokrąglenie=3
 TEKST     = 0, 4, 44, 6, "↑ góra", rozmiar=8, kolor=#ffffff, wyrównanie=środek, pion=środek
 IKONA     = 0, 18, 44, 16, {runa}
 TEKST     = 0, 38, 44, 10, "Zwoje", czcionka=[=tytuł], rozmiar=18, kolor=#ffffff, wyrównanie=środek, pion=środek
