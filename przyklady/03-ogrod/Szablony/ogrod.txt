@@ -52,8 +52,8 @@ KARTA = 88, 63, zaokrąglenie=3                     ; karta pozioma
 TŁO  = #ffffff
 OTOK = 3, [Typ]
 
-; Pasek ostrzegawczy tylko na karcie typu „burza” – końce paska chowają się pod otokiem
-PROSTOKĄT = 3, 50, 82, 10, kolor=#B23A48, jeśli=[Typ]=burza
+; Pasek ostrzegawczy tylko na karcie typu „burza” – do krawędzi karty z trzech stron: końce i dół chowają się pod otokiem (zakładka, bez szczeliny na styku – #143)
+PROSTOKĄT = 0, 50, 88, 13, kolor=#B23A48, jeśli=[Typ]=burza
 TEKST     = 3, 50, 82, 10, "UWAGA – BURZA!", rozmiar=11, kolor=#ffffff, pogrubienie, wyrównanie=środek, pion=środek, jeśli=[Typ]=burza
 
 OBRAZEK = 7, 9, 26, 26, [Obrazek]

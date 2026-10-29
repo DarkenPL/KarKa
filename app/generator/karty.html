@@ -1764,6 +1764,90 @@ function obwodkiKarty(k) {
   return wynik.sort((a, b) => gorszy(b, a) || a.odstep - b.odstep);
 }
 
+// Styk krawędź w krawędź (#143): bok wypełnionego pola leży na wewnętrznej krawędzi OTOK albo na boku innego pola
+// w innym kolorze – bliżej niż STYK_PROG mm z obu stron (szczelina albo za mała zakładka), na odcinku ≥ STYK_ODCINEK mm.
+// Dwie krawędzie na jednej linii są wygładzane osobno (a w druku pasowanie bywa przesunięte) – na styku widać kreskę
+// koloru spod spodu. Pola: PROSTOKĄT bez obrotu (zaokrąglony – boki bez promienia), OBRAZEK wypełnij / rozciągnij bez
+// obrotu, oba bez krycia; kolor brzegu – obwódka albo wypełnienie (gradient i plik – osobne „kolory”). Elipsy i łuki rogów
+// otoku – pomijane (decyzja właściciela 29.10.2026). Bez zgłoszenia, gdy pola mają jeden kolor, gdy kolor pod stykiem
+// (najwyższe wcześniejsze pole w środku odcinka albo tło karty) jest kolorem jednego z nich i gdy styk zakrywa pole wyżej
+// albo otok. Kolor pod spodem i zakrycie liczą tylko pola wypełnione (ramka z samą obwódką jest przezroczysta); elementy
+// pominięte (elipsy, obrócone, z kryciem, OBRAZEK zmieść) nie liczą się też tam – możliwe pominięcie zgłoszenia, a otok
+// z kryciem liczy się jak pełny (przegląd PR #145). Wynik: [{ element, opis, z ('OTOK' albo opis drugiego pola), krawedz,
+// odstep (mm, ujemny = zakładka), odcinek }].
+const STYK_PROG = 0.5, STYK_ODCINEK = 1;
+function stykiKarty(k) {
+  const [W, H] = cardMm(k), PX = 96 / 25.4, wynik = [];
+  const wMm = (v, zapas) => /mm$/.test(v) ? parseFloat(v) : zapas;
+  const r1 = (v) => Math.round(v * 10) / 10, mmTxt = (v) => String(r1(v)).replace('.', ',');
+  const kolor = (st) => st.backgroundImage && st.backgroundImage !== 'none' ? st.backgroundImage
+    : (rgbZCss(st.backgroundColor) || [0, 0, 0, 0])[3] > 0 ? st.backgroundColor : null;
+  const kst = getComputedStyle(k), pola = [], otoki = [];
+  let tlo = kolor(kst) || 'rgb(255, 255, 255)';                           // bez TŁO – biały papier
+  for (const el of k.querySelectorAll(':scope > .el')) {
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || !(parseFloat(st.opacity) > 0)) continue;
+    if (el.classList.contains('otok')) { otoki.push({ s: parseFloat(el.dataset.otok), r: parseFloat(el.dataset.zaokraglenie) || 0, kol: st.backgroundColor }); continue; }
+    const obr = el.classList.contains('obrazek'), img = obr && el.querySelector('img');
+    if (obr && el.classList.contains('tlo')) { tlo = 'plik:' + (img && img.src); continue; }
+    if (!(obr || el.classList.contains('ksztalt')) || parseFloat(st.opacity) < 1 || (st.transform && st.transform !== 'none')) continue;
+    let kol, rad = 0, nazwa = 'OBRAZEK', pelne = true;
+    if (obr) {
+      if (!img || !['cover', 'fill'].includes(img.style.objectFit)) continue;
+      kol = 'plik:' + img.src;
+    } else {
+      if (st.borderTopLeftRadius === '50%') continue;                     // ELIPSA
+      nazwa = 'PROSTOKĄT';
+      const b = wMm(el.style.borderTopWidth, parseFloat(st.borderTopWidth) / PX), kb = rgbZCss(st.borderTopColor) || [0, 0, 0, 0];
+      kol = b > 0 && st.borderTopStyle !== 'none' && kb[3] > 0 ? 'obwódka:' + st.borderTopColor + ' ' + st.borderTopStyle : kolor(st);
+      if (!kol) continue;
+      pelne = !!kolor(st);
+      rad = /mm$/.test(el.style.borderRadius) ? parseFloat(el.style.borderRadius) : 0;
+    }
+    const x = wMm(el.style.left, el.offsetLeft / PX), y = wMm(el.style.top, el.offsetTop / PX), w = wMm(el.style.width, el.offsetWidth / PX), h = wMm(el.style.height, el.offsetHeight / PX);
+    pola.push({ i: pola.length, x0: x, y0: y, x1: x + w, y1: y + h, rad, kol, pelne, nazwa, opis: `${nazwa} ${mmTxt(x)}, ${mmTxt(y)}, ${mmTxt(w)} × ${mmTxt(h)} mm` });
+  }
+  // Boki pola: oś ('x' – pionowy bok na x = v), położenie, zakres wzdłuż (bez promienia rogu).
+  const boki = (p) => ({
+    lewa: ['x', p.x0, p.y0 + p.rad, p.y1 - p.rad], prawa: ['x', p.x1, p.y0 + p.rad, p.y1 - p.rad],
+    górna: ['y', p.y0, p.x0 + p.rad, p.x1 - p.rad], dolna: ['y', p.y1, p.x0 + p.rad, p.x1 - p.rad] });
+  const pokrywa = (p, x, y) => p.pelne && x > p.x0 && x < p.x1 && y > p.y0 && y < p.y1;
+  const pod = (x, y, i, bez) => { for (let j = i - 1; j >= 0; j--) if (!bez.includes(j) && pokrywa(pola[j], x, y)) return pola[j].kol; return tlo; };
+  const nad = (x, y, i) => pola.some((p) => p.i > i && pokrywa(p, x, y));
+  const punkt = (os, v, a, b) => os === 'x' ? [v, (a + b) / 2] : [(a + b) / 2, v];
+  const dodaj = (x) => { if (!wynik.some((y) => y.opis === x.opis && y.z === x.z && y.krawedz === x.krawedz)) wynik.push(x); };
+  // (a) Pole przy wewnętrznej krawędzi otoku – proste boki otoku, pole sięga w głąb karty.
+  for (const o of otoki) {
+    const kr = { lewa: ['x', o.s, o.s + o.r, H - o.s - o.r, 1], prawa: ['x', W - o.s, o.s + o.r, H - o.s - o.r, -1],
+      górna: ['y', o.s, o.s + o.r, W - o.s - o.r, 1], dolna: ['y', H - o.s, o.s + o.r, W - o.s - o.r, -1] };
+    for (const p of pola) {
+      if (p.kol === o.kol) continue;
+      for (const [s, [os, v, a0, a1, znak]] of Object.entries(kr)) {
+        const [, e, b0, b1] = boki(p)[s], dal = boki(p)[{ lewa: 'prawa', prawa: 'lewa', górna: 'dolna', dolna: 'górna' }[s]][1];
+        const odstep = (e - v) * znak, a = Math.max(a0, b0), b = Math.min(a1, b1);
+        if (Math.abs(odstep) >= STYK_PROG || b - a < STYK_ODCINEK || (dal - v) * znak <= STYK_PROG) continue;
+        const [px, py] = punkt(os, v, a, b), spod = pod(px, py, p.i, [p.i]);
+        if (spod === p.kol || spod === o.kol || nad(px, py, p.i)) continue;
+        dodaj({ element: p.nazwa, opis: p.opis, z: 'OTOK', krawedz: s, odstep: Math.round(odstep * 100) / 100, odcinek: r1(b - a) });
+      }
+    }
+  }
+  // (b) Dwa pola w różnych kolorach – boki zwrócone do siebie (prawa / lewa, dolna / górna).
+  const wOtoku = (x, y) => otoki.some((o) => x < o.s || x > W - o.s || y < o.s || y > H - o.s);
+  for (const q of pola) for (const p of pola) {
+    if (p.i >= q.i || p.kol === q.kol) continue;
+    for (const [sq, sp] of [['lewa', 'prawa'], ['prawa', 'lewa'], ['górna', 'dolna'], ['dolna', 'górna']]) {
+      const [os, vq, q0, q1] = boki(q)[sq], [, vp, p0, p1] = boki(p)[sp];
+      const odstep = (sq === 'lewa' || sq === 'górna') ? vq - vp : vp - vq, a = Math.max(p0, q0), b = Math.min(p1, q1);
+      if (Math.abs(odstep) >= STYK_PROG || b - a < STYK_ODCINEK) continue;
+      const [px, py] = punkt(os, (vp + vq) / 2, a, b), spod = pod(px, py, q.i, [p.i, q.i]);
+      if (spod === p.kol || spod === q.kol || nad(px, py, q.i) || wOtoku(px, py)) continue;
+      dodaj({ element: q.nazwa, opis: q.opis, z: p.opis, krawedz: sq, odstep: Math.round(odstep * 100) / 100, odcinek: r1(b - a) });
+    }
+  }
+  return wynik;
+}
+
 // Krawędzie równoległe do cięcia, które ocenia obwodkiKarty (obwódka karty, obwódki prostokątów bez obrotu, LINIA
 // pozioma / pionowa – obie krawędzie każdej), w mm od linii cięcia, i miejsca, w których LINIA przecina cięcie
 // (urwane) – pomiar z obrazu ich nie powtarza.
@@ -2117,7 +2201,7 @@ async function raportDrukarniTeraz() {
       await ukladDoPomiaru(karty);
     }
     const odstep = [], bezPomiaru = [], czern = new Map(), pasy = new Map(), spad = [], pliki = [], zmiesc = [], widziane = new Set();
-    const progi = progiTekstu(), malyTekst = [], obwodki = new Map(), obwodkiInfo = new Map(), podOtokiem = [], liniiNiezmierzone = [];
+    const progi = progiTekstu(), malyTekst = [], obwodki = new Map(), obwodkiInfo = new Map(), podOtokiem = [], liniiNiezmierzone = [], styk = new Map();
     for (const k of karty) {
       const rewers = k.classList.contains('rewers');
       const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' + nrRewersu(k) : k.dataset.row);
@@ -2141,6 +2225,11 @@ async function raportDrukarniTeraz() {
       for (const x of [...obwodkiKarty(k), ...zObrazu]) {
         const kk = [k.dataset.talia, strona, x.opis, x.poziom, x.odstep, x.krawedz].join('|'), m = x.poziom === 'INFO' ? obwodkiInfo : obwodki;
         const y = m.get(kk) || m.set(kk, { talia: k.dataset.talia, strona, ...x, karty: [] }).get(kk);
+        y.karty.push(opisKarty(k));
+      }
+      for (const x of stykiKarty(k)) {                         // styk krawędź w krawędź (#143)
+        const kk = [k.dataset.talia, strona, x.opis, x.z, x.krawedz, x.odstep].join('|');
+        const y = styk.get(kk) || styk.set(kk, { talia: k.dataset.talia, strona, ...x, karty: [] }).get(kk);
         y.karty.push(opisKarty(k));
       }
       for (const { rgb, rodzaj } of await koloryKarty(k)) {
@@ -2169,7 +2258,7 @@ async function raportDrukarniTeraz() {
     malyTekst.sort((a, b) => a.rozmiar - b.rozmiar);
     const obw = [...obwodki.values()].sort((a, b) => gorszy(b, a) || a.odstep - b.odstep);
     return { margines: MARGINES_DRUKARNI, karty: karty.length, niezmierzone: bezPomiaru, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad, spadSzablonu,
-      progiTekstu: progi, malyTekst, obwodki: obw, obwodkiInfo: [...obwodkiInfo.values()].sort((a, b) => a.odstep - b.odstep), liniiNiezmierzone, podOtokiem };
+      progiTekstu: progi, malyTekst, obwodki: obw, obwodkiInfo: [...obwodkiInfo.values()].sort((a, b) => a.odstep - b.odstep), liniiNiezmierzone, podOtokiem, styk: [...styk.values()] };
   });
   // Obrazki kart (html-to-image) czytają podgląd – na wyłączność, chyba że eksport już trwa.
   return (OSTATNI_RAPORT_DRUKARNI = EKSPORT_TRWA ? await praca() : await naWylacznosc(praca));
@@ -2239,6 +2328,15 @@ async function sekcjeDrukarni(lista, o = {}) {
     .concat((r.obwodki || []).length > POKAZ ? [`… i ${r.obwodki.length - POKAZ} pozycji więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
     `obwódki, ramki i linie (także w grafice) są co najmniej ${RAMKA_UWAGA} mm od linii cięcia albo przechodzą przez nią do końca spadu`,
     (r.obwodkiInfo || []).slice(0, POKAZ).map(pozycjaObw));
+  // Styk krawędź w krawędź (#143) – INFO pod sekcją (✓ zostaje); sekcja tylko, gdy są.
+  const styk = r.styk || [], mm2 = (v) => String(Math.abs(v)).replace('.', ',') + ' mm';
+  if (styk.length) lista('Drukarnia: pola stykające się krawędzią', [], 'nic do poprawienia przed drukiem – to kosmetyka', styk.slice(0, POKAZ).map((x) =>
+    `<b>INFO ${x.odstep > 0 ? 'szczelina ' + mm2(x.odstep) : x.odstep < 0 ? 'zakładka ' + mm2(x.odstep) : 'styk'}</b> – ${esc(x.talia)} – ${x.strona === 'rewers' ? 'rewers' : 'awersy (' + x.karty.length + ')'}: `
+      + `${esc(x.opis)}, ${x.krawedz} krawędź – ${x.z === 'OTOK' ? 'na wewnętrznej krawędzi otoku' : 'na krawędzi pola ' + esc(x.z)} (odcinek ${mm(x.odcinek)}). `
+      + 'Krawędzie na jednej linii są wygładzane osobno, a w druku pasowanie bywa przesunięte – na styku widać cienką jasną albo kolorową kreskę; '
+      + (x.z === 'OTOK' ? 'wsuń element pod otok (najlepiej do krawędzi karty)' : 'nałóż pola na siebie (zakładka ok. 0,5–1 mm)')
+      + (x.strona === 'awers' ? `: ${ileKart(x.karty)}` : ''))
+    .concat(styk.length > POKAZ ? [`… i ${styk.length - POKAZ} pozycji więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []));
   lista('Drukarnia: „prawie czerń” zamiast #000', r.czern.map((x) =>
     `<b>${esc(x.kolor)}</b> (jasność ${x.jasnosc}) – ${esc(x.rodzaj)}: ${ileKart(x.karty)}. Po konwersji do CMYK wyjdzie czerń czterokolorowa – drukarnie chcą tekstu i małych ikon w czystej czerni (K100): wpisz #000`),
     'czarne teksty, obrysy i ikony są w #000');

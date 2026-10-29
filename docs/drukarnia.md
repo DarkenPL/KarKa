@@ -51,4 +51,4 @@ Dodatkowo:
 
 ## Zlecenie `raport`
 
-Z `drukarnia = tak` wynik ma `drukarnia.obwodki` (BŁĘDY i UWAGI; z obrazu – `element: "OBRAZ"`, `odstep` ujemny = w spadzie, `urwana: true` z `spad` i `u` – miejsce wzdłuż krawędzi w mm), `drukarnia.obwodkiInfo` (INFO 3–4 mm) i `drukarnia.liniiNiezmierzone` (karty bez pomiaru z obrazu). Zlecenie czeka na koniec pomiaru. W `raport[]` sekcja ma pole `info` z pozycjami INFO.
+Z `drukarnia = tak` wynik ma `drukarnia.obwodki` (BŁĘDY i UWAGI; z obrazu – `element: "OBRAZ"`, `odstep` ujemny = w spadzie, `urwana: true` z `spad` i `u` – miejsce wzdłuż krawędzi w mm), `drukarnia.obwodkiInfo` (INFO 3–4 mm) i `drukarnia.liniiNiezmierzone` (karty bez pomiaru z obrazu). Zlecenie czeka na koniec pomiaru. W `raport[]` sekcja ma pole `info` z pozycjami INFO. Od 0.7.17 także `drukarnia.styk` – pola stykające się krawędzią z otokiem albo z innym polem (INFO, opis w [aplikacja.md](aplikacja.md)).
