@@ -3965,6 +3965,62 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   }
   // Ramki przy cięciu na projekcie (#138): raport drukarni (pierwszy – z pomiarem z obrazu każdej karty) bez UWAG i BŁĘDÓW
   // z pomiaru obrazu i bez kart niezmierzonych; INFO nie liczy się do wyniku. Czas pierwszego raportu – w wyniku.
+  // Styk krawędź w krawędź (#143): pasek z 03 przed poprawką (3…85 × 50…60 pod OTOK = 3) – INFO lewa, prawa (do łuku
+  // rogu otoku – 7 mm) i dolna, po poprawce (0…88 × 50…63), z zakładką 1 mm i 1,5 mm od otoku – nic; pole #cce z zaokrągleniem 3 pod otokiem – INFO na czterech prostych
+  // bokach (pominięcie łuku niczego nie gubi); dwa pola w różnych kolorach na białym – INFO, z zakładką 1 mm, na tle
+  // w kolorze jednego z nich i w jednym kolorze – nic. Bez pomiaru obrazu: html-to-image (600 dpi) rysuje styk bez szczeliny
+  // (przed i po poprawce piksel w piksel tak samo) – szczelinę daje rysowanie ekranu Chromium i przeglądarki PDF.
+  let stykTest = null;
+  if (testBloku('styk')) {
+    stykTest = await wc.executeJavaScript(`(async () => {
+      const b = [], w = {};
+      const d = document.createElement('div');
+      d.style.cssText = 'position:fixed;left:-3000px;top:0';
+      document.body.appendChild(d);
+      try {
+        const OTOK = 'TŁO = #ffffff\\nOTOK = 3, #4A4E69\\n';
+        const PRZYPADKI = {
+          przed: [OTOK + 'PROSTOKĄT = 3, 50, 82, 10, kolor=#B23A48', 'PROSTOKĄT:lewa:0:OTOK:7,PROSTOKĄT:prawa:0:OTOK:7,PROSTOKĄT:dolna:0:OTOK:76'],
+          po: [OTOK + 'PROSTOKĄT = 0, 50, 88, 13, kolor=#B23A48', ''],
+          zakladka: [OTOK + 'PROSTOKĄT = 2, 50, 84, 11, kolor=#B23A48', ''],
+          odstep: [OTOK + 'PROSTOKĄT = 4.5, 50, 79, 8.5, kolor=#B23A48', ''],
+          zaokraglone: [OTOK + 'PROSTOKĄT = 3, 3, 82, 57, kolor=#cce, zaokrąglenie=3',
+            'PROSTOKĄT:lewa:0:OTOK:51,PROSTOKĄT:prawa:0:OTOK:51,PROSTOKĄT:górna:0:OTOK:76,PROSTOKĄT:dolna:0:OTOK:76'],
+          para: ['TŁO = #ffffff\\nPROSTOKĄT = 10, 10, 20, 20, kolor=#ff0000\\nPROSTOKĄT = 30, 10, 20, 20, kolor=#0000ff', 'PROSTOKĄT:lewa:0:PROSTOKĄT 10, 10, 20 × 20 mm:20'],
+          paraZakladka: ['TŁO = #ffffff\\nPROSTOKĄT = 10, 10, 20, 20, kolor=#ff0000\\nPROSTOKĄT = 29, 10, 20, 20, kolor=#0000ff', ''],
+          paraTlo: ['TŁO = #ff0000\\nPROSTOKĄT = 10, 10, 20, 20, kolor=#ff0000\\nPROSTOKĄT = 30, 10, 20, 20, kolor=#0000ff', ''],
+          paraKolor: ['TŁO = #ffffff\\nPROSTOKĄT = 10, 10, 20, 20, kolor=#ff0000\\nPROSTOKĄT = 30, 10, 20, 20, kolor=#ff0000', ''],
+        };
+        const karty = {};
+        for (const [n, [linie]] of Object.entries(PRZYPADKI)) {
+          const t = parseTemplate('[TALIA Styk]\\nKARTA = 88, 63, zaokrąglenie=3\\n' + linie + '\\n', 'styk.txt');
+          if (t.bledy.length) b.push(n + ': parser ' + JSON.stringify(t.bledy));
+          const tal = t.talie[0], r = renderCard(tal, tal.awers, {}, { warn: new Set(), icons: {}, label: 'Styk ' + n, plik: 'styk.txt', kolumny: true, wbudowane: {} });
+          d.insertAdjacentHTML('beforeend', '<div class="karta" data-talia="Styk" title="Styk ' + n + '" style="' + esc(r.style) + '">' + r.html + '</div>');
+          karty[n] = d.lastElementChild;
+        }
+        await ukladDoPomiaru(Object.values(karty));
+        w.styki = Object.fromEntries(Object.keys(PRZYPADKI).map((n) => [n, stykiKarty(karty[n]).map((x) => [x.element, x.krawedz, x.odstep, x.z, x.odcinek].join(':')).join()]));
+        for (const [n, [, ma]] of Object.entries(PRZYPADKI)) if (w.styki[n] !== ma) b.push(n + ': ' + w.styki[n] + ' zamiast ' + ma);
+        // Sekcja raportu: tylko INFO pod ✓.
+        const oryg = window.raportDrukarni;
+        const zKarty = (n) => stykiKarty(karty[n]).map((x) => ({ talia: 'Styk', strona: 'awers', ...x, karty: ['Styk ' + n] }));
+        window.raportDrukarni = async () => ({ margines: 3, karty: 1, niezmierzone: [], odstep: [], czern: [], krawedz: [], spad: [], spadSzablonu: { talie: {}, bez: [], pliki: [], zmiesc: [] },
+          progiTekstu: { czarny: 6, kontra: 8, profil: null }, malyTekst: [], obwodki: [], obwodkiInfo: [], liniiNiezmierzone: [], podOtokiem: [], styk: [...zKarty('przed'), ...zKarty('para')] });
+        try {
+          const sek = await raportJson({ drukarnia: true }), s = sek.find((x) => x.tytul === 'Drukarnia: pola stykające się krawędzią');
+          w.sekcja = s && { ok: s.ok, info: s.info };
+          if (!s || !s.ok || (s.info || []).length !== 4 || !/^INFO styk – Styk – awersy \\(1\\): PROSTOKĄT 3, 50, 82 × 10 mm, lewa krawędź – na wewnętrznej krawędzi otoku \\(odcinek 7,0 mm\\)\\. .*wsuń element pod otok/.test(s.info[0])
+            || !/na krawędzi pola PROSTOKĄT 10, 10, 20 × 20 mm .*nałóż pola na siebie/.test(s.info[3])) b.push('sekcja ' + JSON.stringify(w.sekcja));
+          window.raportDrukarni = async () => ({ margines: 3, karty: 1, niezmierzone: [], odstep: [], czern: [], krawedz: [], spad: [], spadSzablonu: { talie: {}, bez: [], pliki: [], zmiesc: [] },
+            progiTekstu: { czarny: 6, kontra: 8, profil: null }, malyTekst: [], obwodki: [], obwodkiInfo: [], liniiNiezmierzone: [], podOtokiem: [], styk: [] });
+          if ((await raportJson({ drukarnia: true })).some((x) => x.tytul === 'Drukarnia: pola stykające się krawędzią')) b.push('sekcja bez styków');
+        } finally { window.raportDrukarni = oryg; }
+      } catch (e) { b.push('wyjątek: ' + ((e && e.stack) || e)); }
+      finally { d.remove(); }
+      return { ok: !b.length, bledy: b, ...w };
+    })()`);
+  }
   let ramkiPrzyklad = null;
   if (testBloku('ramkiPrzyklad') && folder !== '-') {
     ramkiPrzyklad = await wc.executeJavaScript(`(async () => {
@@ -3973,8 +4029,10 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const t1 = Date.now(); await raportDrukarni(); const ms2 = Date.now() - t1;
       const wpis = (x) => x.poziom + ' ' + x.odstep + ' ' + x.talia + '/' + x.strona + ' ' + x.krawedz + (x.u !== undefined ? ' u=' + x.u : '') + ': ' + x.opis + ' (' + x.karty.slice(0, 3).join(', ') + ')';
       const obraz = r.obwodki.filter((x) => x.element === 'OBRAZ');
-      return { ok: !obraz.length && !r.liniiNiezmierzone.length, karty: r.karty, ms, ms2, obraz: obraz.map(wpis), szablon: r.obwodki.filter((x) => x.element !== 'OBRAZ').map(wpis),
-        info: r.obwodkiInfo.map(wpis), niezmierzone: r.liniiNiezmierzone };
+      // Styk krawędź w krawędź (#143) – przykłady bez styków.
+      const styk = r.styk.map((x) => x.talia + '/' + x.strona + ' ' + x.krawedz + ' ' + x.odstep + ': ' + x.opis + ' z ' + x.z + ' (' + x.karty.slice(0, 3).join(', ') + ')');
+      return { ok: !obraz.length && !r.liniiNiezmierzone.length && !styk.length, karty: r.karty, ms, ms2, obraz: obraz.map(wpis), szablon: r.obwodki.filter((x) => x.element !== 'OBRAZ').map(wpis),
+        info: r.obwodkiInfo.map(wpis), niezmierzone: r.liniiNiezmierzone, styk };
     })()`);
   }
   CZASY_TESTU.push([null, Date.now()]);                  // koniec ostatniego bloku
@@ -3988,8 +4046,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
     && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!filtrWTrakcie || filtrWTrakcie.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!otokTest || otokTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, otok: otokTest, ramkiObraz, ramkiPrzyklad, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!otokTest || otokTest.ok) && (!stykTest || stykTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok);
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
