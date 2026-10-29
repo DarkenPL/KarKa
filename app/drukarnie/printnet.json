@@ -5,6 +5,8 @@
   "opis": "Druk cyfrowy (Ricoh Pro C9210)",
   "spad": 2,
   "strefa": 3,
+  "promienRogu": 5,
+  "promienRoguPotwierdzony": false,
   "icc": "iso300",
   "tac": 300,
   "pdfx": "PDF/X-4",
