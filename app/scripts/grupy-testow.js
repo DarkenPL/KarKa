@@ -11,7 +11,7 @@
 // BLOKI_KAZDEGO (budowa kart, Uwagi, PDF). Tryb pelny: --test-edytor (wszystkie bloki) na każdym przykładzie.
 // Podział (pomiar 29.10.2026, macOS, 5 procesów naraz): bloki z danymi przykładu tam, gdzie te dane są; pozostałe
 // rozłożone tak, żeby 03 i grupy 07 trwały podobnie (ok. 1 min). Ten sam blok na 03 (26 kart z obrazkami) trwa kilka
-// razy dłużej niż na 07 (okna 28 / 1 s, katalog 28 / 3 s) – ciężkie bloki ogólne idą na 07. Wyjątek: filtrWTrakcie (58 s na 03).
+// razy dłużej niż na 07 (okna 28 / 1 s, katalog 28 / 3 s) – ciężkie bloki ogólne idą na 07.
 // Zależności między blokami (każdy blok osobno na kopii 07, 27.10.2026):
 // - część CMYK w zlecenia (zlecenia z profilem) wykonuje się tylko z cmykTest w tym samym procesie – bez niego blok
 //   przechodzi bez tej części (cicha utrata pokrycia),
@@ -21,13 +21,12 @@ const fs = require('fs');
 const path = require('path');
 
 const BLOKI = {
-  '03-ogrod': ['edytor', 'wybor', 'drukarnia', 'drukarniaPdf', 'oknaDruku',    // kilka talii, rewersy, jeśli=
-    'filtrWTrakcie'],   // na 07 bez innych bloków przed nim bywa czerwony (praca kończy się, zanim test złapie „w trakcie”)
+  '03-ogrod': ['edytor', 'wybor', 'drukarnia', 'drukarniaPdf', 'oknaDruku'],   // kilka talii, rewersy, jeśli=
   '05-zaklecia': ['raportStart'],                                       // tekst ok. 2 mm od krawędzi (#111)
   '07-gildie:zlecenia': ['cmykTest', 'zlecenia', 'hist', 'zmienione', 'katalog'],
   '07-gildie:zakladki': ['zakladki', 'zleceniaWTle'],
   '07-gildie:reszta': ['arkusze', 'rewersy', 'rewersyDodatki',          // talia Magowie – rewersy zależne od karty (#47)
-    'spadTest', 'okna', 'podfolder',
+    'spadTest', 'okna', 'podfolder', 'filtrWTrakcie',
     'formatowanie', 'uklad', 'jesli', 'rozmiary', 'akapity',            // karty testowe poza projektem
     'raportProgi', 'naroznik', 'otok', 'ramkiObraz', 'styk'],
   '08-wieze': ['spadSzablonu', 'profileDrukarni'],                      // spad w szablonie (#84), profile drukarni (#85)
