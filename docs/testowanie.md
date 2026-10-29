@@ -13,7 +13,7 @@ Notatki dla Claude (i ludzi). Przeniesione z `CLAUDE.md` (v0.7.5); tryb testowy 
   | `07-gildie` | `--test-edytor` w trzech grupach (`zlecenia`, `zakladki`, `reszta`) | wiele talii i rewersów, rozmiary kart |
   | `05-zaklecia` | `--test-bloki raportStart` | tekst ok. 2 mm od krawędzi (#111); karty mini, formatowanie w danych |
   | `08-wieze` | `--test-bloki spadSzablonu,profileDrukarni` | spad w szablonie (#84), profile drukarni (#85) |
-  | `01-wyprawa`, `02-kuznia`, `04-karawana`, `06-targ` | tylko `--test-pdf` | budowa kart, Uwagi, PDF (04 – XLSX, 06 – pozycje z kolumn) |
+  | `01-wyprawa`, `02-kuznia`, `04-karawana`, `06-targ` | `--test-bloki ramkiPrzyklad` | budowa kart, Uwagi, PDF (04 – XLSX, 06 – pozycje z kolumn), raport drukarni bez UWAG z pomiaru linii z obrazu (#138, `BLOKI_KAZDEGO` – także na 05 i 08) |
 
   Blok potrzebujący danych przykładu bez pełnego edytora → dopisz go w `BLOKI_PRZYKLADOW` (`grupy-testow.js`). `PELNY=1 scripts/testuj.sh` i tryb `pelny` w CI – `--test-edytor` na każdym przykładzie (jak przed #136).
   - 07 w trzech grupach: `KARKA_GS=/usr/bin/gs scripts/testuj.sh 07-gildie` (sama jedna grupa: `scripts/testuj.sh 07-gildie:zakladki`; nazwy: `node scripts/grupy-testow.js`). Jak w CI: `KARKA_GS=/usr/bin/gs node scripts/testy-ci.js pr --bin "xvfb-run -a ./node_modules/.bin/electron --no-sandbox ." --tmp /tmp/ci --razem 4` (przed pierwszym takim uruchomieniem – raz `./node_modules/.bin/electron --version`, inaczej kilka procesów naraz pobiera Electron i pada `spawn ETXTBSY`).
