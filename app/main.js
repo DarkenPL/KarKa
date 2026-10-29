@@ -3758,11 +3758,11 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
           + 'TEKST = 10, 32, 43, 8, "Kolorowy", rozmiar=7, kolor=#cc0000\\n'        // 7 < 8
           + 'TEKST = 10, 42, 43, 8, "Czarny siedem", rozmiar=7, kolor=#000\\n'      // 7 ≥ 6 – bez uwagi
           + 'PROSTOKĄT = 1, 1, 61, 86, obwódka=0.5\\n'                              // 1 mm – BŁĄD
-          + 'PROSTOKĄT = 4, 4, 55, 80, obwódka=0.3\\n'                              // 4 mm – UWAGA
+          + 'PROSTOKĄT = 2.8, 2.8, 57.4, 82.4, obwódka=0.3\\n'                      // 2,8 mm – UWAGA (2,5–3 mm, #138)
           + 'PROSTOKĄT = 20, 52, 20, 6, obwódka=0.3\\n'                             // daleko – bez uwagi
           + 'PROSTOKĄT = -3, 60, 69, 10, kolor=#336699, obwódka=0.3\\n'             // boki w spadzie, góra/dół przechodzą przez cięcie – bez uwagi
           + 'ELIPSA = 50, 30, 12, 12, obwódka=0.3\\n'                               // prawa 1 mm – BŁĄD
-          + 'LINIA = 10, 85, 50, 85\\n'                                             // dolna 2,85 mm – BŁĄD
+          + 'LINIA = 10, 85, 50, 85\\n'                                             // dolna 2,85 mm – UWAGA
           + 'LINIA = 30, -3, 30, 15\\n'                                             // przez linię cięcia – bez uwagi
           + 'LINIA = 40, 30, 40, 86\\n'                                             // prostopadła, koniec 2 mm przed cięciem (− grubość/2) – UWAGA
           + 'IKONA = 20, 70, 15, 10, {proba}\\n'                                  // 64 px na 10 mm ≈ 162,5 dpi (CI: 162,6 – układ w 1/64 px)
@@ -3781,8 +3781,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         const obw = obwodkiKarty(k);
         w.obwodki = obw.map((x) => x.element + ':' + x.poziom + ':' + x.odstep + ':' + x.krawedz);
         const jest = (re, poziom, od) => obw.some((x) => re.test(x.opis) && x.poziom === poziom && (od === undefined || Math.abs(x.odstep - od) < 0.11));
-        if (!jest(/^obwódka karty/, 'BŁĄD', 0) || !jest(/^PROSTOKĄT 1, 1,/, 'BŁĄD', 1) || !jest(/^PROSTOKĄT 4, 4,/, 'UWAGA', 4) || !jest(/^ELIPSA 50, 30/, 'BŁĄD', 1)
-          || !jest(/^LINIA 10, 85/, 'BŁĄD', 2.9) || !obw.some((x) => /^LINIA 40, 30/.test(x.opis) && x.poziom === 'UWAGA' && x.koniec && Math.abs(x.odstep - 1.85) < 0.1) || obw.length !== 6) b.push('obwódki ' + JSON.stringify(w.obwodki));
+        if (!jest(/^obwódka karty/, 'BŁĄD', 0) || !jest(/^PROSTOKĄT 1, 1,/, 'BŁĄD', 1) || !jest(/^PROSTOKĄT 2,8, 2,8,/, 'UWAGA', 2.8) || !jest(/^ELIPSA 50, 30/, 'BŁĄD', 1)
+          || !jest(/^LINIA 10, 85/, 'UWAGA', 2.9) || !obw.some((x) => /^LINIA 40, 30/.test(x.opis) && x.poziom === 'UWAGA' && x.koniec && Math.abs(x.odstep - 1.85) < 0.1) || obw.length !== 6) b.push('obwódki ' + JSON.stringify(w.obwodki));
         const dpi = await obrazkiNiskiejRozdzielczosci(300, [k]);
         w.dpi = dpi.map((x) => x.replace(/<[^>]*>/g, ''));
         if (w.dpi.length !== 1 || !/^Ikony\\/proba-64\\.png \\(ikona\\) – 162,[4-6] dpi/.test(w.dpi[0])) b.push('dpi ' + JSON.stringify(w.dpi));
@@ -3884,6 +3884,99 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       return { ok: !b.length, bledy: b, ...w };
     })()`);
   }
+  // Ramki przy cięciu (#138): progi 2,5 / 3 mm (BŁĄD / UWAGA, 3–4 mm – INFO poza wynikiem), krawędź urwana w spadzie
+  // i pomiar linii z obrazu karty ze spadem (linieZObrazu, 300 dpi): ramka w SVG 2,75 mm – UWAGA, 3,25 mm (dawna ramka
+  // z 08 przed #109) – INFO, 1,5 mm – BŁĄD, przerywana 2 mm – BŁĄD; ramka opisu z 04 (przerywana, 18 mm wysokości)
+  // przesunięta na 2 mm – BŁĄD (także z obrazu), linia kończąca się w połowie spadu – BŁĄD, otok 3 mm – nic.
+  let ramkiObraz = null;
+  if (testBloku('ramkiObraz')) {
+    ramkiObraz = await wc.executeJavaScript(`(async () => {
+      const b = [], w = {}, dodane = [];
+      const d = document.createElement('div');
+      try {
+        // Nakładka SVG na kartę ze spadem (69 × 94 mm) z ramką o boku odsuniętym od cięcia o „o” mm (obwódka 0,4 mm, krawędź zewnętrzna).
+        const svg = (o, kreski = '') => new File(['<svg xmlns="http://www.w3.org/2000/svg" width="690" height="940" viewBox="0 0 69 94"><rect x="' + (3 + o + 0.2) + '" y="' + (3 + o + 0.2)
+          + '" width="' + (63 - 2 * o - 0.4) + '" height="' + (88 - 2 * o - 0.4) + '" fill="none" stroke="#000" stroke-width="0.4"' + kreski + '/></svg>'], 'r.svg', { type: 'image/svg+xml', lastModified: 1 });
+        const pliki = { 'Grafika/rama-275.svg': svg(2.75), 'Grafika/rama-325.svg': svg(3.25), 'Grafika/rama-15.svg': svg(1.5), 'Grafika/rama-2-kreski.svg': svg(2, ' stroke-dasharray="1.2 0.9"') };
+        for (const [n, f] of Object.entries(pliki)) { files.set(norm(n), f); dodane.push(n); }
+        const glowa = '[TALIA Ramki]\\nKARTA = 63, 88\\nTŁO = #f4ecd8\\nTEKST = 10, 40, 43, 8, "Środek", rozmiar=10\\n';
+        const karty = {
+          svg275: 'OBRAZEK = -3, -3, 69, 94, "Grafika/rama-275.svg"\\n',
+          svg325: 'OBRAZEK = -3, -3, 69, 94, "Grafika/rama-325.svg"\\n',
+          svg15: 'OBRAZEK = -3, -3, 69, 94, "Grafika/rama-15.svg"\\n',
+          kreski: 'OBRAZEK = -3, -3, 69, 94, "Grafika/rama-2-kreski.svg"\\n',
+          // Ramka opisu z 04-karawana przesunięta na 2 mm od cięcia (przerywana, zaokrąglona, półprzezroczyste tło).
+          ramka04: 'PROSTOKĄT = 2, 50, 59, 18, kolor=#ffffffcc, obwódka=0.3, kolor_obwódki=#7a4a1e, styl_obwódki=przerywana, zaokrąglenie=2\\n',
+          urwana: 'LINIA = 31.5, -1.5, 31.5, 20, grubość=0.4\\n',              // kończy się w połowie spadu (3 mm)
+          doSpadu: 'LINIA = 31.5, -3, 31.5, 20, grubość=0.4\\nPROSTOKĄT = 3.5, 3.5, 56, 81, obwódka=0.3\\n',   // do końca spadu – nic; ramka 3,5 mm – INFO
+          otok: 'OTOK = 3, #2E7D32\\n',
+        };
+        const el = {};
+        d.style.cssText = 'position:fixed;left:-3000px;top:0';
+        document.body.appendChild(d);
+        for (const [n, tpl] of Object.entries(karty)) {
+          const t = parseTemplate(glowa + tpl, 'ramki.txt');
+          if (t.bledy.length) b.push(n + ': parser ' + JSON.stringify(t.bledy));
+          const tal = t.talie[0], r = renderCard(tal, tal.awers, {}, { warn: new Set(), icons: {}, label: 'Ramki ' + n, plik: 'ramki.txt', kolumny: true, wbudowane: {} });
+          d.insertAdjacentHTML('beforeend', '<div class="karta" data-talia="Ramki" title="Ramki ' + n + '" style="' + esc(r.style) + '">' + r.html + '</div>');
+          el[n] = d.lastElementChild;
+        }
+        await waitForImages(d); fitAll(d); await ukladDoPomiaru(Object.values(el));
+        const opis = (a) => a.map((x) => x.element + ':' + x.poziom + ':' + x.odstep + ':' + x.krawedz + (x.urwana ? ':urwana' : ''));
+        w.szablon = {}; w.obraz = {}; w.wszystkie = {};
+        const t0 = Date.now();
+        for (const [n, k] of Object.entries(el)) {
+          w.szablon[n] = opis(obwodkiKarty(k));
+          w.obraz[n] = opis(await linieZObrazu(k));
+        }
+        w.ms = Math.round((Date.now() - t0) / Object.keys(el).length);
+        w.wszystkie.ramka04 = opis(await linieZObrazu(el.ramka04, { wszystkie: true }));
+        w.wszystkie.urwana = opis(await linieZObrazu(el.urwana, { wszystkie: true }));
+        const jest = (a, re) => a.some((x) => re.test(x));
+        const tylko = (a, re) => a.length && a.every((x) => re.test(x));
+        if (!tylko(w.obraz.svg275, /^OBRAZ:UWAGA:2\\.[6-9]:/) || w.obraz.svg275.length !== 4 || w.szablon.svg275.length) b.push('svg 2,75 ' + JSON.stringify([w.szablon.svg275, w.obraz.svg275]));
+        if (!tylko(w.obraz.svg325, /^OBRAZ:INFO:3\\.[1-4]:/) || w.obraz.svg325.length !== 4) b.push('svg 3,25 ' + JSON.stringify(w.obraz.svg325));
+        if (!tylko(w.obraz.svg15, /^OBRAZ:BŁĄD:1\\.[4-6]:/) || w.obraz.svg15.length !== 4) b.push('svg 1,5 ' + JSON.stringify(w.obraz.svg15));
+        if (!tylko(w.obraz.kreski, /^OBRAZ:BŁĄD:(1\\.9|2|2\\.1):/) || w.obraz.kreski.length !== 4) b.push('svg przerywana 2 ' + JSON.stringify(w.obraz.kreski));
+        if (!jest(w.szablon.ramka04, /^PROSTOKĄT:BŁĄD:2:(lewa|prawa)$/) || w.obraz.ramka04.length || !tylko(w.wszystkie.ramka04, /^OBRAZ:BŁĄD:(1\\.9|2|2\\.1):(lewa|prawa)$/) || w.wszystkie.ramka04.length !== 2) b.push('ramka 04 ' + JSON.stringify([w.szablon.ramka04, w.obraz.ramka04, w.wszystkie.ramka04]));
+        if (w.szablon.urwana.join() !== 'LINIA:BŁĄD:1.5:górna:urwana' || w.obraz.urwana.length || !jest(w.wszystkie.urwana, /^OBRAZ:BŁĄD:0:górna:urwana$/)) b.push('urwana ' + JSON.stringify([w.szablon.urwana, w.obraz.urwana, w.wszystkie.urwana]));
+        if (w.szablon.doSpadu.length !== 1 || !/^PROSTOKĄT:INFO:3\\.5:/.test(w.szablon.doSpadu[0]) || w.obraz.doSpadu.length) b.push('do spadu ' + JSON.stringify([w.szablon.doSpadu, w.obraz.doSpadu]));
+        if (w.szablon.otok.length || w.obraz.otok.length) b.push('otok ' + JSON.stringify([w.szablon.otok, w.obraz.otok]));
+        // Sekcja raportu: INFO pod sekcją (✓ zostaje), linie niezmierzone – błąd zamiast ✓.
+        const oryg = window.raportDrukarni;
+        const sekcja = async (r) => {
+          window.raportDrukarni = async () => ({ margines: 3, karty: 2, niezmierzone: [], odstep: [], czern: [], krawedz: [], spad: [], spadSzablonu: { talie: {}, bez: [], pliki: [], zmiesc: [] },
+            progiTekstu: { czarny: 6, kontra: 8, profil: null }, malyTekst: [], obwodki: [], obwodkiInfo: [], liniiNiezmierzone: [], podOtokiem: [], ...r });
+          try { return (await raportJson({ drukarnia: true })).find((x) => x.tytul === 'Drukarnia: obwódki i ramki przy linii cięcia'); } finally { window.raportDrukarni = oryg; }
+        };
+        const zKarty = (n, x) => ({ talia: 'Ramki', strona: 'awers', ...x, karty: ['Ramki ' + n] });
+        const sInfo = await sekcja({ obwodkiInfo: obwodkiKarty(el.doSpadu).map((x) => zKarty('doSpadu', x)) });
+        const sObraz = await sekcja({ obwodki: [...(await linieZObrazu(el.svg275)).slice(0, 1), ...obwodkiKarty(el.urwana)].map((x) => zKarty('svg', x)) });
+        const sBlad = await sekcja({ liniiNiezmierzone: ['Ramki svg15'] });
+        w.sekcje = { info: sInfo, obraz: sObraz, blad: sBlad };
+        if (!sInfo || !sInfo.ok || !sInfo.info || !/^INFO 3,5 mm – Ramki – awersy \\(1\\): PROSTOKĄT .* 3–4 mm od linii cięcia/.test(sInfo.info[0])) b.push('sekcja INFO ' + JSON.stringify(sInfo));
+        if (!sObraz || sObraz.ok || !/^UWAGA 2,[6-9] mm – Ramki – awersy \\(1\\): linia z obrazu karty, \\S+ krawędź – 2,5–3 mm/.test(sObraz.pozycje[0] || '')
+          || !sObraz.pozycje.some((t) => /^BŁĄD – .*LINIA .*przechodzi przez linię cięcia i kończy się 1,5 mm za nią, przed końcem spadu \\(3,0 mm\\)/.test(t))) b.push('sekcja obraz ' + JSON.stringify(sObraz));
+        if (!sBlad || sBlad.ok || !/^Nie zmierzono linii z obrazu na 1 z 2 kart/.test(sBlad.pozycje[0] || '')) b.push('sekcja błąd ' + JSON.stringify(sBlad));
+      } catch (e) { b.push('wyjątek: ' + ((e && e.stack) || e)); }
+      finally { d.remove(); dodane.forEach((p) => files.delete(norm(p))); }
+      return { ok: !b.length, bledy: b, ...w };
+    })()`);
+  }
+  // Ramki przy cięciu na projekcie (#138): raport drukarni (pierwszy – z pomiarem z obrazu każdej karty) bez UWAG i BŁĘDÓW
+  // z pomiaru obrazu i bez kart niezmierzonych; INFO nie liczy się do wyniku. Czas pierwszego raportu – w wyniku.
+  let ramkiPrzyklad = null;
+  if (testBloku('ramkiPrzyklad') && folder !== '-') {
+    ramkiPrzyklad = await wc.executeJavaScript(`(async () => {
+      LINIE_KART.clear();
+      const t0 = Date.now(), r = await raportDrukarni(), ms = Date.now() - t0;
+      const t1 = Date.now(); await raportDrukarni(); const ms2 = Date.now() - t1;
+      const wpis = (x) => x.poziom + ' ' + x.odstep + ' ' + x.talia + '/' + x.strona + ' ' + x.krawedz + (x.u !== undefined ? ' u=' + x.u : '') + ': ' + x.opis + ' (' + x.karty.slice(0, 3).join(', ') + ')';
+      const obraz = r.obwodki.filter((x) => x.element === 'OBRAZ');
+      return { ok: !obraz.length && !r.liniiNiezmierzone.length, karty: r.karty, ms, ms2, obraz: obraz.map(wpis), szablon: r.obwodki.filter((x) => x.element !== 'OBRAZ').map(wpis),
+        info: r.obwodkiInfo.map(wpis), niezmierzone: r.liniiNiezmierzone };
+    })()`);
+  }
   CZASY_TESTU.push([null, Date.now()]);                  // koniec ostatniego bloku
   await wc.executeJavaScript('buildPrint()');
   await pdfDoPliku(wc, wynik);
@@ -3895,8 +3988,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
     && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!filtrWTrakcie || filtrWTrakcie.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!otokTest || otokTest.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, otok: otokTest, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!otokTest || otokTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok);
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, otok: otokTest, ramkiObraz, ramkiPrzyklad, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

@@ -5,8 +5,8 @@
 //   node scripts/grupy-testow.js                 → wiersze „nazwa bloki” grup 07 (dla powłoki)
 //   node scripts/grupy-testow.js plan <przykład>[:grupa] [pelny] → wiersze „nazwa opcje…” (dla scripts/testuj.sh)
 // Etap A (#136): bloki testują aplikację, nie przykład, więc pełny --test-edytor idzie tylko na 03-ogrod (kilka talii,
-// rewersy, jeśli=) i 07-gildie (w grupach niżej). Pozostałe przykłady – tylko --test-pdf (budowa kart, Uwagi, PDF),
-// a bloki zależne od ich danych – przez --test-bloki (BLOKI_PRZYKLADOW). Tryb pelny: --test-edytor na każdym przykładzie.
+// rewersy, jeśli=) i 07-gildie (w grupach niżej). Pozostałe przykłady – --test-pdf (budowa kart, Uwagi, PDF) z blokami
+// zależnymi od ich danych przez --test-bloki (BLOKI_PRZYKLADOW, BLOKI_KAZDEGO). Tryb pelny: --test-edytor na każdym przykładzie.
 // 07-gildie w trzech procesach (#101, A0). Ostatnia grupa to dopełnienie (-nazwy wszystkich wcześniejszych), więc nowy
 // blok zawsze się wykona. Zależności między blokami (pomiar 27.10.2026, każdy blok osobno na kopii 07):
 // - zlecenia od 0.7.3 (#102) samo robi zapamietajDruk() na starcie – nie potrzebuje już bloku zmienione,
@@ -32,17 +32,18 @@ const BLOKI_PRZYKLADOW = {
   '05-zaklecia': ['raportStart'],                     // tekst ok. 2 mm od krawędzi (#111)
   '08-wieze': ['spadSzablonu', 'profileDrukarni'],    // spad w szablonie (#84), profile drukarni (#85)
 };
+// Bloki na danych każdego przykładu (poza pełnymi – tam i tak są): raport drukarni bez UWAG z pomiaru obrazu (#138).
+const BLOKI_KAZDEGO = ['ramkiPrzyklad'];
 
 // Uruchomienia jednego przykładu; waga – kolejność w CI (najdłuższe najpierw).
 function planPrzykladu(n, pelny = false) {
   if (n === '07-gildie') return GRUPY_07.map((g) =>
     ({ nazwa: n + '-' + g.nazwa, grupa: g.nazwa, przyklad: n, opcje: ['--test-edytor', '--test-bloki', g.bloki], waga: 2 }));
   if (pelny || PELNE.includes(n)) return [{ nazwa: n, przyklad: n, opcje: ['--test-edytor'], waga: 3 }];   // najdłuższe
-  if (BLOKI_PRZYKLADOW[n]) return [{ nazwa: n, przyklad: n, opcje: ['--test-edytor', '--test-bloki', BLOKI_PRZYKLADOW[n].join(',')], waga: 1 }];
-  return [{ nazwa: n, przyklad: n, opcje: [], waga: 0 }];
+  return [{ nazwa: n, przyklad: n, opcje: ['--test-edytor', '--test-bloki', [...(BLOKI_PRZYKLADOW[n] || []), ...BLOKI_KAZDEGO].join(',')], waga: 1 }];
 }
 
-module.exports = { GRUPY_07, PELNE, BLOKI_PRZYKLADOW, planPrzykladu };
+module.exports = { GRUPY_07, PELNE, BLOKI_PRZYKLADOW, BLOKI_KAZDEGO, planPrzykladu };
 
 if (require.main === module) {
   if (process.argv[2] === 'plan') {
