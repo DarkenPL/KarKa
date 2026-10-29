@@ -55,7 +55,7 @@ Wykrojnik drukarni tnie róg karty łukiem, a nie pod kątem prostym. Strefa bez
 
 - odstęp punktu = r − (odległość od środka łuku); UWAGA, gdy mniej niż 3 mm;
 - **promień r** = większy z `promienRogu` profilu drukarni wybranego w oknie PDF dla drukarni ([profile](profile-drukarni.md)) i `KARTA … zaokrąglenie=` z szablonu. LongPack i Printnet nie podają promienia – w profilach jest **5 mm** z rysunku formatów Fabryki Kart (2019, s. 7), z dopiskiem „nie potwierdzony przez drukarnię”. Promień do 3 mm – bez pomiaru (róg strefy bezpiecznej jest wtedy prosty);
-- liczone **z kształtu**, nie z prostokąta wokół elementu: tekst – z prostokątów linii tekstu, ikony obrazkowe i `OBRAZEK` – z pikseli (krycie ≥ 50 %, 600 dpi, tylko kwadrat rogu), `PROSTOKĄT` (też zaokrąglony) i `ELIPSA` – z obrysu (po obrocie). Obrazek obrócony, odbity albo z `kadr=` – z prostokąta wokół niego;
+- liczone **z kształtu**, nie z prostokąta wokół elementu: tekst – z prostokątów linii tekstu, ikony obrazkowe (PNG, SVG – także bez `width`/`height`) i `OBRAZEK` – z pikseli (krycie ≥ 50 %, 600 dpi, tylko kwadrat rogu), `PROSTOKĄT` (też zaokrąglony) i `ELIPSA` – z obrysu (po obrocie). Z prostokąta wokół (ostrożniej – może dać UWAGĘ, choć kształt się mieści): ikony koloru `{kolor-…}` (to prostokąty z małym zaokrągleniem, więc wynik jest prawie dokładny) oraz `OBRAZEK` obrócony, odbity, z `kadr=` albo z plikiem SVG bez `width`/`height`;
 - pomijane: tekst i ikony bliżej niż 3 mm od prostej krawędzi albo pod otokiem (są w swoich sekcjach), kształty i obrazki dotykające krawędzi karty (tło, pasy do spadu), `LINIA`, `OTOK`.
 
 Przykład przy r = 5 mm:
