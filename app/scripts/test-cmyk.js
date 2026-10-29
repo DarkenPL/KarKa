@@ -295,6 +295,34 @@ const plan = (pliki, plikiStron) => ({ uklad: 'drukarnia', szer: 69, wys: 94, sp
     }
   }
 
+  // ── ppi obrazków (#112): przekształcenia cm, forma z /Matrix, obrazek w treści, maski i małe obrazki pomijane ──
+  await krok('sprawdzPdf: ppi obrazków', async () => {
+    const PDFLib = drukarnia.pdfLib();
+    const doc = await PDFDocument.create();
+    const ctx = doc.context, s = doc.addPage([300, 300]);
+    const obraz = await doc.embedPng(pngRgb(64, 64));
+    await doc.flush();
+    const im = ctx.register(ctx.obj({ Type: 'XObject', Subtype: 'Image', Width: 64, Height: 64, ImageMask: true, BitsPerComponent: 1 }));
+    // Forma ×2 (/Matrix), w niej obrazek na 36 pt → 72 pt na stronie = 64 ppi; maska 64 × 64 px (8 ppi) pomijana jako maska.
+    const forma = ctx.register(ctx.stream('q 36 0 0 36 0 0 cm /Im0 Do Q q 400 0 0 400 0 0 cm /Mk Do Q', {
+      Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 100, 100], Matrix: [2, 0, 0, 2, 0, 0],
+      Resources: { XObject: { Im0: obraz.ref, Mk: im } } }));
+    s.node.setXObject(PDFLib.PDFName.of('Fm0'), forma);
+    s.node.setXObject(PDFLib.PDFName.of('Im1'), obraz.ref);
+    const szare = (n) => 'BI /W ' + n + ' /H ' + n + ' /CS /G /BPC 8 ID ' + 'a'.repeat(n * n) + ' EI';
+    // Na stronie: forma, obrazek 64 px na 32 × 16 pt (144 × 288 ppi), obrazek w treści 20 px na 72 pt (20 ppi),
+    // obrazek 16 × 16 px (pomijany), obrazek 64 px na 15,36 pt po dwóch cm (300 ppi – na progu, bez ostrzeżenia).
+    const tresc = ctx.register(ctx.stream(['q 1 0 0 1 10 10 cm /Fm0 Do Q', 'q 32 0 0 16 0 0 cm /Im1 Do Q',
+      'q 72 0 0 72 100 100 cm ' + szare(20) + ' Q', 'q 72 0 0 72 0 200 cm ' + szare(16) + ' Q',
+      'q 0.5 0 0 0.5 0 0 cm q 30.72 0 0 30.72 0 0 cm /Im1 Do Q Q'].join('\n')));
+    s.node.set(PDFLib.PDFName.of('Contents'), tresc);
+    const k = await cmyk.sprawdzPdf(Buffer.from(await doc.save({ useObjectStreams: false })), PDFLib);
+    assert.strictEqual(k.minPpi, 20, 'minPpi: ' + k.minPpi);
+    assert.deepStrictEqual(k.obrazkiNiskiePpi, [{ strona: 1, px: [64, 64], ppi: [64, 64] }, { strona: 1, px: [64, 64], ppi: [144, 288] },
+      { strona: 1, px: [20, 20], ppi: [20, 20] }]);
+    return k.obrazkiNiskiePpi.map((x) => x.ppi.join('×')).join(', ') + ` (min ${k.minPpi}, próg ${cmyk.PROG_PPI})`;
+  });
+
   // ── d) konwersja Ghostscriptem ────────────────────────────────────────────
   if (gsPrawdziwy && profilGotowy) {
     const gs = gsPrawdziwy;
@@ -330,6 +358,9 @@ const plan = (pliki, plikiStron) => ({ uklad: 'drukarnia', szer: 69, wys: 94, sp
         assert.deepStrictEqual(k.obrazki.inne, []);
         assert.strictEqual(k.trimBox, k.strony);
         assert.strictEqual(k.ok, true);
+        // Obrazek 64 × 64 px na 60 × 60 pt = 77 ppi – na każdej stronie ostrzeżenie (#112), ok bez zmian.
+        assert.strictEqual(k.minPpi, 77, 'minPpi: ' + k.minPpi);
+        assert.deepStrictEqual(k.obrazkiNiskiePpi.map((x) => x.ppi.join('×')), Array(k.strony).fill('77×77'));
         // Ramki z planu: MediaBox 69 × 94 mm, TrimBox [3, 3, 66, 91] mm.
         const doc = await PDFDocument.load(w.bufor);
         doc.getPages().forEach((s, i) => {
@@ -347,6 +378,21 @@ const plan = (pliki, plikiStron) => ({ uklad: 'drukarnia', szer: 69, wys: 94, sp
       return opis.join(' · ');
     });
     // Nadruk czerni K100 (#92): czarny tekst na pełnym kolorowym tle, biały tekst, czarny prostokąt.
+    await krok('konwersja: gradient (cieniowanie RGB) → obrazek < 300 ppi (#112)', async () => {
+      // Ghostscript 10.02–10.08 zamienia cieniowanie przy konwersji do CMYK na obrazek ok. 90 × 45 ppi – sprawdzPdf ma to zgłosić.
+      const doc = await PDFDocument.create();
+      const ctx = doc.context, s = doc.addPage([196.08, 265.92]);
+      const sh = ctx.register(ctx.obj({ ShadingType: 2, ColorSpace: 'DeviceRGB', Coords: [0, 0, 196.08, 0], Extend: [true, true],
+        Function: { FunctionType: 2, Domain: [0, 1], C0: [1, 0, 0], C1: [0, 0, 1], N: 1 } }));
+      const { Resources } = s.node.normalizedEntries();
+      Resources.set(PDFLib.PDFName.of('Shading'), ctx.obj({ Sh0: sh }));
+      s.node.set(PDFLib.PDFName.of('Contents'), ctx.register(ctx.stream('q 0 0 196.08 265.92 re W n /Sh0 sh Q')));
+      const w = await cmyk.konwertujBufor(Buffer.from(await doc.save({ useObjectStreams: false })), { gs, profil: iccCmyk, PDFLib });
+      const k = w.kontrola;
+      assert.strictEqual(k.rgb + k.przestrzenieRgb, 0, 'bez RGB po konwersji');
+      assert.ok(k.obrazkiNiskiePpi.length >= 1 && k.minPpi < cmyk.PROG_PPI, 'gradient jako obrazek < 300 ppi: ' + JSON.stringify(k.obrazkiNiskiePpi));
+      return k.obrazkiNiskiePpi.map((x) => `${x.px.join('×')} px = ${x.ppi.join('×')} ppi`).join(', ');
+    });
     await krok('nadruk czerni: tekst K100 nadrukowany, reszta bez zmian (render z symulacją nadruku)', async () => {
       const doc = await PDFDocument.create();
       const font = await doc.embedFont(StandardFonts.HelveticaBold);

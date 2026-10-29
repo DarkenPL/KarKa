@@ -2513,7 +2513,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         const wPlanie = plan.pliki.map((_, n) => plan.strony.filter((s) => s.plik === n)).filter((a) => a.length);
         const W = plan.szer * MMpt, H = plan.wys * MMpt;
         cmykTest.pdf = { pliki: (w.pliki || []).map((p) => path.basename(p)), czas: Date.now() - t0, gsCzas: w.cmyk && w.cmyk.czas, profil: w.cmyk && w.cmyk.profil,
-          kontrola: ((w.cmyk && w.cmyk.pliki) || []).map((k) => ({ strony: k.strony, rgb: k.rgb, przestrzenieRgb: k.przestrzenieRgb, czern: k.czern, obrazki: k.obrazki, trimBox: k.trimBox, nadruk: k.nadruk, ok: k.ok })) };
+          kontrola: ((w.cmyk && w.cmyk.pliki) || []).map((k) => ({ strony: k.strony, rgb: k.rgb, przestrzenieRgb: k.przestrzenieRgb, czern: k.czern, obrazki: k.obrazki, trimBox: k.trimBox, nadruk: k.nadruk, minPpi: k.minPpi, niskiePpi: k.obrazkiNiskiePpi && k.obrazkiNiskiePpi.length, ok: k.ok })) };
         if (!w.cmyk || w.cmyk.nadrukCzerni !== true) bledy.push('pdf: nadruk czerni nie jest domyślnie włączony');
         if (!w.cmyk || w.cmyk.profil !== 'test' || w.cmyk.ghostscript !== gs.wersja) bledy.push('pdf: raport cmyk: ' + JSON.stringify(w.cmyk && { profil: w.cmyk.profil, gs: w.cmyk.ghostscript }));
         if (!w.pliki || w.pliki.length !== wPlanie.length) bledy.push(`pdf: plików ${w.pliki && w.pliki.length}, w planie ${wPlanie.length}`);
@@ -2521,6 +2521,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
           const k = w.cmyk.pliki[n];
           if (!fs.existsSync(w.pliki[n])) { bledy.push('pdf: brak pliku ' + w.pliki[n]); continue; }
           if (!k || !k.ok || k.rgb !== 0 || k.przestrzenieRgb !== 0 || k.trimBox !== k.strony || k.strony !== wPlanie[n].length) bledy.push(`pdf: plik ${n}: kontrola ${JSON.stringify(k && { ok: k.ok, rgb: k.rgb, strony: k.strony, trimBox: k.trimBox })}`);
+          // ppi obrazków (#112): lista (może być pusta) i minPpi – liczba albo null bez obrazków.
+          if (!k || !Array.isArray(k.obrazkiNiskiePpi) || !(k.minPpi === null || Number.isFinite(k.minPpi)) || k.obrazkiNiskiePpi.some((x) => Math.min(...x.ppi) >= cmyk.PROG_PPI)) bledy.push(`pdf: plik ${n}: ppi ${JSON.stringify(k && { minPpi: k.minPpi, niskie: k.obrazkiNiskiePpi })}`);
           const strony_ = (await PDFDocument.load(fs.readFileSync(w.pliki[n]))).getPages();
           if (strony_.length !== wPlanie[n].length) bledy.push(`pdf: plik ${n}: stron ${strony_.length}, w planie ${wPlanie[n].length}`);
           // Nadruk czerni (#92): liczba obiektów ↔ stany /KarkaNadruk z /op true w pliku.
@@ -2537,7 +2539,10 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         if (!pi.error && pi.status === 0) {
           const wiersze = pi.stdout.split('\n').slice(2).map((l) => l.trim().split(/\s+/)).filter((c) => c.length > 6);
           const zle = wiersze.filter((c) => !(c[5] === 'cmyk' || c[5] === 'gray' || (c[5] === 'icc' && c[6] === '4')));
-          cmykTest.pdfimages = { obrazkow: wiersze.length, kolory: [...new Set(wiersze.map((c) => c[5] + '/' + c[6]))] };
+          // ppi (#112): obrazki (bez smask/stencil, większe niż 16 × 16 px) z x-ppi lub y-ppi < 300 – tyle, ile policzyła sprawdzPdf.
+          const niskiePi = wiersze.filter((c) => c[2] === 'image' && !(+c[3] <= 16 && +c[4] <= 16) && Math.min(+c[12], +c[13]) < cmyk.PROG_PPI).length;
+          cmykTest.pdfimages = { obrazkow: wiersze.length, kolory: [...new Set(wiersze.map((c) => c[5] + '/' + c[6]))], niskiePpi: niskiePi };
+          if (niskiePi !== w.cmyk.pliki[0].obrazkiNiskiePpi.length) bledy.push(`pdfimages: obrazków < 300 ppi ${niskiePi}, sprawdzPdf ${w.cmyk.pliki[0].obrazkiNiskiePpi.length}`);
           if (zle.length) bledy.push('pdfimages: obrazki nie w CMYK/gray: ' + zle.map((c) => c.slice(0, 8).join(' ')).join(' | '));
         } else cmykTest.pdfimages = 'brak narzędzia pdfimages';
         // c) bez nadruku (nadrukCzerni = nie): w wyniku nadruk null, w plikach żadnych stanów nadruku.
@@ -2622,6 +2627,10 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
           const plikiLp = stan.zRewersem ? [nazwa('Front'), nazwa('Back')] : [nazwa('Front')];
           if (lp.pliki.join() !== plikiLp.join() || lp.drukarnia !== 'longpack' || lp.spad !== 3) bledy.push('longpack: pliki/spad ' + JSON.stringify(profileDr.longpack));
           if (!(lp.ostrzezenia || []).some((x) => /spad.*ustala profil drukarni LongPack/.test(x))) bledy.push('longpack: brak ostrzeżenia o pominiętym kluczu spad');
+          // Obrazki < 300 ppi (#112): ostrzeżenie w wyniku dokładnie wtedy, gdy kontrola któregoś pliku je znalazła.
+          const niskieLp = (lp.cmyk.pliki || []).reduce((a, x) => a + ((x.obrazkiNiskiePpi || []).length), 0);
+          profileDr.longpack.niskiePpi = niskieLp;
+          if (niskieLp > 0 !== (lp.ostrzezenia || []).some((x) => /poniżej 300 ppi: \d+/.test(x))) bledy.push(`longpack: obrazków < 300 ppi ${niskieLp}, ostrzeżenia ${JSON.stringify(lp.ostrzezenia)}`);
           if (lp.cmyk.pdfx !== 'PDF/X-4' || lp.cmyk.limitTAC !== 300 || !Number.isFinite(lp.cmyk.maksTAC) || profileDr.longpack.cmyk.pliki.some((x) => !Number.isFinite(x))) bledy.push('longpack: cmyk ' + JSON.stringify(profileDr.longpack.cmyk));
           if (prawdziwy300 && lp.cmyk.maksTAC > 300) bledy.push('longpack: maksTAC ' + lp.cmyk.maksTAC + ' > 300 przy ISO Coated v2 300 %');
           const pf = await sprawdzPlik(path.join(projekt, lp.pliki[0]), 3, 'longpack', lp.strona);

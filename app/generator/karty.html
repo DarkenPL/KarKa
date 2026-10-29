@@ -3230,6 +3230,7 @@ const ZADANIA_ZLECEN = {
       if (plan.bezSpadu && plan.bezSpadu.length) wynik.bezSpadu = plan.bezSpadu;
       if (plan.ostrzezenia && plan.ostrzezenia.length) wynik.ostrzezenia = [...(wynik.ostrzezenia || []), ...plan.ostrzezenia];
       if (plan.ostrzezeniaTAC && plan.ostrzezeniaTAC.length) wynik.ostrzezenia = [...(wynik.ostrzezenia || []), ...plan.ostrzezeniaTAC];
+      if (plan.ostrzezeniaPpi && plan.ostrzezeniaPpi.length) wynik.ostrzezenia = [...(wynik.ostrzezenia || []), ...plan.ostrzezeniaPpi];
       if (plan.informacje && plan.informacje.length) wynik.informacje = plan.informacje;
       if (o.drukarnia) wynik.drukarnia = o.drukarnia;
     }
@@ -3586,7 +3587,11 @@ async function zapiszPdf(o = {}) {
     // TAC powyżej limitu profilu – ostrzeżenie (plik powstaje); spad przycięty do profilu – informacja.
     const c = OSTATNI_CMYK;
     plan.ostrzezeniaTAC = c && c.limitTAC && c.stronPonadLimit ? [`TAC do ${c.maksTAC} % – ${c.stronPonadLimit} ${c.stronPonadLimit === 1 ? 'strona' : 'stron(y)'} powyżej limitu drukarni ${c.limitTAC} % (sprawdź ciemne kolory i czerń czterokolorową w grafikach)`] : [];
-    const wszystkie = [...(plan.ostrzezenia || []), ...plan.ostrzezeniaTAC];
+    // Obrazki < 300 ppi po konwersji (#112) – ostrzeżenie; zwykle gradienty CSS/SVG zamienione przez Ghostscripta na obrazki.
+    const niskie = c ? c.pliki.filter((x) => x.obrazkiNiskiePpi && x.obrazkiNiskiePpi.length) : [];
+    const ileNiskich = niskie.reduce((a, x) => a + x.obrazkiNiskiePpi.length, 0);
+    plan.ostrzezeniaPpi = ileNiskich ? [`obrazki poniżej 300 ppi: ${ileNiskich} (najniżej ${niskie.reduce((a, x) => Math.min(a, x.minPpi), Infinity)} ppi; ${niskie.map((x) => String(x.plik).split('/').pop()).join(', ')}) – gradienty CSS/SVG Ghostscript zamienia w CMYK na obrazki w niskiej rozdzielczości`] : [];
+    const wszystkie = [...(plan.ostrzezenia || []), ...plan.ostrzezeniaTAC, ...plan.ostrzezeniaPpi];
     const uwagi = (pliki && wszystkie.length ? ' · Uwaga: ' + wszystkie.join('; ') : '') + (pliki && plan.informacje && plan.informacje.length ? ' · ' + plan.informacje.join('; ') : '');
     status(pliki ? `Zapisano PDF${OSTATNI_CMYK ? ' w CMYK (' + OSTATNI_CMYK.profil + (OSTATNI_CMYK.pdfx ? ', ' + OSTATNI_CMYK.pdfx : '') + ')' : ''}${o.profilDrukarni ? ' dla drukarni ' + o.profilDrukarni.nazwa : ''}: ` + pliki.join(', ') + uwagi : 'Zapis PDF anulowany.');
     if (pliki) { await zapamietajDruk(karty); punktHistorii(({ pojedyncze: 'PDF – osobne strony', drukarnia: OSTATNI_CMYK ? 'PDF – drukarnia CMYK' : 'PDF – drukarnia' }[o.uklad] || 'PDF A4') + (o.zlecenie ? ' (zlecenie)' : '')); }
