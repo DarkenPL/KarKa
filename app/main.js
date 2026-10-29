@@ -1312,14 +1312,11 @@ function utworzOkno() {
 }
 // Okno pokazuje się po wczytaniu strony projektu (jak dawniej „ready-to-show” okna), najpóźniej po 3 s.
 // Start w tle (--w-tle, #120) – okno zostaje ukryte do pokazUkryteOkno().
-// Tryb testowy (#137): showInactive bez fokusu – okno widoczne (zrzuty, PDF), ale nie przerywa pracy w innej aplikacji.
+// Tryb testowy (#137): okno w ogóle się nie pokazuje (zrzuty capturePage i PDF działają bez tego) – testy na Macu
+// nie zasłaniają pracy w innej aplikacji i nie zabierają jej fokusu.
 function pokazOknoPoWczytaniu(p) {
-  if (startWTle) return;
-  const pokaz = () => {
-    if (!okno || okno.isDestroyed() || okno.isVisible()) return;
-    if (testowy) { okno.showInactive(); ulozWidok(); return; }
-    okno.show(); ulozWidok(); if (p.wc) p.wc.focus();
-  };
+  if (startWTle || testowy) return;
+  const pokaz = () => { if (okno && !okno.isDestroyed() && !okno.isVisible()) { okno.show(); ulozWidok(); if (p.wc) p.wc.focus(); } };
   p.wc.once('did-finish-load', pokaz);
   setTimeout(pokaz, 3000);
 }
@@ -3905,8 +3902,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
 
 // ── Start ───────────────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) app.quit();
-// Tryb testowy (#137): okno testu leży pod innymi oknami – bez tego przełącznika Chromium uznałby je za zasłonięte
-// (document.hidden → rzadsze sprawdzanie zmian plików, dławienie timerów).
+// Tryb testowy (#137): okno testu jest niepokazane – bez tego przełącznika Chromium mógłby uznać stronę za zasłoniętą
+// (dławienie timerów i renderera w tle).
 if (process.argv.includes('--test-pdf')) app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 // Start w tle (#120): `open -g -a KarKa --args --w-tle` – okno ukryte (ikona w Docku), bez fokusu i bez okna
 // aktualizacji. Zakładki, zlecenia i plik stanu działają jak zwykle (aktywna zakładka nie ma dławienia timerów).
