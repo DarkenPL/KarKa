@@ -7,7 +7,7 @@
 ; ── Wspólne ───────────────────────────────────────────────────────
 PROJEKT = Ogród                           ; nazwa gry w plikach JPG i PDF
 KARTA    = 63, 88
-CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#1d1b19
+CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#000
 
 KOLOR = warzywa, #E8A15A
 KOLOR = kwiaty,  #E7C94C
@@ -21,11 +21,12 @@ KOLOR = burza,   #4A4E69
 [TALIA Rośliny]
 DANE = rosliny.csv
 
-TŁO       = [Grządka]
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=#ffffff, zaokrąglenie=4
+TŁO  = #ffffff
+; Otok: pas od końca spadu do linii bezpieczeństwa (3 mm od cięcia), zawsze na wierzchu karty
+OTOK = 3, [Grządka]
 
-; Rzadka karta: złota ramka i koniczyna w rogu – tylko gdy kolumna Rzadka = tak
-PROSTOKĄT = 1.5, 1.5, 60, 85, kolor=brak, obwódka=1.2, kolor_obwódki=#C9A227, zaokrąglenie=5, jeśli=[Rzadka]=tak
+; Rzadka karta: złoty otok (drugi OTOK – ostatni jest na wierzchu) i koniczyna w rogu – tylko gdy kolumna Rzadka = tak
+OTOK = 3, #C9A227, jeśli=[Rzadka]=tak
 IKONA     = 50, 6, 7, 7, {koniczyna}, jeśli=[Rzadka]=tak
 
 TEKST   = 6, 6, 44, 9, [Nazwa], czcionka="Patrick Hand, cursive", rozmiar=16, pion=środek
@@ -39,7 +40,6 @@ TEKST   = 6, 70, 26, 12, "Rekord plonu!", rozmiar=10, pogrubienie, kolor=#B23A48
 
 [REWERS]
 TŁO       = #4E7A3A
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=brak, obwódka=0.6, kolor_obwódki=#ffffff80, zaokrąglenie=4
 IKONA     = 0, 28, 63, 24, {konewka}
 TEKST     = 0, 56, 63, 10, "Ogród", czcionka="Patrick Hand, cursive", rozmiar=24, kolor=#ffffff, wyrównanie=środek, pion=środek, interlinia=1
 
@@ -49,10 +49,10 @@ TEKST     = 0, 56, 63, 10, "Ogród", czcionka="Patrick Hand, cursive", rozmiar=2
 DANE  = pogoda.csv
 KARTA = 88, 63, zaokrąglenie=3                     ; karta pozioma
 
-TŁO       = [Typ]
-PROSTOKĄT = 3, 3, 82, 57, kolor=#ffffff, zaokrąglenie=3
+TŁO  = #ffffff
+OTOK = 3, [Typ]
 
-; Pasek ostrzegawczy tylko na karcie typu „burza”
+; Pasek ostrzegawczy tylko na karcie typu „burza” – końce paska chowają się pod otokiem
 PROSTOKĄT = 3, 50, 82, 10, kolor=#B23A48, jeśli=[Typ]=burza
 TEKST     = 3, 50, 82, 10, "UWAGA – BURZA!", rozmiar=11, kolor=#ffffff, pogrubienie, wyrównanie=środek, pion=środek, jeśli=[Typ]=burza
 
@@ -63,6 +63,5 @@ TEKST   = 37, 18, 46, 30, [Skutek], ikony=1.3
 [REWERS]
 KARTA     = 88, 63
 TŁO       = #2F5D8A
-PROSTOKĄT = 3.5, 3.5, 81, 56, kolor=brak, obwódka=0.6, kolor_obwódki=#ffffff80, zaokrąglenie=4
 IKONA     = 0, 14, 88, 20, {slonce-biale}
 TEKST     = 0, 38, 88, 10, "Pogoda", czcionka="Patrick Hand, cursive", rozmiar=22, kolor=#ffffff, wyrównanie=środek, pion=środek, interlinia=1

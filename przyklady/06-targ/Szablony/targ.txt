@@ -11,15 +11,15 @@ KARTA = 63, 88, zaokrąglenie=3
 
 STAŁA = żeton, 11                          ; bok żetonu w mm
 
-CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#1d1b19
+CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#000
 
 ; ── Awers ─────────────────────────────────────────────────────────
-TŁO       = #e9dcc0
-PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=#fffaf0, zaokrąglenie=3
+TŁO  = #fffaf0
+; Otok: pas od końca spadu do linii bezpieczeństwa (3 mm od cięcia), zawsze na wierzchu karty
+OTOK = 3, #e9dcc0
 
-; Ilustracja w ramce: kadr = przesunięcie X i Y (mm) i skala (%) z danych.
-; Bez wartości w kolumnach obraz wypełnia ramkę (skala 100 %).
-PROSTOKĄT = 6, 6, 51, 40, kolor=#d8c7a4
+; Ilustracja w polu 51 × 40 mm: kadr = przesunięcie X i Y (mm) i skala (%) z danych.
+; Bez wartości w kolumnach obraz wypełnia pole (skala 100 %).
 OBRAZEK   = 6, 6, 51, 40, [Ilustracja], kadr=[KadrX] [KadrY] [Skala], odbicie=[Odbicie]
 
 ; Żetony: pozycje z kolumn, rozmiar ze stałej, krycie i obrót z danych.
@@ -38,7 +38,7 @@ TEKST = 6, 72, 51, 10, [Opis], rozmiar=8, kursywa, wyrównanie=środek
 
 ; ── Rewers ────────────────────────────────────────────────────────
 [REWERS]
-TŁO       = #5a4632
+TŁO       = #8C2F39
 IKONA     = 0, 28, 63, 22, {kowadlo}, krycie=40%
 IKONA     = 0, 28, 63, 22, {kowadlo}, odbicie=poziome, krycie=40%
 TEKST     = 0, 53, 63, 13, "Targ", czcionka="Patrick Hand, cursive", rozmiar=26, kolor=#ffffff, wyrównanie=środek, pion=środek, interlinia=1

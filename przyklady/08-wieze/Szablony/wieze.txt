@@ -11,7 +11,7 @@ NAZWA = Wieże
 DANE  = wieze.csv
 KARTA = 63, 88, spad=3, zaokrąglenie=3
 
-CZCIONKA = "EB Garamond, Georgia, serif", 11, kolor=#000000
+CZCIONKA = "EB Garamond, Georgia, serif", 11, kolor=#000
 
 TŁO     = [Tło]                   ; plik 69×94 mm (karta + spad)
 OBRAZEK = 0, 0, 63, 88, Grafika/rama.svg, dopasuj=rozciągnij   ; nakładka na całą kartę – też ze spadem

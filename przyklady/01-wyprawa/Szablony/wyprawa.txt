@@ -1,6 +1,6 @@
 ; ═══════════════════════════════════════════════════════════════════
 ;  PRZYKŁAD 1 – prosta talia
-;  Jedna talia: kolorowe tło z kolumny [Kolor], tytuł, obrazek i opis.
+;  Jedna talia: otok w kolorze z kolumny [Kolor], tytuł, obrazek i opis.
 ;  Wymiary w mm, (0, 0) = lewy górny róg karty.
 ; ═══════════════════════════════════════════════════════════════════
 
@@ -14,10 +14,11 @@ KOLOR = las,        #7BA05B
 KOLOR = skarb,      #D9A441
 KOLOR = odpoczynek, #6C8EBF
 
-CZCIONKA = "EB Garamond, Georgia, serif", 11, kolor=#222222
+CZCIONKA = "EB Garamond, Georgia, serif", 11, kolor=#000
 
-TŁO       = [Kolor] | #cccccc               ; gdy kolumna pusta – szary
-PROSTOKĄT = 3, 3, 57, 82, kolor=#ffffff, zaokrąglenie=3
+TŁO  = #ffffff
+; Otok: pas od końca spadu do linii bezpieczeństwa (3 mm od cięcia), zawsze na wierzchu karty
+OTOK = 3, [Kolor] | #cccccc                  ; gdy kolumna pusta – szary
 
 TEKST   = 5, 6, 53, 10, [Nazwa], czcionka="Patrick Hand, cursive", rozmiar=16, wyrównanie=środek, pion=środek
 OBRAZEK = 12, 18, 39, 36, [Obrazek]
