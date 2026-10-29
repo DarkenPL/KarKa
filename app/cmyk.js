@@ -318,9 +318,84 @@ function sprawdzPdf(buf, PDFLib) {
       const [x1, y1, x2, y2] = obiekt(t).asArray().map((n) => obiekt(n).asNumber());
       if (x1 >= m.x - 0.01 && y1 >= m.y - 0.01 && x2 <= m.x + m.width + 0.01 && y2 <= m.y + m.height + 0.01 && x2 > x1 && y2 > y1) wynik.trimBox++;
     }
+    // ppi obrazków (#112) – ostrzeżenie, nie wpływa na ok.
+    const ppi = ppiObrazkow(doc, PDFLib);
+    wynik.minPpi = ppi.length ? Math.min(...ppi.map((x) => Math.min(...x.ppi))) : null;
+    wynik.obrazkiNiskiePpi = ppi.filter((x) => Math.min(...x.ppi) < PROG_PPI);
     wynik.ok = wynik.rgb === 0 && wynik.przestrzenieRgb === 0 && wynik.obrazki.inne.length === 0 && wynik.trimBox === wynik.strony;
     return wynik;
   });
+}
+
+// ── Rozdzielczość obrazków (#112) ────────────────────────────────────────────
+// Ghostscript przy konwersji do CMYK zamienia cieniowania (gradienty CSS/SVG) na obrazki ok. 90 × 45 ppi – preflight
+// GWG 2015 zgłasza < 150 ppi jako błąd. Treść stron z bieżącym przekształceniem (q / Q / cm, /Matrix form): obrazek
+// (Do z /Subtype /Image albo BI … EI) wypełnia kwadrat 1 × 1, więc jego rozmiar na stronie to długości kolumn macierzy
+// (pt), a ppi = piksele · 72 / pt, osobno w poziomie i w pionie. Pomijane maski (ImageMask; SMask nie ma Do) i obrazki
+// do 16 × 16 px (jak GWG 2015). Wynik: każde narysowanie obrazka { strona (od 1), px: [w, h], ppi: [x, y] }.
+const PROG_PPI = 300;
+const razyMacierz = (m, n) => [m[0] * n[0] + m[1] * n[2], m[0] * n[1] + m[1] * n[3], m[2] * n[0] + m[3] * n[2],
+  m[2] * n[1] + m[3] * n[3], m[4] * n[0] + m[5] * n[2] + n[4], m[4] * n[1] + m[5] * n[3] + n[5]];
+function ppiObrazkow(doc, PDFLib) {
+  const { PDFName, PDFRawStream, PDFArray, PDFDict, PDFRef, PDFNumber } = PDFLib;
+  const ctx = doc.context;
+  const obiekt = (x) => (x instanceof PDFRef ? ctx.lookup(x) : x);
+  const liczba = (x) => { x = obiekt(x); return x instanceof PDFNumber ? x.asNumber() : NaN; };
+  // Strumień → tekst albo null (bez filtra albo sam FlateDecode – jak nadrukCzerni).
+  const czytaj = (o) => {
+    if (!(o instanceof PDFRawStream)) return null;
+    const d = o.dict, filtr = d.get(PDFName.of('Filter'));
+    const filtry = filtr instanceof PDFArray ? filtr.asArray().map(String) : filtr ? [String(filtr)] : [];
+    if (filtry.length > 1 || (filtry.length === 1 && filtry[0] !== '/FlateDecode') || d.get(PDFName.of('DecodeParms'))) return null;
+    try { return (filtry.length ? zlib.inflateSync(Buffer.from(o.contents)) : Buffer.from(o.contents)).toString('latin1'); } catch (e) { return null; }
+  };
+  const wynik = [];
+  const dodaj = (strona, w, h, m) => {
+    const sx = Math.hypot(m[0], m[1]), sy = Math.hypot(m[2], m[3]);
+    if (!(w > 0 && h > 0) || (w <= 16 && h <= 16) || !sx || !sy) return;
+    wynik.push({ strona, px: [w, h], ppi: [Math.round(w * 72 / sx), Math.round(h * 72 / sy)] });
+  };
+  const przejdz = (tekst, zasoby, ctm, strona, glebokosc) => {
+    const xo = zasoby instanceof PDFDict ? obiekt(zasoby.get(PDFName.of('XObject'))) : null;
+    const stos = [];
+    let argumenty = [], nazwa = null;
+    for (const tk of tokenyTresci(tekst)) {
+      if (tk.t === 'num') { argumenty.push(Number(tk.w)); continue; }
+      if (tk.t === 'nazwa') { nazwa = tk.w.slice(1); argumenty.push(null); continue; }
+      if (tk.t !== 'op') { argumenty.push(null); continue; }
+      if (tk.w === 'q') stos.push(ctm);
+      else if (tk.w === 'Q') { if (stos.length) ctm = stos.pop(); }
+      else if (tk.w === 'cm') { const a = argumenty.slice(-6); if (a.length === 6 && a.every(Number.isFinite)) ctm = razyMacierz(a, ctm); }
+      else if (tk.w === 'BI') {
+        const d = (/^BI\s([\s\S]*?)\sID\s/.exec(tekst.slice(tk.p, tk.p + 2000)) || [])[1] || '';
+        if (!/\/(?:IM|ImageMask)\s+true/.test(d)) dodaj(strona, Number((/\/(?:W|Width)\s+(\d+)/.exec(d) || [])[1]), Number((/\/(?:H|Height)\s+(\d+)/.exec(d) || [])[1]), ctm);
+      } else if (tk.w === 'Do' && nazwa && xo instanceof PDFDict) {
+        const o = obiekt(xo.get(PDFName.of(nazwa)));
+        const typ = o instanceof PDFRawStream ? String(o.dict.get(PDFName.of('Subtype'))) : null;
+        if (typ === '/Image') {
+          const im = o.dict.get(PDFName.of('ImageMask'));
+          if (!(im && String(im) === 'true')) dodaj(strona, liczba(o.dict.get(PDFName.of('Width'))), liczba(o.dict.get(PDFName.of('Height'))), ctm);
+        } else if (typ === '/Form' && glebokosc < 10) {
+          const t = czytaj(o);
+          const mx = obiekt(o.dict.get(PDFName.of('Matrix')));
+          const m = mx instanceof PDFArray && mx.size() === 6 ? mx.asArray().map(liczba) : [1, 0, 0, 1, 0, 0];
+          const wlasne = obiekt(o.dict.get(PDFName.of('Resources')));
+          if (t !== null) przejdz(t, wlasne instanceof PDFDict ? wlasne : zasoby, razyMacierz(m.every(Number.isFinite) ? m : [1, 0, 0, 1, 0, 0], ctm), strona, glebokosc + 1);
+        }
+      }
+      argumenty = [];
+      nazwa = null;
+    }
+  };
+  doc.getPages().forEach((s, i) => {
+    const { Resources } = s.node.normalizedEntries();
+    const c = obiekt(s.node.get(PDFName.of('Contents')));
+    const refy = c instanceof PDFArray ? c.asArray() : c ? [c] : [];
+    // Strumienie strony to jedna treść (stan q / cm może przechodzić między nimi).
+    const tekst = refy.map((r) => czytaj(obiekt(r))).filter((t) => t !== null).join('\n');
+    if (tekst) przejdz(tekst, Resources, [1, 0, 0, 1, 0, 0], i + 1, 0);
+  });
+  return wynik;
 }
 
 // Czysta czerń K100: w strumieniach treści (strony, XObject Form) „0 0 0 rg/RG” i „0 g/G” (czerń #000 z Chromium)
@@ -728,4 +803,4 @@ async function zmierzTAC(buf, { gs, dpi = 150, limit = null, limitCzasu = 5 * 60
 
 module.exports = { PROFILE, DOMYSLNY, PODPOWIEDZ_GS, MIN_WERSJA_GS, znajdzGs, argumentyGs, konwertuj, opisBleduGs,
   sprawdzPlikIcc, profilLokalny, pobierzProfil, rozwiazProfil, adresPaczki, czyKlucz, sprawdzPdf, konwertujBufor, sha256,
-  czernK100, grupyCmyk, nadrukCzerni, nadrukWStrumieniu, katalogIccGs, wypakujProfileGs, sprawdzProfilGs, pdfx4, zmierzTAC, pikseleTiff };
+  czernK100, grupyCmyk, nadrukCzerni, nadrukWStrumieniu, katalogIccGs, wypakujProfileGs, sprawdzProfilGs, pdfx4, zmierzTAC, pikseleTiff, PROG_PPI };
