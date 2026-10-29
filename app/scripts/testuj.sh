@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Testy aplikacji na kopiach przykładów (Linux z Xvfb, np. sesja Claude, albo macOS – okna na ekranie, bash 3.2 wystarczy).
 #   scripts/testuj.sh                 – wszystkie przykłady według planu z scripts/grupy-testow.js (jak CI w PR, #136):
-#                                       --test-edytor na 03-ogrod i 07-gildie, bloki na danych 05 i 08, reszta --test-pdf
+#                                       każdy blok --test-edytor raz, na swoim przykładzie (03, 05, 07, 08); na końcu
+#                                       sprawdzenie, że żaden blok nie poszedł dwa razy
 #   scripts/testuj.sh 03-ogrod        – wybrane przykłady (nazwy folderów z przyklady/), też według planu
 #   scripts/testuj.sh /ścieżka/do/gra.txt – dowolny projekt (kopiowany razem z folderem projektu), tryb --test-edytor
 #   RAZEM=1 scripts/testuj.sh         – ile testów naraz (domyślnie 5: test głównie czeka, 5 przykładów ≈ 1,5 min zamiast 5)
@@ -97,5 +98,16 @@ for z in "${zadania[@]}"; do
 done
 while [ ${#pidy[@]} -gt 0 ]; do czekaj1; done
 cat "$TMP"/*.wynik
+# Cały plan (#136 B): każdy blok dokładnie raz (poza BLOKI_KAZDEGO) – z czasyBlokow wyników.
+if [ $# -eq 0 ] && [ -z "${PELNY:-}" ] && [ -z "${BEZ_EDYTORA:-}" ]; then
+  node -e '
+    const fs = require("fs"), { BLOKI_KAZDEGO } = require("./scripts/grupy-testow"), ile = {};
+    for (const f of process.argv.slice(1)) { let d = null;
+      for (const w of fs.readFileSync(f, "utf8").split("\n").reverse()) if (w.startsWith("{")) { try { d = JSON.parse(w); break; } catch (e) {} }
+      for (const b of Object.keys((d && d.czasyBlokow) || {})) ile[b] = (ile[b] || 0) + 1; }
+    const zle = Object.entries(ile).filter(([b, n]) => n > 1 && !BLOKI_KAZDEGO.includes(b)).map(([b, n]) => b + " × " + n);
+    console.log("Bloki: " + Object.keys(ile).length + (zle.length ? " · WIĘCEJ NIŻ RAZ: " + zle.join(", ") : ", każdy raz"));
+    process.exit(zle.length ? 1 : 0);' "$TMP"/*.json || kod=1
+fi
 echo "Pliki testów (PDF, zrzuty, JSON, logi): $TMP"
 exit $kod

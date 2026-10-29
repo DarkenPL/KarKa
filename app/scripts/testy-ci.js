@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Testy przykładów w CI (#88): plan uruchomień zależny od trybu, kilka procesów naraz, czasy w podsumowaniu przebiegu.
 //   node scripts/testy-ci.js <tryb> --bin "<polecenie aplikacji>" --tmp <katalog> [--razem 4] [--limit 600]
-// tryb: pr    – plan z scripts/grupy-testow.js (#136 etap A, wspólny z scripts/testuj.sh): pełny --test-edytor na 03-ogrod,
-//               07-gildie w trzech procesach (ostatnia grupa = dopełnienie), bloki na danych 05 i 08 (--test-bloki),
-//               pozostałe przykłady --test-pdf (renderowanie, PDF, eksport);
+// tryb: pr    – plan z scripts/grupy-testow.js (#136, wspólny z scripts/testuj.sh): każdy blok --test-edytor raz, na swoim
+//               przykładzie (03, 05, 08, 07-gildie w trzech procesach), na każdym przykładzie budowa kart, Uwagi, PDF
+//               i ramkiPrzyklad; blok bez przykładu albo uruchomiony więcej niż raz = błąd;
 //       pelny – --test-edytor na każdym przykładzie (jak do 0.6.2).
 // --bin: w CI ścieżka do KarKa w .app; lokalnie np. "xvfb-run -a ./node_modules/.bin/electron --no-sandbox ."
 // Każde uruchomienie ma własną kopię przykładu i własny --user-data-dir (procesy równoległe się nie blokują).
@@ -27,13 +27,15 @@ if (!['pr', 'pelny'].includes(tryb) || !bin.length) {
   process.exit(2);
 }
 
-// Plan przykładów (#136 etap A) i grupy 07-gildie (#101, A0) – scripts/grupy-testow.js, wspólne z scripts/testuj.sh.
-const { planPrzykladu } = require('./grupy-testow');
+// Plan przykładów (#136) i grupy 07-gildie (#101, A0) – scripts/grupy-testow.js, wspólne z scripts/testuj.sh.
+const { planPrzykladu, BLOKI_KAZDEGO } = require('./grupy-testow');
 
 function plan() {
   const przyklady = fs.readdirSync(PRZYKLADY).filter((n) => fs.statSync(path.join(PRZYKLADY, n)).isDirectory()).sort();
   if (tryb === 'pelny') return przyklady.map((n) => ({ nazwa: n, przyklad: n, opcje: ['--test-edytor'], waga: 1 }));
-  const lista = przyklady.flatMap((n) => planPrzykladu(n));
+  let lista;
+  try { lista = przyklady.flatMap((n) => planPrzykladu(n)); }
+  catch (e) { console.error(`::error::${e.message.replace(/\n/g, '%0A')}`); process.exit(1); }   // blok bez przykładu (#136 B)
   // Najdłuższe najpierw (grupy 07) – krótkie wypełniają wolne miejsca.
   return lista.sort((a, b) => b.waga - a.waga);
 }
@@ -92,7 +94,16 @@ function uruchom(u) {
     '| Uruchomienie | Opcje | Czas [s] | Wynik | Najdłuższe bloki [s] |', '|---|---|---:|---|---|',
     ...wyniki.map((w) => `| ${w.nazwa} | ${w.opcje.join(' ') || '--test-pdf'} | ${w.s} | ${w.ok ? 'ok' : '**BŁĄD**' + (w.nieudane.length ? ' (' + w.nieudane.join(', ') + ')' : '')} | `
       + (w.czasy ? Object.entries(w.czasy).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, v]) => `${k} ${v}`).join(', ') : '') + ' |')];
+  // Tryb pr (#136 B): każdy blok dokładnie raz w całym planie (poza BLOKI_KAZDEGO) – z czasyBlokow uruchomień.
+  let powtorki = [];
+  if (tryb === 'pr') {
+    const ile = {};
+    for (const w of wyniki) for (const b of Object.keys(w.czasy || {})) ile[b] = (ile[b] || 0) + 1;
+    powtorki = Object.entries(ile).filter(([b, n]) => n > 1 && !BLOKI_KAZDEGO.includes(b)).map(([b, n]) => `${b} × ${n}`);
+    tab.push('', `Bloki: ${Object.keys(ile).length}` + (powtorki.length ? ` · **więcej niż raz: ${powtorki.join(', ')}**` : ', każdy raz'));
+    if (powtorki.length) console.log(`::error::Bloki uruchomione więcej niż raz: ${powtorki.join(', ')}`);
+  }
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, tab.join('\n') + '\n');
   console.log(tab.join('\n'));
-  process.exit(wyniki.every((w) => w.ok) ? 0 : 1);
+  process.exit(wyniki.every((w) => w.ok) && !powtorki.length ? 0 : 1);
 })();
