@@ -3808,7 +3808,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   let naroznikTest = null;
   if (testBloku('naroznik')) {
     naroznikTest = await wc.executeJavaScript(`(async () => {
-      const b = [], w = {}, dodane = ['Ikony/kw.png', 'Ikony/kolo.svg', 'Ikony/kw.svg'];
+      const b = [], w = {}, dodane = ['Ikony/kw.png', 'Ikony/kolo.svg', 'Ikony/kw.svg', 'Ikony/kolo-vb.svg'];
       const d = document.createElement('div');
       try {
         const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); g.fillStyle = '#c33'; g.fillRect(0, 0, 64, 64);
@@ -3816,7 +3816,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         const svg = (x) => new File(['<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">' + x + '</svg>'], 'i.svg', { type: 'image/svg+xml', lastModified: 1 });
         files.set(norm(dodane[1]), svg('<circle cx="50" cy="50" r="50" fill="#336699"/>'));
         files.set(norm(dodane[2]), svg('<rect width="100" height="100" fill="#336699"/>'));
-        const icons = { kw: { url: fileUrl(dodane[0]), plik: dodane[0] }, kolo: { url: fileUrl(dodane[1]), plik: dodane[1] }, kws: { url: fileUrl(dodane[2]), plik: dodane[2] } };
+        files.set(norm(dodane[3]), new File(['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="#336699"/></svg>'], 'i.svg', { type: 'image/svg+xml', lastModified: 1 }));   // bez width/height
+        const icons = { kw: { url: fileUrl(dodane[0]), plik: dodane[0] }, kolo: { url: fileUrl(dodane[1]), plik: dodane[1] }, kws: { url: fileUrl(dodane[2]), plik: dodane[2] }, kolovb: { url: fileUrl(dodane[3]), plik: dodane[3] } };
         const karta = (tpl, n) => { const t = parseTemplate(tpl, 'rog.txt'); if (t.bledy.length) b.push('parser ' + JSON.stringify(t.bledy));
           const tal = t.talie[0]; return renderCard(tal, tal.awers, {}, { warn: new Set(), icons, label: 'Róg ' + n, plik: 'rog.txt', kolumny: true, wbudowane: {} }); };
         const ra = karta('[TALIA Róg]\\nKARTA = 63, 88\\nTŁO = #ffffff\\n'
@@ -3830,7 +3831,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
           + 'OBRAZEK = 55, 3, 5, 5, "' + dodane[0] + '", dopasuj=rozciągnij\\n'   // prawy górny: 2,2 mm
           + 'PROSTOKĄT = 3, 80, 5, 5, kolor=#336699\\n'                // lewy dolny: 2,2 mm
           + 'OTOK = 5, #8a7f72\\n', 2);                                // szerszy niż strefa – UWAGA
-        const rc = karta('[TALIA Róg]\\nKARTA = 63, 88, zaokrąglenie=6\\nTŁO = #ffffff\\nIKONA = 3.6, 3.6, 5, 5, {kw}\\n', 3);   // promień 6: 3,6 mm za mało (≥ 3,88)
+        const rc = karta('[TALIA Róg]\\nKARTA = 63, 88, zaokrąglenie=6\\nTŁO = #ffffff\\nIKONA = 3.6, 3.6, 5, 5, {kw}\\n'
+          + 'IKONA = 53.5, 78.5, 6, 6, {kolovb}\\n', 3);   // promień 6: 3,6 mm za mało (≥ 3,88); okrągły SVG tylko z viewBox (prawy dolny, 3,5 mm): z kształtu 3,7 – nic (z prostokąta byłoby 2,5)
         d.style.cssText = 'position:fixed;left:-3000px;top:0';
         d.innerHTML = [ra, rb, rc].map((r, i) => '<div class="karta" data-talia="Róg" title="Róg ' + (i + 1) + '" style="' + esc(r.style) + '">' + r.html + '</div>').join('');
         document.body.appendChild(d);
@@ -3849,6 +3851,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         w.promien = [promienRoguKarty(ka, { promienRogu: 5 }), promienRoguKarty(ka, null), promienRoguKarty(kc, null), promienRoguKarty(kc, { promienRogu: 5 })];
         if (w.promien.join() !== '5,0,6,6') b.push('promienRoguKarty ' + JSON.stringify(w.promien));
         w.c = opis(naroznikiKarty(kc, promienRoguKarty(kc, null)));
+        const vb = kc.querySelectorAll('img.ikona')[1], vbr = vb && vb.getBoundingClientRect();
+        w.vb = vbr ? Math.round(vbr.width / (kc.getBoundingClientRect().width / 63) * 10) / 10 : 0;
+        if (Math.abs(w.vb - 6) > 0.2) b.push('SVG z viewBox – szerokość ' + w.vb);
         if (w.c.length !== 1 || !/^IKONA:lewy górny:/.test(w.c[0]) || !(parseFloat(w.c[0].split(':')[2]) < 3)) b.push('zaokrąglenie=6 ' + JSON.stringify(w.c));
         w.otok = obwodkiKarty(kb).map((x) => x.element + ':' + x.poziom + ':' + x.odstep + ':' + !!x.szerszy);
         if (w.otok.join() !== 'OTOK:UWAGA:5:true') b.push('otok ' + JSON.stringify(w.otok));
