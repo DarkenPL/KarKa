@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Hook PreToolUse (Bash): przy `gh pr create` sprawdza wersję aplikacji (zasada z CLAUDE.md: PR ze zmianą w app/ podnosi wersję).
-Bez zmian w app/ (git diff --name-only origin/main...HEAD) milczy – wyjątek z #101. Inaczej blokuje PR, gdy: wersja w app/package.json jest taka sama jak na origin/main; package-lock.json ma inną wersję;
+"""Hook PreToolUse (Bash): przy `gh pr create` sprawdza wersję aplikacji (zasada z CLAUDE.md: PR ze zmianą w plikach aplikacji podnosi wersję).
+Bez zmian w plikach aplikacji (git diff --name-only origin/main...HEAD; reguła w pliki_aplikacji.py – app/ poza app/scripts/, przyklady/) milczy – wyjątek z #101. Inaczej blokuje PR, gdy: wersja w app/package.json jest taka sama jak na origin/main; package-lock.json ma inną wersję;
 tag v<wersja> już istnieje na GitHubie (wersja zajęta – np. przez inny PR); inny otwarty PR ma w app/package.json
 tę samą wersję (gałąź z head.ref; gdy gh nie odpowiada – tylko ostrzeżenie)."""
 import base64, json, os, re, subprocess, sys
@@ -23,9 +23,16 @@ def git(*args):
     except Exception:
         return ""
 
+try:
+    from pliki_aplikacji import OPIS, wymaga_wersji
+except Exception as e:   # bez modułu – ostrożnie: każda zmiana w app/ i przyklady/ wymaga wersji
+    print(f"Uwaga (.claude/hooks/wersja-pr.py): brak pliki_aplikacji.py ({e}) – sprawdzam całe app/ i przyklady/.", file=sys.stderr)
+    OPIS = "app/, przyklady/"
+    wymaga_wersji = lambda sciezki: any(p.startswith(("app/", "przyklady/")) for p in sciezki)
+
 git("fetch", "-q", "origin", "main")
-if not any(p.startswith("app/") for p in git("diff", "--name-only", "origin/main...HEAD").splitlines()):
-    sys.exit(0)   # PR bez zmian w app/ nie podbija wersji (decyzja właściciela 27.10.2026, #101)
+if not wymaga_wersji(git("diff", "--name-only", "origin/main...HEAD").splitlines()):
+    sys.exit(0)   # PR bez zmian w plikach aplikacji nie podbija wersji (decyzja właściciela 27.10.2026, #101; #141)
 
 def blokuj(co, rada):
     print(f"ZABLOKOWANE przez .claude/hooks/wersja-pr.py: {co}. {rada} Nie obchodź tego zamka – powiedz właścicielowi.", file=sys.stderr)
@@ -48,7 +55,7 @@ if not nowa:
     blokuj("brak wersji w app/package.json", "Sprawdź plik.")
 if stara and nowa == stara:
     blokuj(f"wersja aplikacji nie została podniesiona (origin/main i gałąź: {stara})",
-           "PR ze zmianą w app/ podnosi wersję o najmniejszą podwersję w app/package.json i package-lock.json i dopisuje ją w docs/historia.md.")
+           f"PR ze zmianą w plikach aplikacji ({OPIS}) podnosi wersję o najmniejszą podwersję w app/package.json i package-lock.json i dopisuje ją w docs/historia.md.")
 lock_w = {lock.get("version"), (lock.get("packages") or {}).get("", {}).get("version")}
 if lock_w != {nowa}:
     blokuj(f"package-lock.json ma inną wersję ({', '.join(str(x) for x in lock_w if x)}) niż package.json ({nowa})",
