@@ -1771,7 +1771,10 @@ function obwodkiKarty(k) {
 // obrotu, oba bez krycia; kolor brzegu – obwódka albo wypełnienie (gradient i plik – osobne „kolory”). Elipsy i łuki rogów
 // otoku – pomijane (decyzja właściciela 29.10.2026). Bez zgłoszenia, gdy pola mają jeden kolor, gdy kolor pod stykiem
 // (najwyższe wcześniejsze pole w środku odcinka albo tło karty) jest kolorem jednego z nich i gdy styk zakrywa pole wyżej
-// albo otok. Wynik: [{ element, opis, z ('OTOK' albo opis drugiego pola), krawedz, odstep (mm, ujemny = zakładka), odcinek }].
+// albo otok. Kolor pod spodem i zakrycie liczą tylko pola wypełnione (ramka z samą obwódką jest przezroczysta); elementy
+// pominięte (elipsy, obrócone, z kryciem, OBRAZEK zmieść) nie liczą się też tam – możliwe pominięcie zgłoszenia, a otok
+// z kryciem liczy się jak pełny (przegląd PR #145). Wynik: [{ element, opis, z ('OTOK' albo opis drugiego pola), krawedz,
+// odstep (mm, ujemny = zakładka), odcinek }].
 const STYK_PROG = 0.5, STYK_ODCINEK = 1;
 function stykiKarty(k) {
   const [W, H] = cardMm(k), PX = 96 / 25.4, wynik = [];
@@ -1788,7 +1791,7 @@ function stykiKarty(k) {
     const obr = el.classList.contains('obrazek'), img = obr && el.querySelector('img');
     if (obr && el.classList.contains('tlo')) { tlo = 'plik:' + (img && img.src); continue; }
     if (!(obr || el.classList.contains('ksztalt')) || parseFloat(st.opacity) < 1 || (st.transform && st.transform !== 'none')) continue;
-    let kol, rad = 0, nazwa = 'OBRAZEK';
+    let kol, rad = 0, nazwa = 'OBRAZEK', pelne = true;
     if (obr) {
       if (!img || !['cover', 'fill'].includes(img.style.objectFit)) continue;
       kol = 'plik:' + img.src;
@@ -1798,16 +1801,17 @@ function stykiKarty(k) {
       const b = wMm(el.style.borderTopWidth, parseFloat(st.borderTopWidth) / PX), kb = rgbZCss(st.borderTopColor) || [0, 0, 0, 0];
       kol = b > 0 && st.borderTopStyle !== 'none' && kb[3] > 0 ? 'obwódka:' + st.borderTopColor + ' ' + st.borderTopStyle : kolor(st);
       if (!kol) continue;
+      pelne = !!kolor(st);
       rad = /mm$/.test(el.style.borderRadius) ? parseFloat(el.style.borderRadius) : 0;
     }
     const x = wMm(el.style.left, el.offsetLeft / PX), y = wMm(el.style.top, el.offsetTop / PX), w = wMm(el.style.width, el.offsetWidth / PX), h = wMm(el.style.height, el.offsetHeight / PX);
-    pola.push({ i: pola.length, x0: x, y0: y, x1: x + w, y1: y + h, rad, kol, nazwa, opis: `${nazwa} ${mmTxt(x)}, ${mmTxt(y)}, ${mmTxt(w)} × ${mmTxt(h)} mm` });
+    pola.push({ i: pola.length, x0: x, y0: y, x1: x + w, y1: y + h, rad, kol, pelne, nazwa, opis: `${nazwa} ${mmTxt(x)}, ${mmTxt(y)}, ${mmTxt(w)} × ${mmTxt(h)} mm` });
   }
   // Boki pola: oś ('x' – pionowy bok na x = v), położenie, zakres wzdłuż (bez promienia rogu).
   const boki = (p) => ({
     lewa: ['x', p.x0, p.y0 + p.rad, p.y1 - p.rad], prawa: ['x', p.x1, p.y0 + p.rad, p.y1 - p.rad],
     górna: ['y', p.y0, p.x0 + p.rad, p.x1 - p.rad], dolna: ['y', p.y1, p.x0 + p.rad, p.x1 - p.rad] });
-  const pokrywa = (p, x, y) => x > p.x0 && x < p.x1 && y > p.y0 && y < p.y1;
+  const pokrywa = (p, x, y) => p.pelne && x > p.x0 && x < p.x1 && y > p.y0 && y < p.y1;
   const pod = (x, y, i, bez) => { for (let j = i - 1; j >= 0; j--) if (!bez.includes(j) && pokrywa(pola[j], x, y)) return pola[j].kol; return tlo; };
   const nad = (x, y, i) => pola.some((p) => p.i > i && pokrywa(p, x, y));
   const punkt = (os, v, a, b) => os === 'x' ? [v, (a + b) / 2] : [(a + b) / 2, v];

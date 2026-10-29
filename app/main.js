@@ -3963,12 +3963,10 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       return { ok: !b.length, bledy: b, ...w };
     })()`);
   }
-  // Ramki przy cięciu na projekcie (#138): raport drukarni (pierwszy – z pomiarem z obrazu każdej karty) bez UWAG i BŁĘDÓW
-  // z pomiaru obrazu i bez kart niezmierzonych; INFO nie liczy się do wyniku. Czas pierwszego raportu – w wyniku.
   // Styk krawędź w krawędź (#143): pasek z 03 przed poprawką (3…85 × 50…60 pod OTOK = 3) – INFO lewa, prawa (do łuku
   // rogu otoku – 7 mm) i dolna, po poprawce (0…88 × 50…63), z zakładką 1 mm i 1,5 mm od otoku – nic; pole #cce z zaokrągleniem 3 pod otokiem – INFO na czterech prostych
-  // bokach (pominięcie łuku niczego nie gubi); dwa pola w różnych kolorach na białym – INFO, z zakładką 1 mm, na tle
-  // w kolorze jednego z nich i w jednym kolorze – nic. Bez pomiaru obrazu: html-to-image (600 dpi) rysuje styk bez szczeliny
+  // bokach (pominięcie łuku niczego nie gubi); dwa pola w różnych kolorach na białym – INFO, także z zakładką 0,3 mm
+  // i pod ramką bez wypełnienia; z zakładką 1 mm, na tle w kolorze jednego z nich, w jednym kolorze i pod pełnym polem – nic. Bez pomiaru obrazu: html-to-image (600 dpi) rysuje styk bez szczeliny
   // (przed i po poprawce piksel w piksel tak samo) – szczelinę daje rysowanie ekranu Chromium i przeglądarki PDF.
   let stykTest = null;
   if (testBloku('styk')) {
@@ -3990,6 +3988,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
           paraZakladka: ['TŁO = #ffffff\\nPROSTOKĄT = 10, 10, 20, 20, kolor=#ff0000\\nPROSTOKĄT = 29, 10, 20, 20, kolor=#0000ff', ''],
           paraTlo: ['TŁO = #ff0000\\nPROSTOKĄT = 10, 10, 20, 20, kolor=#ff0000\\nPROSTOKĄT = 30, 10, 20, 20, kolor=#0000ff', ''],
           paraKolor: ['TŁO = #ffffff\\nPROSTOKĄT = 10, 10, 20, 20, kolor=#ff0000\\nPROSTOKĄT = 30, 10, 20, 20, kolor=#ff0000', ''],
+          paraMalaZakladka: ['TŁO = #ffffff\\nPROSTOKĄT = 10, 10, 20, 20, kolor=#ff0000\\nPROSTOKĄT = 29.7, 10, 20, 20, kolor=#0000ff', 'PROSTOKĄT:lewa:-0.3:PROSTOKĄT 10, 10, 20 × 20 mm:20'],
+          paraPodRamka: ['TŁO = #ffffff\\nPROSTOKĄT = 10, 10, 20, 20, kolor=#ff0000\\nPROSTOKĄT = 30, 10, 20, 20, kolor=#0000ff\\nPROSTOKĄT = 5, 5, 50, 30, obwódka=0.5', 'PROSTOKĄT:lewa:0:PROSTOKĄT 10, 10, 20 × 20 mm:20'],   // ramka bez wypełnienia nie zakrywa
+          paraPodPolem: ['TŁO = #ffffff\\nPROSTOKĄT = 10, 10, 20, 20, kolor=#ff0000\\nPROSTOKĄT = 30, 10, 20, 20, kolor=#0000ff\\nPROSTOKĄT = 25, 5, 10, 30, kolor=#00ff00', ''],
         };
         const karty = {};
         for (const [n, [linie]] of Object.entries(PRZYPADKI)) {
@@ -4021,6 +4022,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       return { ok: !b.length, bledy: b, ...w };
     })()`);
   }
+  // Ramki przy cięciu na projekcie (#138): raport drukarni (pierwszy – z pomiarem z obrazu każdej karty) bez UWAG i BŁĘDÓW
+  // z pomiaru obrazu i bez kart niezmierzonych; INFO nie liczy się do wyniku. Czas pierwszego raportu – w wyniku.
   let ramkiPrzyklad = null;
   if (testBloku('ramkiPrzyklad') && folder !== '-') {
     ramkiPrzyklad = await wc.executeJavaScript(`(async () => {
