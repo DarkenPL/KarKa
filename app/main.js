@@ -3798,6 +3798,88 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       return { ok: !b.length, bledy: b, ...w };
     })()`);
   }
+  // OTOK (#132): geometria z obrazu 600 dpi (pas 3,00 mm na czterech bokach, promień rogu 3 mm), karta ze spadem
+  // (pas do końca spadu, rogi bez prześwitu), jeśli= i kolor z pustej kolumny, Raport drukarni (otok 2 mm – UWAGA,
+  // otok 3 mm – nic, tekst pod otokiem – osobna sekcja zamiast odstępu od cięcia).
+  let otokTest = null;
+  if (testBloku('otok')) {
+    otokTest = await wc.executeJavaScript(`(async () => {
+      const b = [], w = {};
+      const d = document.createElement('div');
+      try {
+        const t = parseTemplate('[TALIA Otok]\\nKARTA = 63, 88, spad=3, zaokrąglenie=3\\nTŁO = #ffffff\\n'
+          + 'TEKST = 10, 20, 43, 8, "Środek", rozmiar=10\\n'
+          + 'TEKST = 1, 40, 20, 6, "Brzeg", rozmiar=10\\n'                          // pod otokiem
+          + 'OTOK = 3, [Kolor]\\n'
+          + 'OTOK = 2, #C9A227, jeśli=[Rzadka]=tak\\n', 'otok.txt');
+        if (t.bledy.length) b.push('parser ' + JSON.stringify(t.bledy));
+        const tal = t.talie[0], ctx = (n) => ({ warn: new Set(), icons: {}, label: 'Otok ' + n, plik: 'otok.txt', kolumny: true, wbudowane: {} });
+        const ra = renderCard(tal, tal.awers, { Kolor: '#2E7D32', Rzadka: '' }, ctx(1)), rb = renderCard(tal, tal.awers, { Kolor: '', Rzadka: 'tak' }, ctx(2));
+        d.style.cssText = 'position:fixed;left:-3000px;top:0';
+        d.innerHTML = [ra, rb].map((r, i) => '<div class="karta" data-talia="Otok" title="Otok ' + (i + 1) + '" style="' + esc(r.style) + '">' + r.html + '</div>').join('');
+        document.body.appendChild(d);
+        const [ka, kb] = d.children;
+        fitAll(d); await ukladDoPomiaru([ka, kb]);
+        w.otoki = [ka, kb].map((k) => [...k.querySelectorAll('.el.otok')].map((e) => e.dataset.otok + '/' + e.dataset.zaokraglenie));
+        if (w.otoki[0].join() !== '3/3' || w.otoki[1].join() !== '2/2') b.push('otoki ' + JSON.stringify(w.otoki));
+        if (ka.lastElementChild.classList.contains('otok') !== true) b.push('otok nie jest ostatnią warstwą');
+        // Pomiar z obrazu: pokrycie kolorem otoku (antyaliasing liczony ułamkiem) wzdłuż linii od krawędzi.
+        const DPI = 600, PX = DPI / 25.4;
+        const piksele = async (el) => { const bm = await createImageBitmap(await obrazKarty(el, { dpi: DPI, format: 'png' }));
+          const c = document.createElement('canvas'); c.width = bm.width; c.height = bm.height; const g = c.getContext('2d'); g.drawImage(bm, 0, 0);
+          const { data } = g.getImageData(0, 0, c.width, c.height);
+          return { W: c.width, H: c.height, pokr: (x, y) => { const i = (y * c.width + x) * 4; return data[i + 3] < 128 ? NaN : Math.min(1, Math.max(0, (255 - data[i]) / (255 - 46))); } }; };
+        const pas = (p, kier) => {                       // szerokość pasa w mm od krawędzi do środka (lewa, prawa, górna, dolna)
+          const [n, f] = { lewa: [p.W / 2, (i) => p.pokr(i, Math.round(p.H / 2))], prawa: [p.W / 2, (i) => p.pokr(p.W - 1 - i, Math.round(p.H / 2))],
+            górna: [p.H / 2, (i) => p.pokr(Math.round(p.W / 2), i)], dolna: [p.H / 2, (i) => p.pokr(Math.round(p.W / 2), p.H - 1 - i)] }[kier];
+          // Ciągły pas od krawędzi (bez tekstu dalej); płótno bywa o ułamek piksela większe od karty – puste skrajne piksele pomijane.
+          let i = 0; while (i < 3 && !(f(i) >= 0.01)) i++;
+          let s = 0; for (; i < n; i++) { const v = f(i) || 0; if (v < 0.01) break; s += v; } return Math.round(s / PX * 1000) / 1000; };
+        const pa = await piksele(ka), boki = ['lewa', 'prawa', 'górna', 'dolna'];
+        w.pas = Object.fromEntries(boki.map((k) => [k, pas(pa, k)]));
+        // Obraz (html-to-image) ma rozmiar płótna z offsetWidth/Height w całych pikselach – stąd tolerancja 0,15 mm;
+        // dokładną geometrię sprawdza ścieżka otoku (Path2D w mm karty, evenodd) – ta sama, co w clip-path elementu.
+        if (boki.some((k) => Math.abs(w.pas[k] - 3) > 0.15)) b.push('pas ' + JSON.stringify(w.pas));
+        if (!/^path\\(evenodd, "M 0 0 H 238\\.11\\d* V 332\\.59\\d* H 0 Z M 22\\.67\\d* 11\\.33\\d* /.test(getComputedStyle(ka.querySelector('.el.otok')).clipPath)) b.push('clip-path ' + getComputedStyle(ka.querySelector('.el.otok')).clipPath.slice(0, 80));
+        const sciezka = new Path2D(sciezkaOtoku(63, 88, 3, 3)), g2 = document.createElement('canvas').getContext('2d');
+        const wFill = (x, y) => g2.isPointInPath(sciezka, x, y, 'evenodd');
+        w.geometria = [[2.99, 44, true], [3.01, 44, false], [60.01, 44, true], [59.99, 44, false], [31.5, 2.99, true], [31.5, 3.01, false], [31.5, 85.01, true], [31.5, 84.99, false],
+          [0.1, 0.1, true], [62.9, 87.9, true], [3.87, 3.87, true], [3.89, 3.89, false], [59.13, 84.13, true], [59.11, 84.11, false]].filter(([x, y, v]) => wFill(x, y) !== v);
+        if (w.geometria.length) b.push('geometria ' + JSON.stringify(w.geometria));
+        // Róg: przekątna od lewego górnego rogu – granica pokrycia 0,5 w t = s + r − r/√2 → r.
+        let tr = NaN;
+        for (let i = Math.round(3.2 * PX); i < Math.round(6 * PX); i++) if (pa.pokr(i, i) < 0.5) { const p0 = pa.pokr(i - 1, i - 1), p1 = pa.pokr(i, i); tr = (i - 1 + (p0 - 0.5) / (p0 - p1) + 0.5) / PX; break; }
+        w.promien = Math.round((tr - 3) / (1 - Math.SQRT1_2) * 100) / 100;
+        if (!(Math.abs(w.promien - 3) <= 0.1)) b.push('promień ' + w.promien);
+        // Karta ze spadem (PDF dla drukarni): pas od końca spadu = 6 mm, róg spadu w kolorze otoku.
+        const zs = kartaZeSpadem(ka, 63, 88, 3); d.appendChild(zs);
+        const ps = await piksele(zs);
+        w.spad = Object.fromEntries(boki.map((k) => [k, pas(ps, k)]));
+        w.rogSpadu = [ps.pokr(2, 2), ps.pokr(ps.W - 3, ps.H - 3), ps.pokr(Math.round(2.5 * PX), Math.round(2.5 * PX))];
+        if (boki.some((k) => Math.abs(w.spad[k] - 6) > 0.15) || w.rogSpadu.some((x) => !(x > 0.98))) b.push('spad ' + JSON.stringify([w.spad, w.rogSpadu]));
+        zs.remove();
+        // Raport drukarni: otok 3 mm – nic, 2 mm – UWAGA; „Brzeg” pod otokiem, „Środek” zwykły odstęp.
+        w.obwodki = [ka, kb].map((k) => obwodkiKarty(k).map((x) => x.element + ':' + x.poziom + ':' + x.odstep));
+        if (w.obwodki[0].length || w.obwodki[1].join() !== 'OTOK:UWAGA:2') b.push('obwódki ' + JSON.stringify(w.obwodki));
+        const oa = odstepyKarty(ka), ob = odstepyKarty(kb);
+        w.odstep = [oa, ob].map((o) => ({ odstep: Math.round(o.odstep * 100) / 100, tekst: o.tekst, pod: o.podOtokiem.map((x) => x.tekst + ':' + x.krawedz + ':' + x.otok) }));
+        if (oa.tekst !== 'Środek' || oa.odstep < 3 || w.odstep[0].pod.join() !== 'Brzeg:lewa:3' || w.odstep[1].pod.join() !== 'Brzeg:lewa:2') b.push('odstęp ' + JSON.stringify(w.odstep));
+        const oryg = window.raportDrukarni;
+        window.raportDrukarni = async () => ({ margines: 3, karty: 1, niezmierzone: [], odstep: [], czern: [], krawedz: [], spad: [], spadSzablonu: { talie: {}, bez: [], pliki: [], zmiesc: [] },
+          progiTekstu: { czarny: 6, kontra: 8, profil: null }, malyTekst: [], obwodki: obwodkiKarty(kb).map((x) => ({ talia: 'Otok', strona: 'awers', ...x, karty: ['Otok 2'] })),
+          podOtokiem: [{ karta: 'Otok 1', talia: 'Otok', strona: 'awers', ...oa.podOtokiem[0], ile: 1 }] });
+        try {
+          const sek = await raportJson({ drukarnia: true });
+          const s1 = sek.find((x) => x.tytul === 'Drukarnia: tekst i ikony pod otokiem'), s2 = sek.find((x) => x.tytul === 'Drukarnia: obwódki i ramki przy linii cięcia');
+          w.sekcje = { pod: s1 && s1.pozycje, obwodki: s2 && s2.pozycje };
+          if (!s1 || s1.ok || !/^UWAGA \\d,\\d mm – Otok 1: „Brzeg”, lewa krawędź – wchodzi w otok 3,0 mm/.test(s1.pozycje[0] || '')
+            || !s2 || s2.ok || !/^UWAGA 2,0 mm – Otok – awersy \\(1\\): OTOK 2 mm, wewnętrzna krawędź – bliżej niż 3 mm/.test(s2.pozycje[0] || '')) b.push('sekcje ' + JSON.stringify(w.sekcje));
+        } finally { window.raportDrukarni = oryg; }
+      } catch (e) { b.push('wyjątek: ' + ((e && e.stack) || e)); }
+      finally { d.remove(); }
+      return { ok: !b.length, bledy: b, ...w };
+    })()`);
+  }
   CZASY_TESTU.push([null, Date.now()]);                  // koniec ostatniego bloku
   await wc.executeJavaScript('buildPrint()');
   await pdfDoPliku(wc, wynik);
@@ -3809,8 +3891,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
     && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!filtrWTrakcie || filtrWTrakcie.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!otokTest || otokTest.ok);
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, otok: otokTest, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

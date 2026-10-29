@@ -155,6 +155,24 @@ LINIA = 10, 40, 50, 25, grubość=0.6, kolor=#8b2c2c, koniec=strzałka_pełna
 LINIA = 10, 50, 50, 50, początek=kropka, koniec=strzałka
 ```
 
+### `OTOK = 3, [Kolor]` (od 0.7.12)
+**Otok** to kolorowy pas wokół karty, od końca spadu do linii bezpieczeństwa (domyślnie 3 mm od linii cięcia). Słownik: **ramka** – cienka linia (`PROSTOKĄT … obwódka=`, `LINIA`), **otok** – pas od końca spadu do linii bezpieczeństwa, **pole karty** – wnętrze karty wewnątrz otoku.
+- pierwsza liczba – szerokość pasa w mm **od linii cięcia** (domyślnie 3); może być `[Kolumną]`,
+- drugi argument albo `kolor=` – kolor jak w `TŁO` (`#RRGGBB`, nazwa z `KOLOR`, `[Kolumna]`, `[Kolor] | szary`); pusta kolumna = karta bez otoku,
+- `zaokrąglenie` – promień wewnętrznego rogu w mm (domyślnie równy szerokości; `zaokrąglenie=0` – ostry róg),
+- `krycie` – od 0 do 1,
+- `jeśli=` – jak przy innych elementach; kilka `OTOK` w talii jest dozwolonych (np. zwykły i złoty dla kart rzadkich – rysowane po kolei, ostatni na wierzchu). Działa też w `[REWERS]`.
+
+Otok leży **nad wszystkimi elementami karty**, niezależnie od miejsca w szablonie. Model warstw od góry: otok → teksty → ikony i obrazki → tło. Elementy przy krawędzi (np. pasek przy dolnej krawędzi) mogą sięgać pod otok – bez własnego zaokrąglenia. Tekst i ikony pod otokiem są zasłonięte, a Raport w trybie drukarni je zgłasza.
+
+Otok jest rysowany dokładnie, bez zaokrąglania do pikseli. W PDF dla drukarni sięga do końca spadu, a rogi spadu są wypełnione. W podglądzie, w obrazkach i w druku A4 kończy się na krawędzi karty. Zastępuje obejście z obwódką (`PROSTOKĄT = -1, -1, …, obwódka=4, …`), które Raport w trybie drukarni zgłaszał jako błąd przy linii cięcia.
+
+```
+OTOK = 3, [Kolor]                                  ; pas 3 mm, róg 3 mm
+OTOK = 3, #C9A227, jeśli=[Rzadka]=tak             ; złoty otok kart rzadkich – na wierzchu
+OTOK = 4, kolor=#1d1b19, zaokrąglenie=2
+```
+
 ### `TEKST = x, y, szer, wys, "treść z [Kolumnami]", opcje…`
 
 | Opcja | Znaczenie |
