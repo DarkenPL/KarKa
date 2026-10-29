@@ -1625,7 +1625,8 @@ function odstepyKarty(k) {
 // po fitAll. Próg: czysta czerń #000 (w CMYK jedna farba K100) – czarny, każdy inny kolor (także biały na tle i
 // „prawie czerń”) – kontra. Progi z profilu drukarni wybranego w oknie PDF dla drukarni (minTekstPt), domyślnie 6 / 8 pt.
 const PROGI_TEKSTU = { czarny: 6, kontra: 8 };
-// Profil drukarni dla raportu – ten, który okno PDF dla drukarni pokaże jako wybrany (zapamietanaDrukarnia).
+// Profil drukarni dla raportu – zapamiętany w oknie PDF dla drukarni (zapamietanaDrukarnia). Bez Ghostscripta okno pokaże
+// zamiast niedostępnego profilu CMYK inny, a raport liczy dalej z zapamiętanego – ostrożniej (np. promień 5 mm LongPack).
 function profilRaportu() {
   try { const id = zapamietanaDrukarnia(ustawieniaOkna('drukarnia')); return profileDrukarni().find((x) => x && x.id === id) || null; } catch (e) { return null; }
 }
@@ -1776,12 +1777,13 @@ function obwodkiKarty(k) {
 // od linii cięcia: róg kwadratowej ikony 3 mm od obu krawędzi przy r = 5 mm – 2,2 mm (r − √2·(r − x) ≥ 3 → x ≥ 3,59).
 // r = większy z promienRogu profilu drukarni i KARTA … zaokrąglenie=; r ≤ MARGINES_DRUKARNI – bez pomiaru (róg strefy jest
 // wtedy kwadratowy, a odstęp od prostych krawędzi sprawdza sekcja tekstu). Liczone z kształtu, nie z prostokąta wokół:
-// tekst – prostokąty linii tekstu (obwiedniaGlifow), ikony obrazkowe i OBRAZEK – piksele z kryciem ≥ 50 % (płótno
-// NAROZNIK_DPI, tylko kwadrat rogu), PROSTOKĄT (też zaokrąglony) i ELIPSA – punkty obrysu po obrocie (kształt wypukły –
+// tekst – prostokąty linii tekstu (obwiedniaGlifow), ikony obrazkowe (img.ikona, też SVG bez width/height – rysowane
+// w swoje pole) i OBRAZEK – piksele z kryciem ≥ 50 % (płótno NAROZNIK_DPI, tylko kwadrat rogu), ikona koloru
+// (.ikona-kolor – prostokąt z zaokrągleniem 0,08 em) – prostokąt, PROSTOKĄT (też zaokrąglony) i ELIPSA – punkty obrysu po obrocie (kształt wypukły –
 // najbliższy łukowi punkt leży na obrysie). Najpierw prostokąt wokół elementu: gdy on jest dość daleko, kształt też.
 // Pomijane: tekst i ikony bliżej niż 3 mm od prostej krawędzi albo pod otokiem (są w swoich sekcjach), kształty
 // i obrazki dotykające krawędzi karty (tło, pasy do spadu), niewidoczne, LINIA, OTOK, obwódka karty. Obrazek obrócony,
-// odbity albo z kadr= – z prostokąta wokół niego. Wynik: [{ element, opis, naroznik, odstep (mm, ujemny = za łukiem), promien }].
+// odbity albo z kadr= albo plik bez rozmiaru naturalnego (SVG tylko z viewBox) – z prostokąta wokół niego. Wynik: [{ element, opis, naroznik, odstep (mm, ujemny = za łukiem), promien }].
 const NAROZNIK_DPI = 600;                 // kwadrat rogu 5 mm = 118 px – piksel 0,04 mm
 const NAROZNIKI = [['lewy górny', false, false], ['prawy górny', true, false], ['lewy dolny', false, true], ['prawy dolny', true, true]];
 function promienRoguKarty(k, profil = profilRaportu()) {
@@ -1835,7 +1837,7 @@ function naroznikiKarty(k, r = promienRoguKarty(k)) {
       const ikona = el.classList.contains('ikony');
       zmierz(czesci.map((c) => {
         const p = prost({ left: c.l, top: c.t, right: c.r, bottom: c.b });
-        const img = c.n && c.n.tagName === 'IMG' && c.n.complete && c.n.naturalWidth ? c.n : null;
+        const img = c.n && c.n.tagName === 'IMG' && c.n.complete ? c.n : null;   // rysowana w swoje pole – rozmiar naturalny niepotrzebny
         return { p, dokladnie: img && ((rog) => odObrazu(img, p.x1, p.y1, p.x2 - p.x1, p.y2 - p.y1, p, rog)) };
       }), ikona ? 'IKONA' : 'TEKST', ikona ? 'ikona ' + ([...el.querySelectorAll('img.ikona, .ikona-kolor')].map((n) => n.alt || n.title).filter(Boolean)[0] || '') : '„' + el.textContent.trim().replace(/\s+/g, ' ').slice(0, 40) + '”');
       continue;
