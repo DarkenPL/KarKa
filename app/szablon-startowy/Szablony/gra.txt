@@ -32,6 +32,8 @@ DANE = karty.csv
 ; ── Awers ─────────────────────────────────────────────────────────
 TŁO       = [Kolor] | szary                ; kolor z kolumny Kolor, a gdy pusta – szary
 PROSTOKĄT = 3.5, 3.5, 56, 81, kolor=#ffffff, zaokrąglenie=4
+; Otok – kolorowy pas od krawędzi do 3 mm, zawsze na wierzchu (usuń „;” na początku, by go włączyć):
+; OTOK = 3, [Kolor] | szary
 
 ; Koszt (z lewej) i punkty (z prawej) w jednym wierszu – grupa „góra”
 ; sprawia, że ikony mają ten sam rozmiar na wszystkich kartach.

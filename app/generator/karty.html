@@ -542,7 +542,7 @@ function renderText(text, icons, warn) {
 
 const plain = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l').replace(/Ł/g, 'L')
   .toLowerCase().trim().replace(/[\s-]+/g, '_');
-const ELEMENTY = ['tlo', 'prostokat', 'elipsa', 'tekst', 'obrazek', 'ikona', 'linia'];
+const ELEMENTY = ['tlo', 'prostokat', 'elipsa', 'tekst', 'obrazek', 'ikona', 'linia', 'otok'];
 const FLAGI = ['jedna_linia', 'pogrubienie', 'kursywa', 'podkreslenie', 'wersaliki', 'bez_formatowania'];
 
 function stripComment(line) {
@@ -772,6 +772,45 @@ function liniaSvg(c, tpl, ctx, colorOf) {
   const kk = o.krycie ? krycieLiczba(o.krycie) : null;
   const kr = kk !== null ? ` opacity="${kk}"` : '';
   return `<svg class="el linia" style="left:0;top:0;width:${tpl.w}mm;height:${tpl.h}mm;overflow:visible" viewBox="0 0 ${tpl.w} ${tpl.h}"${kr}>${s}</svg>`;
+}
+
+// OTOK = szerokość, kolor, zaokrąglenie=…, krycie=… (#132) – pas od końca spadu do „szerokość” mm od linii cięcia
+// (domyślnie 3 mm = linia bezpieczeństwa), wewnętrzny róg zaokrąglony (domyślnie promień = szerokość). Kształt:
+// prostokąt zewnętrzny minus zaokrąglony wewnętrzny (evenodd) jako clip-path: path() na wypełnionym div-ie – dokładna
+// geometria. Nie obwódka CSS ani <svg>: Chromium przyciąga do pikseli grubość obwódki i początek elementu <svg>
+// (w PDF dla drukarni pas wychodził o ~0,1 mm nierówny), a ścieżka przycinania liczona jest od ułamkowego położenia div-a.
+// Div ma rozmiar karty – nie wystaje poza nią (w druku wystający div przelewał się na następną stronę); w PDF dla
+// drukarni kartaZeSpadem powiększa go o spad i przelicza ścieżkę (stylOtoku) – pas sięga końca spadu, rogi bez prześwitu.
+// Rysowany na końcu karty – nad wszystkimi elementami (model warstw: otok → teksty → ikony i art → tło).
+const OTOK_SZEROKOSC = 3, PX_NA_MM = 96 / 25.4;
+// Ścieżka otoku karty W × H (mm), pas s, promień r, w div-ie wystającym o Z mm poza kartę; k = jednostek na mm.
+function sciezkaOtoku(W, H, s, r, Z = 0, k = 1) {
+  const f = (n) => +((n + Z) * k).toFixed(3), R = +(r * k).toFixed(3);
+  const luk = (x, y) => `A${R} ${R} 0 0 1 ${f(x)} ${f(y)}`;
+  return `M${f(-Z)} ${f(-Z)}H${f(W + Z)}V${f(H + Z)}H${f(-Z)}Z`
+    + `M${f(s + r)} ${f(s)}H${f(W - s - r)}${luk(W - s, s + r)}V${f(H - s - r)}${luk(W - s - r, H - s)}`
+    + `H${f(s + r)}${luk(s, H - s - r)}V${f(s + r)}${luk(s + r, s)}Z`;
+}
+// Położenie i clip-path div-a otoku karty w × h ze spadem Z (mm).
+function stylOtoku(el, w, h, Z) {
+  const s = parseFloat(el.dataset.otok), r = parseFloat(el.dataset.zaokraglenie);
+  Object.assign(el.style, { left: -Z + 'mm', top: -Z + 'mm', width: w + 2 * Z + 'mm', height: h + 2 * Z + 'mm',
+    clipPath: `path(evenodd, '${sciezkaOtoku(w, h, s, r, Z, PX_NA_MM)}')` });
+}
+function otokHtml(c, tpl, ctx, liczba, colorOf, krycieOf) {
+  const o = c.opt, a0 = c.args[0];
+  const sz = a0 === undefined || String(a0).trim() === '' ? { n: OTOK_SZEROKOSC } : liczba(a0);
+  if (sz.pusta) return '';                                       // szerokość z pustej kolumny → bez otoku
+  const s = sz.n, maks = Math.min(tpl.w, tpl.h) / 2;
+  if (Number.isNaN(s) || s <= 0 || s >= maks) { ctx.warn.add(`${c.where}: ${ctx.label}: OTOK = szerokość w mm (większa od 0, mniejsza niż ${String(maks).replace('.', ',')}), np. OTOK = 3, #2E7D32`); return ''; }
+  const kol = colorOf(o.kolor ?? c.args[1] ?? '#000000');
+  if (!kol) return '';                                           // kolor z pustej kolumny → bez otoku
+  const zr = o.zaokraglenie === undefined ? { n: s } : liczba(o.zaokraglenie);
+  const r = Math.max(0, Math.min(Number.isNaN(zr.n) ? s : zr.n, (tpl.w - 2 * s) / 2, (tpl.h - 2 * s) / 2));
+  const kk = krycieOf(o.krycie, c.where), f = (n) => +n.toFixed(4);
+  const st = `left:0;top:0;width:${tpl.w}mm;height:${tpl.h}mm;background:${kol};`
+    + `clip-path:path(evenodd,'${sciezkaOtoku(tpl.w, tpl.h, s, r, 0, PX_NA_MM)}');` + (kk !== null ? `opacity:${kk};` : '');
+  return `<div class="el otok" data-otok="${f(s)}" data-zaokraglenie="${f(r)}" style="${esc(st)}"></div>`;
 }
 
 // ── Formatowanie tekstu (issue #55) ─────────────────────────────────────────
@@ -1034,7 +1073,7 @@ function renderCard(tpl, cmds, row, ctx) {
   };
   const mm = (v) => (String(v).trim().endsWith('%') ? String(v).trim() : num(v) + 'mm');
 
-  let bg = '', html = '', tlo = '';
+  let bg = '', html = '', tlo = '', otok = '';
   // Spad z szablonu (#84): TŁO z pliku i obrazki przy krawędzi to pliki karty ze spadem – ramka sięga spadu,
   // karta (overflow: hidden) przycina je do linii cięcia, a PDF dla drukarni rysuje je bez skalowania.
   const sp = tpl.spad || 0;
@@ -1052,6 +1091,7 @@ function renderCard(tpl, cmds, row, ctx) {
       continue;
     }
     if (c.kom === 'linia') { html += liniaSvg(c, tpl, ctx, colorOf); continue; }
+    if (c.kom === 'otok') { otok += otokHtml(c, tpl, ctx, liczba, colorOf, krycieOf); continue; }
     const poz = [0, 1, 2, 3].map((i) => liczba(c.args[i]));
     const zDanych = poz.filter((p) => p.zKolumny);
     if (zDanych.length && zDanych.every((p) => p.pusta)) continue;        // pozycja z kolumn pusta → elementu nie ma
@@ -1128,6 +1168,7 @@ function renderCard(tpl, cmds, row, ctx) {
   const k = (cmds === tpl.rewers && tpl.kartaRewers) || tpl.karta;
   const r = k.zaokraglenie ? `border-radius:${mm(k.zaokraglenie)};` : '';
   if (k.obwodka) html += `<div class="el" style="left:0;top:0;width:100%;height:100%;${r}border:${num(k.obwodka)}mm solid ${colorOf(k.kolor_obwodki || '#000000') || '#000'}"></div>`;
+  html += otok;                                       // OTOK nad wszystkim, także nad obwódką karty (#132)
   return { html: tlo + html, style: `width:${tpl.w}mm;height:${tpl.h}mm;${bg}${r}` };
 }
 
@@ -1548,23 +1589,34 @@ function obwiedniaGlifow(el) {
   return x1 === Infinity ? null : { x1, y1, x2, y2 };
 }
 
-// Najmniejszy odstęp tekstu/ikon od krawędzi karty (linii cięcia) – w mm, z kierunkiem.
+// Najszerszy widoczny OTOK karty w mm (0 = bez otoku).
+function otokKarty(k) {
+  let s = 0;
+  for (const el of k.querySelectorAll(':scope > .el.otok')) {
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || parseFloat(st.opacity) === 0) continue;
+    s = Math.max(s, parseFloat(el.dataset.otok) || 0);
+  }
+  return s;
+}
+// Najmniejszy odstęp tekstu/ikon od krawędzi karty (linii cięcia) – w mm, z kierunkiem; elementy, które wchodzą w pas OTOK, idą osobno do „pod otokiem” (#132) –
+// są zasłonięte, więc to błąd szablonu, nie ryzyko cięcia. Wynik: najbliższy element z polem podOtokiem: [...].
 function odstepyKarty(k) {
   const kr = k.getBoundingClientRect();
   if (!k.isConnected || !kr.width || !kr.height) return { niezmierzona: true };   // karta odpięta albo ukryta (#111)
-  const pxNaMm = kr.width / cardMm(k)[0];
+  const pxNaMm = kr.width / cardMm(k)[0], otok = otokKarty(k), podOtokiem = [];
   let naj = null;
   for (const el of k.querySelectorAll('.el.tekst, .el.ikony')) {
     if (getComputedStyle(el).display === 'none') continue;
     const o = obwiedniaGlifow(el);
     if (!o) continue;
-    const strony = [['lewa', o.x1 - kr.left], ['górna', o.y1 - kr.top], ['prawa', kr.right - o.x2], ['dolna', kr.bottom - o.y2]];
-    for (const [strona, px] of strony) {
-      const mmOd = px / pxNaMm;
-      if (!naj || mmOd < naj.odstep) naj = { odstep: mmOd, krawedz: strona, element: el.classList.contains('ikony') ? 'IKONA' : 'TEKST', tekst: el.textContent.trim().replace(/\s+/g, ' ').slice(0, 40) };
-    }
+    const strony = [['lewa', o.x1 - kr.left], ['górna', o.y1 - kr.top], ['prawa', kr.right - o.x2], ['dolna', kr.bottom - o.y2]].map(([s, px]) => [s, px / pxNaMm]);
+    const opis = { element: el.classList.contains('ikony') ? 'IKONA' : 'TEKST', tekst: el.textContent.trim().replace(/\s+/g, ' ').slice(0, 40) };
+    const pod = strony.filter(([, mmOd]) => mmOd < otok - 0.05).sort((a, b) => a[1] - b[1])[0];
+    if (pod) { podOtokiem.push({ ...opis, odstep: Math.round(Math.max(0, pod[1]) * 10) / 10, krawedz: pod[0], otok }); continue; }
+    for (const [strona, mmOd] of strony) if (!naj || mmOd < naj.odstep) naj = { odstep: mmOd, krawedz: strona, ...opis };
   }
-  return naj;
+  return naj ? { ...naj, podOtokiem } : podOtokiem.length ? { odstep: Infinity, podOtokiem } : null;
 }
 
 // Rozmiar tekstu po dopasowaniu (#110, pkt 1): każdy fragment osobno (<small>, <big>, <rozmiar=>), z getComputedStyle
@@ -1639,6 +1691,12 @@ function obwodkiKarty(k) {
   for (const el of k.querySelectorAll(':scope > .el')) {
     const st = getComputedStyle(el);
     if (!widoczna(el, st)) continue;
+    if (el.classList.contains('otok')) {
+      // OTOK (#132) sięga końca spadu – liczy się tylko wewnętrzna krawędź pasa: węższy niż linia bezpieczeństwa – UWAGA.
+      const s = parseFloat(el.dataset.otok);
+      if (s < MARGINES_DRUKARNI - 0.005) dodaj({ element: 'OTOK', opis: `OTOK ${mmTxt(s)} mm`, poziom: 'UWAGA', odstep: r1(s), krawedz: 'wewnętrzna' });
+      continue;
+    }
     if (el.classList.contains('linia')) {
       if (el.getAttribute('opacity') !== null && +el.getAttribute('opacity') === 0) continue;
       for (const l of el.querySelectorAll('line')) {
@@ -1699,6 +1757,7 @@ async function koloryKarty(k) {
       if (parseFloat(st.webkitTextStrokeWidth) > 0) out.push({ rgb: rgbZCss(st.webkitTextStrokeColor), rodzaj: 'obrys tekstu' });
     }
     if (parseFloat(st.borderTopWidth) > 0) out.push({ rgb: rgbZCss(st.borderTopColor), rodzaj: 'obwódka' });
+    if (el.classList.contains('otok')) out.push({ rgb: rgbZCss(st.backgroundColor), rodzaj: 'otok' });
     for (const s of el.querySelectorAll('svg [stroke], svg [fill]')) for (const a of ['stroke', 'fill']) {
       const v = s.getAttribute(a);
       if (v && v !== 'none') out.push({ rgb: /^#/.test(v) ? rgbZHex(v) : rgbZCss(v), rodzaj: 'linia' });
@@ -1885,14 +1944,15 @@ async function raportDrukarniTeraz() {
       await ukladDoPomiaru(karty);
     }
     const odstep = [], bezPomiaru = [], czern = new Map(), pasy = new Map(), spad = [], pliki = [], zmiesc = [], widziane = new Set();
-    const progi = progiTekstu(), malyTekst = [], obwodki = new Map();
+    const progi = progiTekstu(), malyTekst = [], obwodki = new Map(), podOtokiem = [];
     for (const k of karty) {
       const rewers = k.classList.contains('rewers');
       const klucz = k.dataset.talia + '|' + (rewers ? 'rewers' + nrRewersu(k) : k.dataset.row);
       const pierwsza = !widziane.has(klucz); widziane.add(klucz);
-      const o = odstepyKarty(k);
-      if (o && o.niezmierzona) { if (!bezPomiaru.includes(opisKarty(k))) bezPomiaru.push(opisKarty(k)); continue; }
-      if (o && o.odstep < MARGINES_DRUKARNI - 0.005) {
+      const { podOtokiem: pod = [], ...o } = odstepyKarty(k) || {};
+      if (o.niezmierzona) { if (!bezPomiaru.includes(opisKarty(k))) bezPomiaru.push(opisKarty(k)); continue; }
+      if (pod.length && !podOtokiem.some((x) => x.klucz === klucz)) podOtokiem.push({ klucz, karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...pod.sort((a, b) => a.odstep - b.odstep)[0], ile: pod.length });
+      if (o.odstep < MARGINES_DRUKARNI - 0.005) {
         const byla = odstep.find((x) => x.klucz === klucz);
         if (!byla) odstep.push({ klucz, karta: opisKarty(k), talia: k.dataset.talia, strona: rewers ? 'rewers' : 'awers', ...o, odstep: Math.round(o.odstep * 100) / 100 });
         else if (o.odstep < byla.odstep) Object.assign(byla, o, { odstep: Math.round(o.odstep * 100) / 100 });
@@ -1925,13 +1985,14 @@ async function raportDrukarniTeraz() {
     }
     odstep.sort((a, b) => a.odstep - b.odstep);
     odstep.forEach((x) => delete x.klucz);
+    podOtokiem.forEach((x) => delete x.klucz);
     // Spad w szablonie (#84): talie bez deklaracji i pliki o proporcjach innych niż karta ze spadem.
     const talie = [...$('podglad').querySelectorAll('.talia')].map((t) => t.dataset.talia);
     const spadSzablonu = { talie: Object.fromEntries(talie.map((t) => [t, spadTalii(t)])), bez: talie.filter((t) => !spadTalii(t)), pliki, zmiesc };
     malyTekst.sort((a, b) => a.rozmiar - b.rozmiar);
     const obw = [...obwodki.values()].sort((a, b) => (b.poziom === 'BŁĄD') - (a.poziom === 'BŁĄD') || a.odstep - b.odstep);
     return { margines: MARGINES_DRUKARNI, karty: karty.length, niezmierzone: bezPomiaru, odstep, czern: [...czern.values()], krawedz: [...pasy.values()], spad, spadSzablonu,
-      progiTekstu: progi, malyTekst, obwodki: obw };
+      progiTekstu: progi, malyTekst, obwodki: obw, podOtokiem };
   });
   // Obrazki kart (html-to-image) czytają podgląd – na wyłączność, chyba że eksport już trwa.
   return (OSTATNI_RAPORT_DRUKARNI = EKSPORT_TRWA ? await praca() : await naWylacznosc(praca));
@@ -1960,6 +2021,12 @@ async function sekcjeDrukarni(lista, o = {}) {
     `<b>${mm(x.odstep)}</b> – ${esc(x.karta)}: ${x.element === 'IKONA' ? 'ikona' : '„' + esc(x.tekst) + '”'}, ${x.krawedz} krawędź`)
     .concat(r.odstep.length > POKAZ ? [`… i ${r.odstep.length - POKAZ} kart więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : [])),
     `tekst i ikony są co najmniej ${MARGINES_DRUKARNI} mm od linii cięcia`);
+  // Tekst i ikony w pasie OTOK (#132) – zasłonięte otokiem (otok jest nad wszystkim); sekcja tylko, gdy są.
+  const pod = r.podOtokiem || [];
+  if (pod.length) lista('Drukarnia: tekst i ikony pod otokiem', pod.slice(0, POKAZ).map((x) =>
+    `<b>UWAGA ${mm(x.odstep)}</b> – ${esc(x.karta)}: ${x.element === 'IKONA' ? 'ikona' : '„' + esc(x.tekst) + '”'}, ${x.krawedz} krawędź – wchodzi w otok ${mm(x.otok)} i jest nim zasłonięty; odsuń od krawędzi na ≥ ${mm(x.otok)}`
+      + (x.ile > 1 ? ` <span class="opis">i ${x.ile - 1} ${x.ile === 2 ? 'inny element' : 'innych elementów'}</span>` : ''))
+    .concat(pod.length > POKAZ ? [`… i ${pod.length - POKAZ} kart więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []), '');
   // Rozmiar tekstu po dopasowaniu (#110, pkt 1) – na karcie najmniejszy fragment, w zleceniu wszystkie.
   const pg = r.progiTekstu || progiTekstu(), pt = (v) => String(v).replace('.', ',') + ' pt', maly = r.malyTekst || [];
   lista(`Drukarnia: tekst mniejszy niż ${pt(pg.czarny)} (czarny) / ${pt(pg.kontra)} (kolorowy)`, maly.slice(0, POKAZ).map((x) => {
@@ -1976,10 +2043,11 @@ async function sekcjeDrukarni(lista, o = {}) {
     BŁĄD: `bliżej niż ${MARGINES_DRUKARNI} mm od linii cięcia – po cięciu (±1 mm) może zostać ucięta; odsuń ją albo przedłuż do spadu`,
     KONIEC: `kończy się bliżej niż ${MARGINES_DRUKARNI} mm przed linią cięcia – po cięciu (±1 mm) odstęp końca od krawędzi będzie widocznie różny; doprowadź ją do spadu albo skróć`,
     UWAGA: `równoległa do krawędzi ${MARGINES_DRUKARNI}–${PAS_RAMEK} mm od linii cięcia – po cięciu (±1 mm) odstęp będzie widocznie nierówny; odsuń ją na ≥ ${PAS_RAMEK} mm`,
+    OTOK: `bliżej niż ${MARGINES_DRUKARNI} mm od linii cięcia – po cięciu (±1 mm) pas będzie widocznie nierówny; poszerz otok do ${MARGINES_DRUKARNI} mm (linia bezpieczeństwa)`,
   };
   lista('Drukarnia: obwódki i ramki przy linii cięcia', (r.obwodki || []).slice(0, POKAZ).map((x) =>
     `<b>${x.poziom}${x.element === 'KARTA' ? '' : ' ' + mm(x.odstep)}</b> – ${esc(x.talia)} – ${x.strona === 'rewers' ? 'rewers' : 'awersy (' + x.karty.length + ')'}: ${esc(x.opis)}`
-      + (x.element === 'KARTA' ? ' ' : `, ${x.krawedz} krawędź – `) + (RADA_OBW[x.element === 'KARTA' ? 'KARTA' : x.koniec ? 'KONIEC' : x.poziom]) + (x.strona === 'awers' ? `: ${ileKart(x.karty)}` : ''))
+      + (x.element === 'KARTA' ? ' ' : `, ${x.krawedz} krawędź – `) + (RADA_OBW[x.element === 'KARTA' || x.element === 'OTOK' ? x.element : x.koniec ? 'KONIEC' : x.poziom]) + (x.strona === 'awers' ? `: ${ileKart(x.karty)}` : ''))
     .concat((r.obwodki || []).length > POKAZ ? [`… i ${r.obwodki.length - POKAZ} pozycji więcej (pełna lista w zleceniu raport z drukarnia = tak)`] : []),
     `obwódki i ramki są co najmniej ${PAS_RAMEK} mm od linii cięcia albo przechodzą przez nią do spadu`);
   lista('Drukarnia: „prawie czerń” zamiast #000', r.czern.map((x) =>
@@ -2561,6 +2629,7 @@ function kartaZeSpadem(k, w, h, s) {
   wnetrze.style.cssText = `position:absolute;left:${mm(s)};top:${mm(s)};width:${mm(w)};height:${mm(h)};overflow:visible;`;
   wnetrze.append(...c.childNodes);
   c.appendChild(wnetrze);
+  for (const el of wnetrze.querySelectorAll(':scope > .el.otok')) stylOtoku(el, w, h, s);   // OTOK do końca spadu (#132)
   [...wnetrze.querySelectorAll(OBRAZY_SPADU)].forEach((el, i) => {
     const img = el.querySelector('img');
     if (img && !/cover|fill/.test(img.style.objectFit)) return;   // „zmieść” zmieniłoby położenie obrazka
