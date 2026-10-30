@@ -21,7 +21,7 @@ const fs = require('fs');
 const path = require('path');
 
 const BLOKI = {
-  '03-ogrod': ['edytor', 'wybor', 'drukarnia', 'drukarniaPdf', 'oknaDruku'],   // kilka talii, rewersy, jeśli=
+  '03-ogrod': ['edytor', 'wybor', 'drukarnia', 'drukarniaPdf', 'obrotKarty', 'oknaDruku'],   // kilka talii, rewersy, jeśli=
   '05-zaklecia': ['raportStart'],                                       // tekst ok. 2 mm od krawędzi (#111)
   '07-gildie:zlecenia': ['cmykTest', 'zlecenia', 'hist', 'zmienione', 'katalog'],
   '07-gildie:zakladki': ['zakladki', 'zleceniaWTle'],
