@@ -3018,10 +3018,12 @@ function printCard(k, w, h, rewers = false) {
   const cell = document.createElement('div');
   cell.style.cssText = `position:relative;width:${h}mm;height:${w}mm;overflow:hidden;`;
   // Przed obrotem karta wystaje w lewo, nie w prawo – inaczej Chrome uznaje stronę za za szeroką
-  // i zmniejsza cały wydruk.
-  c.style.position = 'absolute'; c.style.left = (h - w) + 'mm'; c.style.top = '0';
+  // i zmniejsza cały wydruk. Ułamek px z left Chromium zaokrągla przy elemencie z transform (ok. 0,1 mm przesunięcia, #134),
+  // więc w left tylko całe px, a reszta w transform.
+  const lewo = Math.round((h - w) * 96 / 25.4), reszta = (h - w) - lewo * 25.4 / 96;
+  c.style.position = 'absolute'; c.style.left = lewo + 'px'; c.style.top = '0';
   c.style.transformOrigin = '0 0';
-  c.style.transform = rewers ? `translate(${w - h}mm, ${w}mm) rotate(-90deg)` : `translateX(${w}mm) rotate(90deg)`;
+  c.style.transform = rewers ? `translate(${w - h + reszta}mm, ${w}mm) rotate(-90deg)` : `translateX(${w + reszta}mm) rotate(90deg)`;
   cell.appendChild(c);
   return cell;
 }
@@ -3187,7 +3189,10 @@ function buildPrint(o = {}) {
       if (s) { const z = s + ZAPAS; k = kartaZeSpadem(k, w, h, z); w += 2 * z; h += 2 * z; }
       const [cw, ch] = cellOf({ w, h });
       const box = printCard(k, w, h);
-      box.style.position = 'absolute'; box.style.left = mm((pw - cw) / 2); box.style.top = mm((ph - ch) / 2);
+      // Położenie w transform, nie w left/top: ujemny top (ZAPAS) Chromium kasuje na każdej stronie oprócz pierwszej,
+      // treść schodziła o 0,5 mm względem TrimBox (#134).
+      box.style.position = 'absolute'; box.style.left = '0'; box.style.top = '0';
+      box.style.transform = `translate(${mm((pw - cw) / 2)}, ${mm((ph - ch) / 2)})`;
       a.appendChild(box);
     };
     if (tryb === 'drukarnia' && o.strony !== 'naprzemian') {

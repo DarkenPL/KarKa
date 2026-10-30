@@ -2226,6 +2226,41 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     drukarniaPdf.bledy = bledy;
     drukarniaPdf.ok = !bledy.length;
   }
+  // Położenie karty na stronie PDF drukarni (#134): białe pole w 3 mm od cięcia (OTOK = 3 w 03-ogrod) mierzone z rasteryzacji
+  // Ghostscriptem na pierwszej stronie, kolejnej stronie (ujemny top kasowany na stronach od drugiej) i pierwszej karcie
+  // poziomej (zaokrąglenie left przy obrocie); ze spadem 3 mm (z ZAPAS) i bez spadu. Tolerancja ±0,06 mm (1 px przy 600 dpi + 0,02).
+  let obrotKarty = null;
+  if (testBloku('obrotKarty')) {
+    const gs = cmyk.znajdzGs({ odswiez: true });
+    if (!gs.ok) obrotKarty = process.env.GITHUB_ACTIONS ? { ok: false, blad: 'w CI wymagany Ghostscript: ' + gs.powod } : { pominiety: true, powod: gs.powod };
+    else {
+      const js = (k) => wc.executeJavaScript(k);
+      const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'gk-obrot-'));
+      const DPI = 600, bledy = [], pomiary = [];
+      const karty = await js(`kartyEksportu({}).map((k) => { const [w, h] = cardMm(k); return w > h; })`);
+      const pozioma = karty.indexOf(true);
+      if (pozioma < 2) bledy.push('przykład bez karty poziomej za drugą stroną');
+      else for (const spad of [3, 0]) {
+        const plan = await js(`buildPrint(${JSON.stringify({ uklad: 'drukarnia', spad, strony: 'osobno', rewersy: false })})`);
+        const [plik] = await pdfDoPliku(wc, path.join(tmp, `s${spad}.pdf`), plan);
+        for (const strona of [1, 2, pozioma + 1]) {
+          const pgm = path.join(tmp, `s${spad}-${strona}.pgm`);
+          require('child_process').execFileSync(gs.sciezka, ['-q', '-dNOPAUSE', '-dBATCH', '-sDEVICE=pgmraw', `-r${DPI}`, '-dGraphicsAlphaBits=1', `-dFirstPage=${strona}`, `-dLastPage=${strona}`, `-sOutputFile=${pgm}`, plik]);
+          const b = fs.readFileSync(pgm), t = [];
+          let o = 0;
+          while (t.length < 4) { if (b[o] === 35) { while (b[o] !== 10) o++; o++; continue; } let s = ''; while (b[o] > 32) s += String.fromCharCode(b[o++]); o++; t.push(s); }
+          const W = +t[1], H = +t[2], px = (x, y) => b[o + y * W + x];
+          const biel = (f, n) => { let r = 0; for (let k = 0; k < n; k++) { r = f(k) >= 250 ? r + 1 : 0; if (r >= 20) return (k - 19) * 25.4 / DPI; } return -1; };
+          const cx = W >> 1, cy = H >> 1, oczek = spad + 3;
+          const boki = { lewa: biel((k) => px(k, cy), W), prawa: biel((k) => px(W - 1 - k, cy), W), gora: biel((k) => px(cx, k), H), dol: biel((k) => px(cx, H - 1 - k), H) };
+          pomiary.push({ spad, strona, ...Object.fromEntries(Object.entries(boki).map(([n, v]) => [n, +v.toFixed(2)])) });
+          for (const [n, v] of Object.entries(boki)) if (Math.abs(v - oczek) > 0.06) bledy.push(`spad ${spad}, strona ${strona}, ${n}: ${v.toFixed(2)} mm, oczekiwano ${oczek}`);
+        }
+      }
+      fs.rmSync(tmp, { recursive: true, force: true });
+      obrotKarty = { pomiary, bledy, ok: !bledy.length };
+    }
+  }
   // Spad obrazków przy krawędzi (#74; --test-edytor, poza przykładami – zmienia szablon testowej kopii i dopisuje obrazek):
   // do pierwszej talii trafiają obrazek „wypełnij” (3 krawędzie) i „rozciągnij” (dolna krawędź) o znanym rozmiarze.
   // a) DOM: obraz w klonie ze spadem ma tę samą skalę i położenie co w pierwotnej ramce;
@@ -4132,9 +4167,9 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     && Menu.getApplicationMenu().items[0].submenu.items.some((i) => i.label === 'Sprawdź aktualizacje…');
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
-    && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!filtrWTrakcie || filtrWTrakcie.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
+    && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!obrotKarty || obrotKarty.pominiety || obrotKarty.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!filtrWTrakcie || filtrWTrakcie.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
     && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!naroznikTest || naroznikTest.ok) && (!otokTest || otokTest.ok) && (!stykTest || stykTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, naroznik: naroznikTest, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, obrotKarty, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, naroznik: naroznikTest, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
