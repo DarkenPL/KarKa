@@ -76,6 +76,9 @@ jobs:
       - name: Test – historia wersji (moduł)
         run: node scripts/test-historia.js
 
+      - name: Test – instrukcja gry (moduł)
+        run: node scripts/test-instrukcja.js
+
       - name: Test – PDF dla drukarni (moduł)
         run: node scripts/test-drukarnia.js
 

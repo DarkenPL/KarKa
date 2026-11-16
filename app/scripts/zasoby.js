@@ -13,6 +13,7 @@ const kopiuj = (z, d) => { fs.mkdirSync(path.dirname(d), { recursive: true }); f
 
 fs.rmSync(CEL, { recursive: true, force: true });
 kopiuj(path.join(APP, 'generator/karty.html'), path.join(CEL, 'karty.html'));
+kopiuj(path.join(APP, 'generator/instrukcja.js'), path.join(CEL, 'instrukcja.js'));   // instrukcja gry (#160) – /.app/instrukcja.js
 kopiuj(path.join(REPO, 'przyklady'), path.join(CEL, 'przyklady'));
 kopiuj(path.join(APP, 'szablon-startowy'), path.join(CEL, 'szablon-startowy'));
 

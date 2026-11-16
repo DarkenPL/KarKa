@@ -1,8 +1,8 @@
 {
   "name": "karka",
   "productName": "KarKa",
-  "version": "0.7.21",
-  "nazwaWydania": "Pieczęć lakowa",
+  "version": "0.8.0",
+  "nazwaWydania": "Kaszta zecerska",
   "description": "KarKa (Kawia Karciana) – generator kart do gier: karty z arkusza CSV/XLSX i szablonu tekstowego",
   "main": "start.js",
   "private": true,

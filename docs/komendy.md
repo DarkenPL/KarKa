@@ -402,3 +402,106 @@ Przykład z `przyklady/03-ogrod`:
 TEKST = 6, 60, 51, 9, "Bez wymagań", jeśli=[Lubi]=
 TEKST = 6, 70, 26, 12, "Rekord plonu!", jeśli=[Grządka]=grzyby | [Plon]>=7 & [Lubi]=
 ```
+
+## Instrukcja gry (od 0.8.0)
+
+Instrukcję gry składasz strona w stronę z dwóch plików: **szablonu stron** (format, strony, ramki i obrazki w mm, style akapitów – składnia jak w szablonie kart) i **tekstu w Markdownie**. Strony oglądasz w **Widok → Instrukcja gry (⌘2)**, obok kart (⌘1 wraca do kart); odświeżają się po zapisie każdego z tych plików, a karty się wtedy nie przebudowują. Uwagi instrukcji są w panelu Uwag z dopiskiem „Instrukcja:”. Cały przykład: `przyklady/03-ogrod/Instrukcja`.
+
+W szablonie kart (część wspólna) wskaż szablon stron – ścieżka względem folderu projektu, jak `DANE`:
+
+```
+INSTRUKCJA = Instrukcja/instrukcja.txt
+```
+
+Szablonu instrukcji nie trzymaj w `Szablony/` – folder projektu otwiera się pierwszym szablonem z `Szablony/`.
+
+### Szablon stron
+
+```
+DOKUMENT = 105, 148, spad=3               ; strona w mm; spad do druku; strony=12 – liczba stron (domyślnie największy numer [STRONA N])
+TREŚĆ    = Instrukcja/instrukcja.md       ; plik(i) tekstu, po przecinku
+
+STYL = akapit, czcionka="EB Garamond", rozmiar=9.5, wyrównanie=wyjustuj, po=1.5
+STYL = numer1, numer="1.", czcionka_znaku="Patrick Hand", kolor_znaku=zieleń
+STYL = faza, bazuje=numer1, numer="Faza 1:", wcięcie=14
+STYL_ZNAKOWY = pogrubienie, czcionka="EB Garamond", grubość=600, kolor=#2E4A22
+
+[WZORZEC]                                  ; pod każdą stroną
+TŁO = ziemia
+TEKST = 10, 141, 85, 4, "[_projekt] · strona [_numer]", styl=podpis
+[WZORZEC LEWA]                             ; tylko strony parzyste (lewe)
+PROSTOKĄT = 101, -3, 7, 154, kolor=zieleń
+[WZORZEC PRAWA]                            ; tylko strony nieparzyste (prawe; strona 1 jest prawa)
+PROSTOKĄT = -3, -3, 7, 154, kolor=zieleń
+
+[STRONA 1]
+OBRAZEK = 32, 34, 40, 40, Ikony/slonecznik.svg
+RAMKA   = 12, 80, 81, 56, tekst=wstęp, kolor=#ffffff, obwódka=0.35, zaokrąglenie=3, margines=3, pion=środek
+[STRONA 3, bez_wzorca]                     ; strona bez elementów wzorca
+OBRAZEK = 40, 84, 25, 25, Ikony/burza.svg, obrót=180
+```
+
+| Komenda / sekcja | Opis |
+|---|---|
+| `DOKUMENT = szer, wys` | Rozmiar strony w mm. `spad=` (0–10 mm) – jak `spad=` w `KARTA`: `TŁO` z pliku i obrazki przy krawędzi to pliki ze spadem. `strony=N` – liczba stron (puste strony mają tylko wzorzec). |
+| `TREŚĆ = plik.md, …` | Pliki tekstu w Markdownie (ścieżki względem folderu projektu). Kilka plików czyta się po kolei. |
+| `STYL = nazwa, opcje…` | Styl akapitu – patrz niżej. |
+| `STYL_ZNAKOWY = pogrubienie, …` | Wygląd `**…**` (albo `kursywa` – `*…*`) w całej instrukcji: `czcionka=`, `grubość=` (np. 600), `kolor=`. |
+| `[WZORZEC]`, `[WZORZEC LEWA]`, `[WZORZEC PRAWA]` | Elementy rysowane pod każdą stroną / pod stronami parzystymi / nieparzystymi. Elementy przed pierwszą sekcją też należą do wzorca. |
+| `[STRONA N]` | Elementy strony N (od 1). `[STRONA N, bez_wzorca]` – bez wzorca. Kolejność sekcji w pliku jest dowolna. |
+| `RAMKA = x, y, szer, wys, tekst=nazwa` | Ramka tekstu z Markdownu: część pliku zaczęta `<tekst=nazwa>` (bez `tekst=` – początek pliku przed pierwszym `<tekst=…>`). Rysuje się jak `PROSTOKĄT` (domyślnie bez wypełnienia): `kolor=`, `obwódka=`, `kolor_obwódki=`, `zaokrąglenie=`, `obrót=`, `krycie=`. `margines=` – odstęp tekstu od brzegu ramki (mm), `pion=góra \| środek \| dół`. |
+| Elementy kart | `TŁO`, `PROSTOKĄT`, `ELIPSA`, `LINIA`, `OBRAZEK`, `IKONA`, `TEKST` – jak na kartach, w mm od lewego górnego rogu strony (bez spadu), z `obrót=`; kolejność w pliku = kolejność rysowania (wzorzec pod stroną). `KOLOR`, `STAŁA`, `CZCIONKA_PLIK`, `CZCIONKA_GOOGLE` działają w całym pliku, `CZCIONKA` – od miejsca wpisania w swojej sekcji. Pola wbudowane: `[_numer]` (numer strony), `[_liczba]` (liczba stron), `[_projekt]`, `[_wersja]`, `[_data]`. |
+| `TEKST … styl=nazwa` | Krótki tekst (podpis) w stylu akapitu: czcionka, rozmiar, kolor, wyrównanie, interlinia, ikony i flagi stylu; opcje wpisane w wierszu mają pierwszeństwo, styl – przed `CZCIONKA`. Za długi tekst zmniejsza się jak na kartach. |
+
+**Etap 1 (0.8.0):** jeden tekst w jednej ramce. Łączenie ramek w wątek (tekst przelewa się do następnej ramki) – w następnej wersji; na razie druga ramka z tym samym `tekst=` zostaje pusta (z Uwagą). Tekst, który się nie mieści, jest ucięty: ramka dostaje czerwony obrys i znak „+”, a Uwaga podaje, ile akapitów i znaków zostało.
+
+### Style akapitów
+
+Wbudowane style (używa ich Markdown bez znacznika): `akapit`, `h1`–`h3` (nagłówki `#`–`###`), `lista1`–`lista3` (punkty `-` na poziomach 1–3), `numer1`–`numer3` (punkty `1.` na poziomach 1–3). `STYL = akapit, …` zmienia tylko podane opcje; pozostałe style bazują na `akapit` (zmiana czcionki akapitu zmienia wszystkie). Własny styl: dowolna nazwa, `bazuje=` – styl, z którego bierze resztę opcji (domyślnie `akapit`).
+
+| Opcja | Znaczenie |
+|---|---|
+| `czcionka=`, `rozmiar=` (pt), `kolor=` | jak w `TEKST` (kolor też z palety `KOLOR`) |
+| `wyrównanie=lewo \| środek \| prawo \| wyjustuj` | w poziomie |
+| `interlinia=1.2` | odstęp między wierszami |
+| `przed=`, `po=` | odstęp przed i po akapicie w mm (odstęp przed pierwszym akapitem ramki jest pomijany) |
+| `wcięcie=`, `wcięcie_prawe=`, `wcięcie_pierwszego=` | wcięcia w mm: lewe (u listy – początek tekstu), prawe, pierwszego wiersza |
+| `znak="•"` | znak wypunktowania |
+| `numer="1."` | numeracja: cyfra `1` wzoru zastępuje numer (`1.`, `(1)`, `Faza 1:`); bez cyfry – osobna litera `a`, `A`, `i`, `I` (`a)`, `i.`) |
+| `wcięcie_znaku=` | gdzie stoi znak / numer (mm); tekst listy zaczyna się od `wcięcie=` – kolejne wiersze punktu też (wcięcie wiszące) |
+| `czcionka_znaku=`, `rozmiar_znaku=`, `kolor_znaku=`, `pogrubienie_znaku` | znak i numer własną czcionką – np. gdy czcionka tekstu nie ma znaku „•” |
+| `ikony=` | wysokość ikon `{…}` względem tekstu |
+| `bazuje=` | styl bazowy |
+| flagi `pogrubienie`, `kursywa`, `wersaliki` | `pogrubienie=nie` wyłącza flagę ze stylu bazowego (np. w nagłówkach) |
+
+Numeracja: punkty listy liczą się od 1 w każdej liście; akapit bez znaku i nagłówek zaczynają liczenie od nowa, punkt wyższego poziomu – na niższych poziomach.
+
+### Tekst w Markdownie
+
+```
+<tekst=przebieg>
+# Przebieg gry
+
+Gra toczy się w turach. **Słońce** {slonce} pomaga roślinom.
+
+1. Potasujcie talię.
+1. Każdy ogrodnik:
+   - dobiera 4 karty,
+   - przygotowuje trzy grządki:<br>warzywa, kwiaty i drzewa.
+1. <styl=faza>**Sadzenie** – połóż roślinę.
+
+<następna_ramka>
+```
+
+| Zapis | Znaczenie |
+|---|---|
+| `#`, `##`, `###` | nagłówki (style `h1`–`h3`) |
+| pusta linia | koniec akapitu; wiersze bez pustej linii łączą się w jeden akapit |
+| `-`, `*`, `+`, `•` i spacja | punkt listy; poziom z wcięcia (2–4 spacje głębiej = poziom niżej, do 3) |
+| `1.` albo `1)` i spacja | punkt listy numerowanej – numer liczy KarKa (wszystkie mogą być `1.`) |
+| `**…**`, `*…*`, `{ikona}`, `<u>`, `<small>`… | jak na kartach ([Formatowanie tekstu](#formatowanie-tekstu)); `{ikona}` z folderu `Ikony` albo `ikony.csv` |
+| `<br>`, `\` albo dwie spacje na końcu wiersza | złamanie wiersza w akapicie |
+| `<styl=nazwa>` na początku akapitu albo punktu | inny styl tego akapitu (np. druga lista numerowana) |
+| `<tekst=nazwa>` w osobnym wierszu | zaczyna tekst dla ramki z `tekst=nazwa` |
+| `<następna_ramka>` w osobnym wierszu | dalszy tekst – do następnej ramki (od wersji z wątkami; teraz liczy się jako niezmieszczony) |
+| `<!-- … -->` | komentarz – pomijany |

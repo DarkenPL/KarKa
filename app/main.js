@@ -1234,6 +1234,10 @@ function zbudujMenu() {
     {
       label: 'Widok',
       submenu: [
+        // #160: karty albo strony instrukcji gry (INSTRUKCJA = … w szablonie) – stan strony, po wczytaniu od nowa karty.
+        { label: 'Karty', accelerator: 'CmdOrCtrl+1', enabled: !!p.szablon, click: wStronie("window.pokazWidok && pokazWidok('karty')") },
+        { label: 'Instrukcja gry', accelerator: 'CmdOrCtrl+2', enabled: !!p.szablon, click: wStronie("window.pokazWidok && pokazWidok('instrukcja')") },
+        { type: 'separator' },
         { label: 'Edytor szablonu', accelerator: 'Alt+CmdOrCtrl+E', enabled: !!p.szablon, click: wStronie('window.przelaczEdytor && przelaczEdytor()') },
         { label: 'Raport projektu', enabled: !!p.folder, click: wStronie('window.pokazRaport && pokazRaport(true)') },
         // #47: podgląd rewersów zamiast awersów – stan zakładki, bez zapisu (po wczytaniu strony od nowa wyłączony).
@@ -4140,6 +4144,106 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       return { ok: !b.length, bledy: b, ...w };
     })()`);
   }
+  // Instrukcja gry (#160, etap 1; przykład 03-ogrod – Instrukcja/instrukcja.txt + instrukcja.md): 4 strony, ramki w mm,
+  // wzorzec lewy/prawy, obrót, style akapitów (czcionka znaku i numeru, wyjustowanie, styl znakowy), ikony w tekście,
+  // pola wbudowane, zero Uwag. Poza przykładami: zmiana instrukcja.md na dysku odświeża samą instrukcję (karty bez
+  // przebudowy), za długi tekst i <następna_ramka> dają Uwagę z liczbą akapitów, po przywróceniu Uwag nie ma.
+  // Zrzut stron: -instrukcja.png (strony 1–4 w pomniejszeniu).
+  let instrukcja = null;
+  if (testBloku('instrukcja')) {
+    const js = (k) => wc.executeJavaScript(k);
+    const b = [];
+    const s0 = await js(`(() => {
+      const mm = (px) => Math.round(px * 25.4 / 96 * 100) / 100;
+      const I = INSTRUKCJA, strony = [...document.querySelectorAll('#strony .karta.strona')];
+      const poz = (el) => { const s = el.closest('.karta.strona'), a = s.getBoundingClientRect(), r = el.getBoundingClientRect(); return [r.left - a.left, r.top - a.top, r.width, r.height].map(mm).concat(+s.dataset.strona); };
+      const ramki = [...document.querySelectorAll('#strony [data-ramka]')].map(poz);
+      const zielone = strony.map((s) => [...s.querySelectorAll('.el.ksztalt')].filter((e) => getComputedStyle(e).backgroundColor === 'rgb(78, 122, 58)').map((e) => poz(e)[0]));
+      const r2 = strony[1].querySelector('.ramka-tekst'), r4 = strony[3].querySelector('.ramka-tekst');
+      const bloki = (r) => [...r.children].map((x) => ({ styl: x.dataset.styl, znak: x.querySelector('.znak') ? x.querySelector('.znak').textContent : '',
+        cz: getComputedStyle(x).fontFamily, czZnaku: x.querySelector('.znak') ? getComputedStyle(x.querySelector('.znak')).fontFamily : '', wyr: getComputedStyle(x).textAlign, br: !!x.querySelector('br') }));
+      const b2 = bloki(r2), b4 = bloki(r4);
+      const pogr = r2.querySelector('b'), ikony = strony[0].querySelectorAll('[data-ramka] img.ikona').length;
+      const obrot = [...strony[2].querySelectorAll('.el.obrazek')].map((e) => e.style.transform || '');
+      return { I, uwagi: [...UWAGI_INSTRUKCJI], panel: document.getElementById('uwagi').innerText, stron: strony.length,
+        szer: strony.map((s) => mm(s.getBoundingClientRect().width)), wys: mm(strony[0].getBoundingClientRect().height), ramki, zielone, b2, b4, ikony, obrot,
+        pogr: pogr ? getComputedStyle(pogr).color + ' ' + getComputedStyle(pogr).fontWeight : '',
+        stopka: [...strony[1].querySelectorAll('.el.tekst')].map((e) => e.textContent).find((t) => /strona/.test(t)) || '',
+        przycisk: !document.getElementById('widokPrzycisk').hidden };
+    })()`);
+    const I = s0.I || {};
+    if (s0.stron !== 4 || I.strony !== 4) b.push('stron: ' + s0.stron);
+    if (s0.szer.some((w) => Math.abs(w - 105) > 0.05) || Math.abs(s0.wys - 148) > 0.05) b.push('rozmiar strony ' + s0.szer + ' × ' + s0.wys);
+    const ramkaOk = (r, oc) => oc.every((v, i) => Math.abs(r[i] - v) <= 0.05);
+    if (s0.ramki.length !== 4 || !ramkaOk(s0.ramki[0], [12, 80, 81, 56, 1]) || !ramkaOk(s0.ramki[1], [10, 10, 85, 128, 2]) || !ramkaOk(s0.ramki[3], [10, 10, 85, 128, 4])) b.push('ramki ' + JSON.stringify(s0.ramki));
+    if ((I.ramki || []).some((r) => r.bloki)) b.push('tekst nie mieści się: ' + JSON.stringify(I.ramki));
+    if (s0.uwagi.length || /Instrukcja/.test(s0.panel)) b.push('Uwagi instrukcji: ' + s0.uwagi.join(' | '));
+    // wzorzec: strona 1 i 3 (prawe) – pasek z lewej (x = -3), 2 i 4 (lewe) – z prawej (x = 101)
+    if (JSON.stringify(s0.zielone) !== '[[-3],[101],[-3],[101]]') b.push('wzorzec lewy/prawy ' + JSON.stringify(s0.zielone));
+    const h1 = s0.b2[0], num = s0.b2.filter((x) => x.styl === 'numer1'), l2 = s0.b2.filter((x) => x.styl === 'lista2'), ak = s0.b2.find((x) => x.styl === 'akapit');
+    if (!h1 || h1.styl !== 'h1' || !/Patrick Hand/.test(h1.cz)) b.push('nagłówek ' + JSON.stringify(h1));
+    if (num.map((x) => x.znak).join() !== '1.,2.,3.,4.' || num.some((x) => !/Patrick Hand/.test(x.czZnaku) || !/EB Garamond/.test(x.cz))) b.push('lista numerowana ' + JSON.stringify(num));
+    if (l2.map((x) => x.znak).join() !== '–,–' || !l2[1].br) b.push('podpunkty ' + JSON.stringify(l2));
+    if (!ak || ak.wyr !== 'justify') b.push('akapit wyjustowany ' + JSON.stringify(ak));
+    if (s0.b4.filter((x) => x.styl === 'faza').map((x) => x.znak).join() !== 'Faza 1:,Faza 2:,Faza 3:') b.push('druga lista numerowana ' + JSON.stringify(s0.b4));
+    if (s0.pogr !== 'rgb(46, 74, 34) 600') b.push('styl znakowy ' + s0.pogr);
+    if (s0.ikony < 3) b.push('ikony w tekście: ' + s0.ikony);
+    if (!s0.obrot.some((t) => /rotate\(90deg\)/.test(t)) || !s0.obrot.some((t) => /rotate\(180deg\)/.test(t))) b.push('obrót obrazków ' + s0.obrot);
+    if (s0.stopka !== 'Ogród · strona 2') b.push('pola wbudowane w stopce: ' + s0.stopka);
+    if (!s0.przycisk) b.push('brak przycisku Instrukcja');
+    // Zrzut stron (pomniejszenie, żeby weszły 4 strony)
+    await js("pokazWidok('instrukcja'); document.getElementById('ramkiInstrukcji').checked = false");
+    wc.setZoomFactor(0.45); await czekaj(700);
+    fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-instrukcja.png', (await wc.capturePage()).toPNG());
+    wc.setZoomFactor(1);
+    let zmiana = null;
+    if (!jestPrzykladem(szablon)) {
+      const md = path.join(projekt, 'Instrukcja', 'instrukcja.md'), oryginal = fs.readFileSync(md, 'utf8');
+      const czas = async (od) => { for (let i = 0; i < 40; i++) { await czekaj(250); const c = await js('INSTRUKCJA && INSTRUKCJA.czas'); if (c && c !== od) return c; } return null; };
+      const c0 = await js("document.querySelector('#podglad .karta').dataset.testInstrukcji = '1'; INSTRUKCJA.czas");
+      const dlugi = Array.from({ length: 12 }, (x, i) => `Akapit dopisany w teście numer ${i + 1}, który ma kilka słów, żeby zająć wiersz albo dwa w ramce strony czwartej.`).join('\n\n');
+      fs.writeFileSync(md, oryginal + '\n' + dlugi + '\n\n<następna_ramka>\n\nPo znaczniku.\n\nI jeszcze jeden akapit.\n');
+      const c1 = await czas(c0);
+      const s1 = await js(`({ uwagi: [...UWAGI_INSTRUKCJI], panel: document.getElementById('uwagi').innerText, karty: !!document.querySelector('#podglad .karta[data-test-instrukcji]'),
+        plus: document.querySelectorAll('#strony .plus-ramki').length, przep: [...document.querySelectorAll('#strony .przepelniona')].map((e) => e.closest('.karta.strona').dataset.strona), ramki: INSTRUKCJA.ramki })`);
+      fs.writeFileSync(md, oryginal);
+      const c2 = await czas(c1);
+      const s2 = await js(`({ uwagi: [...UWAGI_INSTRUKCJI], plus: document.querySelectorAll('#strony .plus-ramki').length, karty: !!document.querySelector('#podglad .karta[data-test-instrukcji]') })`);
+      const r4 = (s1.ramki || []).find((r) => r.strona === 4) || {};
+      const u = s1.uwagi.find((x) => /nie mieści się w ramce na stronie 4/.test(x)) || '';
+      zmiana = { c1: !!c1, c2: !!c2, uwaga: u, r4, przep: s1.przep, plus: s1.plus, kartyBezPrzebudowy: s1.karty && s2.karty, poPrzywroceniu: s2.uwagi };
+      if (!c1 || !c2) b.push('instrukcja nie odświeżyła się po zmianie pliku');
+      if (!/^instrukcja\.txt, wiersz \d+: tekst „przebieg” nie mieści się w ramce na stronie 4 – zostało \d+ akapit(y|ów)? \(ok\. \d+ znaków\), w tym 2 po <następna_ramka>/.test(u)
+        || !/Instrukcja: instrukcja\.txt, wiersz/.test(s1.panel) || r4.poZnaczniku !== 2 || !(r4.bloki >= 3) || !(r4.znaki > 100)) b.push('Uwaga o przepełnieniu ' + JSON.stringify({ u, r4 }));
+      if (s1.przep.join() !== '4' || s1.plus !== 1) b.push('oznaczenie przepełnionej ramki ' + JSON.stringify(s1.przep));
+      if (!s1.karty || !s2.karty) b.push('zmiana tekstu instrukcji przebudowała karty');
+      if (s2.uwagi.length || s2.plus) b.push('Uwagi po przywróceniu tekstu: ' + s2.uwagi.join(' | '));
+      // Przegląd #161: wyjątek w instrukcji nie przerywa budowy kart (Uwaga, zbudowano, karty); ⌘R zawsze przebudowuje karty;
+      // ikona użyta tylko w tekście instrukcji nie jest w raporcie „nieużywana”.
+      const wyjatek = await js(`(async () => {
+        const oryg = Instrukcja.parseDokument; window.zbudowano = false;
+        Instrukcja.parseDokument = () => { throw new Error('próba z testu'); };
+        try { await build(); } finally { Instrukcja.parseDokument = oryg; }
+        const w = { zbudowano: window.zbudowano, karty: document.querySelectorAll('#podglad .karta').length, uwaga: [...UWAGI_INSTRUKCJI].some((x) => /błąd przy składaniu instrukcji – próba z testu/.test(x)),
+          panel: /Instrukcja: błąd przy składaniu/.test(document.getElementById('uwagi').innerText) };
+        await build(); return { ...w, poNaprawie: [...UWAGI_INSTRUKCJI] };
+      })()`);
+      if (!wyjatek.zbudowano || !wyjatek.karty || !wyjatek.uwaga || !wyjatek.panel || wyjatek.poNaprawie.length) b.push('wyjątek w instrukcji ' + JSON.stringify(wyjatek));
+      await js("document.querySelector('#podglad .karta').dataset.testInstrukcji = '2'");
+      await js('odswiezKarty()');
+      if (await js("!!document.querySelector('#podglad .karta[data-test-instrukcji]')")) b.push('⌘R (odswiezKarty) nie przebudował kart');
+      fs.copyFileSync(path.join(projekt, 'Ikony', 'marchew.svg'), path.join(projekt, 'Ikony', 'tylko-instrukcja.svg'));
+      fs.writeFileSync(md, oryginal + '\nIkona tylko w instrukcji {tylko-instrukcja}.\n');
+      const c3 = await czas(await js('INSTRUKCJA.czas'));
+      const raport = await js("raportProjektu()");
+      fs.writeFileSync(md, oryginal); fs.rmSync(path.join(projekt, 'Ikony', 'tylko-instrukcja.svg'));
+      await czas(c3);
+      if (!c3 || /tylko-instrukcja/.test(raport)) b.push('raport: ikona z instrukcji jako nieużywana');
+      zmiana.przeglad = { wyjatek, raport: !/tylko-instrukcja/.test(raport) };
+    }
+    await js("pokazWidok('karty')");
+    instrukcja = { ok: !b.length, bledy: b, stan: I, zmiana };
+  }
   // Ramki przy cięciu na projekcie (#138): raport drukarni (pierwszy – z pomiarem z obrazu każdej karty) bez UWAG i BŁĘDÓW
   // z pomiaru obrazu i bez kart niezmierzonych; INFO nie liczy się do wyniku. Czas pierwszego raportu – w wyniku.
   let ramkiPrzyklad = null;
@@ -4168,8 +4272,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
     && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!obrotKarty || obrotKarty.pominiety || obrotKarty.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!filtrWTrakcie || filtrWTrakcie.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!naroznikTest || naroznikTest.ok) && (!otokTest || otokTest.ok) && (!stykTest || stykTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, obrotKarty, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, naroznik: naroznikTest, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!naroznikTest || naroznikTest.ok) && (!otokTest || otokTest.ok) && (!stykTest || stykTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok) && (!instrukcja || instrukcja.ok);
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, obrotKarty, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, naroznik: naroznikTest, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, instrukcja, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
