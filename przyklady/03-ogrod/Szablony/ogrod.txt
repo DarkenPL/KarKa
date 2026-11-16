@@ -6,6 +6,7 @@
 
 ; ── Wspólne ───────────────────────────────────────────────────────
 PROJEKT = Ogród                           ; nazwa gry w plikach JPG i PDF
+INSTRUKCJA = Instrukcja/instrukcja.txt    ; instrukcja gry: strony, ramki i style (Widok → Instrukcja gry, ⌘2)
 KARTA    = 63, 88
 CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#000
 

@@ -1,0 +1,59 @@
+; ═══════════════════════════════════════════════════════════════════
+;  INSTRUKCJA GRY – szablon stron (wskazuje go INSTRUKCJA = … w Szablony/ogrod.txt)
+;  • strony A6 ze spadem, wzorzec wspólny i osobny dla stron lewych i prawych,
+;  • ramki tekstu (RAMKA) z instrukcja.md, style akapitów (STYL), podpisy (TEKST styl=…),
+;  • strona 3 – rysunek: obrazki obrócone, pola z zaokrąglonymi rogami i obrysem.
+;  Widok → Instrukcja gry (⌘2); tekst odświeża się po zapisie instrukcja.md.
+; ═══════════════════════════════════════════════════════════════════
+
+DOKUMENT = 105, 148, spad=3                ; strona w mm (A6), spad do druku
+TREŚĆ    = Instrukcja/instrukcja.md        ; tekst w Markdownie
+
+KOLOR = zieleń, #4E7A3A
+KOLOR = ziemia, #F4EEDF
+
+; ── Style akapitów (wbudowane: akapit, h1–h3, lista1–3, numer1–3) ──
+STYL = akapit, czcionka="EB Garamond", rozmiar=9.5, interlinia=1.25, wyrównanie=wyjustuj, po=1.5, kolor=#000
+STYL = h1, czcionka="Patrick Hand", rozmiar=20, kolor=zieleń, wyrównanie=lewo, pogrubienie=nie, po=2
+STYL = h2, czcionka="Patrick Hand", rozmiar=14, kolor=zieleń, wyrównanie=lewo, pogrubienie=nie, przed=2, po=1
+STYL = lista1, wyrównanie=lewo, znak="•", kolor_znaku=zieleń, pogrubienie_znaku
+STYL = lista2, wyrównanie=lewo, znak="–", czcionka_znaku="Patrick Hand"
+STYL = numer1, wyrównanie=lewo, numer="1.", czcionka_znaku="Patrick Hand", rozmiar_znaku=11, kolor_znaku=zieleń
+STYL = faza, bazuje=numer1, wciecie=14, numer="Faza 1:", wyrównanie=lewo, po=1    ; inna lista numerowana – <styl=faza>
+STYL = ramka, bazuje=akapit, wyrównanie=środek, kursywa, po=0
+STYL = podpis, czcionka="Patrick Hand", rozmiar=10, kolor=#000, wyrównanie=środek
+STYL_ZNAKOWY = pogrubienie, czcionka="EB Garamond", grubość=600, kolor=#2E4A22
+
+; ── Wzorzec: tło i pasek przy grzbiecie (lewa strona – pasek z prawej, prawa – z lewej) ──
+[WZORZEC]
+TŁO = ziemia
+TEKST = 10, 141, 85, 4, "[_projekt] · strona [_numer]", styl=podpis, rozmiar=7
+[WZORZEC LEWA]
+PROSTOKĄT = 101, -3, 7, 154, kolor=zieleń
+[WZORZEC PRAWA]
+PROSTOKĄT = -3, -3, 7, 154, kolor=zieleń
+
+[STRONA 1]
+TEKST   = 10, 12, 85, 20, "Ogród", czcionka="Patrick Hand", rozmiar=40, kolor=zieleń, wyrównanie=środek, pion=środek
+OBRAZEK = 32, 34, 40, 40, Ikony/slonecznik.svg
+RAMKA   = 12, 80, 81, 56, tekst=wstęp, kolor=#ffffff, obwódka=0.35, kolor_obwódki=zieleń, zaokrąglenie=3, margines=3, pion=środek
+
+[STRONA 2]
+RAMKA = 10, 10, 85, 128, tekst=przygotowanie
+
+[STRONA 3]
+TEKST     = 10, 10, 85, 10, "Przykładowy ogród", styl=podpis, rozmiar=14
+PROSTOKĄT = 10, 24, 85, 52, kolor=#ffffff, obwódka=0.35, kolor_obwódki=zieleń, zaokrąglenie=3
+OBRAZEK   = 16, 30, 18, 18, Ikony/marchew.svg
+OBRAZEK   = 43, 30, 18, 18, Ikony/pomidor.svg, obrót=-15
+OBRAZEK   = 70, 30, 18, 18, Ikony/dab.svg, obrót=90
+TEKST     = 12, 50, 26, 6, "Marchew", styl=podpis
+TEKST     = 39, 50, 26, 6, "Pomidor", styl=podpis
+TEKST     = 66, 50, 26, 6, "Dąb", styl=podpis
+TEKST     = 12, 60, 81, 12, "grządka „warzywa” · grządka „drzewa”", styl=podpis, rozmiar=8, kolor=#6b6b6b
+OBRAZEK   = 40, 84, 25, 25, Ikony/burza.svg, obrót=180
+TEKST     = 20, 112, 65, 8, "Burza do góry nogami", styl=podpis, obrót=180
+RAMKA     = 15, 122, 75, 14, tekst=podpis, pion=środek
+
+[STRONA 4]
+RAMKA = 10, 10, 85, 128, tekst=przebieg

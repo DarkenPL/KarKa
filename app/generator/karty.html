@@ -144,7 +144,7 @@ label { display: inline-flex; gap: 6px; align-items: center; }
   display: flex; flex-direction: column; background: #fbfaf8; border-right: 1px solid #d8d3cb;
 }
 #edytor[hidden] { display: none; }
-body.z-edytorem #podglad, body.z-edytorem .uwagi, body.z-edytorem .start, body.z-edytorem .raport, body.z-edytorem .wersja-baner { margin-left: calc(max(var(--ed-w), 360px) + 16px); }
+body.z-edytorem #podglad, body.z-edytorem #instrukcja, body.z-edytorem .uwagi, body.z-edytorem .start, body.z-edytorem .raport, body.z-edytorem .wersja-baner { margin-left: calc(max(var(--ed-w), 360px) + 16px); }
 .ed-pasek { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e3ded6; font-size: 13px; }
 .ed-pasek b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ed-pasek #edStan { color: #6b655d; flex: 1; }
@@ -187,11 +187,37 @@ body.z-edytorem #podglad, body.z-edytorem .uwagi, body.z-edytorem .start, body.z
 button.wlaczony { background: #4a453f; border-color: #4a453f; color: #fff; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   Instrukcja gry (#160): strony jak karty (.karta.strona), ramki tekstu z Markdownu w .el.ksztalt[data-ramka].
+   Widok kart i instrukcji: niewidoczny ma wysokość 0 (nie display:none) – pomiar tekstu i kart działa w obu.
+   ═══════════════════════════════════════════════════════════════════════════ */
+body.widok-instrukcja #podglad, body.widok-instrukcja #podgladRewersy, body:not(.widok-instrukcja) #instrukcja { height: 0; overflow: hidden; }
+body.widok-instrukcja #start { display: none; }
+.instrukcja-pasek { display: flex; gap: 14px; align-items: center; margin: 12px 16px 0; font-size: 13px; color: #4a453f; }
+.instrukcja-pasek .opis { color: #8a8378; font-size: 12px; }
+#strony { display: flex; flex-wrap: wrap; gap: 22px 30px; padding: 12px 16px 16px; align-items: flex-start; }
+.rozkladowka { display: flex; align-items: flex-start; }
+.rozkladowka.pierwsza { padding-left: var(--szer-strony, 0); }
+.strona-podglad { margin: 0; position: relative; }
+.strona-podglad figcaption { text-align: center; font-size: 11px; color: #8a8378; margin-top: 4px; }
+.karta.strona { box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+.karta.strona.za-dlugi { outline: 2px dashed #d00; outline-offset: 3px; }
+.strona .el.ksztalt[data-ramka] { overflow: hidden; }
+.strona .ramka-tekst { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-start; --pole: 1em; }
+.strona .ramka-tekst > .blok { flex: none; overflow-wrap: break-word; --pole: 1em; }
+.strona .ramka-tekst > .blok:first-child { margin-top: 0 !important; }
+.strona .blok > .znak { display: inline-block; text-indent: 0; white-space: nowrap; }
+.strona .el.ksztalt.przepelniona { outline: 0.5mm solid #d00; }
+.strona .plus-ramki { position: absolute; width: 3mm; height: 3mm; background: #d00; color: #fff; font: bold 2.6mm/3mm sans-serif; text-align: center; z-index: 3; }
+#instrukcja.z-ramkami .strona .el.ksztalt[data-ramka] { outline: 0.25mm dashed #2f6fd6; }
+#instrukcja.z-ramkami .strona .el.tekst { outline: 0.2mm dotted #2f6fd6; }
+#instrukcja.z-ramkami .strona .el.ksztalt.przepelniona { outline: 0.5mm solid #d00; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
    Druk
    ═══════════════════════════════════════════════════════════════════════════ */
 @media print {
   body { background: #fff; }
-  .pasek, .uwagi, #podglad, #podgladRewersy, .start, #edytor { display: none !important; }
+  .pasek, .uwagi, #podglad, #podgladRewersy, #instrukcja, .start, #edytor { display: none !important; }
   #druk { display: block; }
   .arkusz { position: relative; break-after: page; overflow: hidden; margin: 0; }
   html, body { margin: 0 !important; padding: 0 !important; }
@@ -210,6 +236,7 @@ button.wlaczony { background: #4a453f; border-color: #4a453f; color: #fff; }
 <div class="pasek" id="pasek">
   <button id="edytorPrzycisk" disabled title="Edytor szablonu (⌥⌘E)">Edytor</button>
   <button id="historiaPrzycisk" disabled title="Historia wersji szablonu i plików danych">Historia</button>
+  <button id="widokPrzycisk" hidden title="Strony instrukcji gry (⌘2) albo karty (⌘1)">Instrukcja</button>
   <button id="raportPrzycisk" disabled title="Duplikaty ID, puste pola, nieużywane kolumny, obrazki i ikony">Raport</button>
   <label title="Które talie pokazać w podglądzie">Talia: <select id="filtr"><option value="">Wszystkie talie</option></select></label>
   <span class="odstep"></span>
@@ -244,8 +271,13 @@ button.wlaczony { background: #4a453f; border-color: #4a453f; color: #fff; }
 
 <div id="podglad"></div>
 <div id="podgladRewersy" style="display:none"></div>
+<div id="instrukcja"><div class="instrukcja-pasek"><b>Instrukcja</b><span class="opis" id="instrukcjaOpis"></span>
+  <label title="Obrys ramek tekstu i pól TEKST na stronach"><input type="checkbox" id="ramkiInstrukcji"> Pokaż ramki</label></div><div id="strony"></div></div>
 <div id="druk"></div>
+<style id="czcionki-instrukcji"></style>
+<style id="style-instrukcji"></style>
 
+<script src="/.app/instrukcja.js"></script>
 <script>
 'use strict';
 
@@ -320,12 +352,24 @@ async function loadFromServer({ tylkoNowe = false } = {}) {
   }
   // 2) pliki danych i inne pliki wskazane w szablonie
   const refs = new Set([CONFIG.plikIkon]);
+  let sciezkaInstr = '';
   if (tf) {
     const t = parseTemplate(await tf.text(), tf.name);
     t.dane.forEach((d) => refs.add(plikDanych(d)[0]));
     t.pliki.forEach((d) => refs.add(d));
+    if (t.instrukcja) { sciezkaInstr = t.instrukcja; refs.add(t.instrukcja); }
   }
   await Promise.all([...refs].map(put));
+  // 2b) instrukcja gry (#160): pliki tekstu (TREŚĆ) i pliki wskazane na stronach (obrazki, czcionki)
+  const plikiInstr = new Set();
+  const fi = sciezkaInstr && next.get(norm(sciezkaInstr));
+  if (sciezkaInstr) plikiInstr.add(norm(sciezkaInstr));
+  if (fi && window.Instrukcja) {
+    const { tresc, pliki } = plikiInstrukcji(await fi.text(), sciezkaInstr);
+    tresc.forEach((r) => { refs.add(r); plikiInstr.add(norm(r)); });
+    pliki.forEach((r) => refs.add(r));
+    await Promise.all([...refs].map(put));
+  }
   // 3) obrazki i ikony, do których odwołują się dane, oraz ikony z folderów Ikony/ i Icons/
   const imgs = new Set(Object.values(CONFIG.ikonyDomyslne).map((v) => v[0]));
   ikonyZFolderow = await znajdzIkony();
@@ -339,10 +383,17 @@ async function loadFromServer({ tylkoNowe = false } = {}) {
   }
   await Promise.all([...imgs].map(put));
   serverWanted = [...refs].filter((r) => !next.has(norm(r)));
+  // Zmieniły się tylko pliki instrukcji (szablon stron, tekst) – przebudowa samej instrukcji, karty zostają (#160).
+  // Treść szablonu musi być tą, z której zbudowano karty: edytor buduje bez loadFromServer, a zlecenie z dysku
+  // podmienia treść bez zmiany daty pliku (#160 – blok zlecenia).
+  const odcisk = [...next].filter(([k]) => !plikiInstr.has(k)).map(([k, f]) => k + '@' + f.lastModified + ':' + f.size).sort().join('|') + '#' + spisIkon;
+  const tylkoInstrukcja = !tylkoNowe && window.zbudowano && odcisk === ODCISK_KART && !!tf && skrot(await tf.text()) === ZBUDOWANY_SZABLON;
   files = next; serverPaths = paths;
-  await build();
+  if (tylkoInstrukcja) await budujInstrukcje(); else await build();
+  ODCISK_KART = odcisk;
   if (!tylkoNowe) zapiszHistorie();
 }
+let ODCISK_KART = '', ZBUDOWANY_SZABLON = '';            // pliki projektu poza plikami instrukcji – przy zmianie tylko instrukcji karty się nie przebudowują
 
 // Odcisk plików projektu. Listy są sortowane: pliki wczytują się równolegle, więc kolejność w serverPaths
 // bywa za każdym razem inna – bez sortowania każde przeładowanie zmieniało odcisk i odświeżanie kręciło się w kółko.
@@ -678,6 +729,7 @@ function parseTemplate(text, plik) {
         break;
       case 'stol': out.bledy.push(`${where}: komenda STÓŁ nie jest już potrzebna – eksport do playingcards.io tworzy nowy pokój. Możesz usunąć ten wiersz.`); break;
       case 'projekt': if (args[0]) out.projekt = args[0].trim(); break;
+      case 'instrukcja': out.instrukcja = (args[0] || '').trim(); break;      // szablon stron instrukcji gry (#160)
       case 'wersja': out.wersja = (args[0] || '').trim(); break;
       default:
         if (!ELEMENTY.includes(kom)) { out.bledy.push(`${where}: nieznana komenda ${m[1].trim()}`); return; }
@@ -1114,7 +1166,7 @@ function renderCard(tpl, cmds, row, ctx) {
       const stylObw = { przerywana: 'dashed', kropkowana: 'dotted' }[plain(o.styl_obwodki || '')] || 'solid';
       if (o.obwodka) st += `border:${num(o.obwodka)}mm ${stylObw} ${colorOf(o.kolor_obwodki || '#000000') || '#000'};`;
       if (o.krycie) { const k = krycieOf(o.krycie, c.where); if (k !== null) st += `opacity:${k};`; }
-      html += `<div class="el ksztalt" style="${esc(st)}"></div>`;
+      html += `<div class="el ksztalt"${c.ramka !== undefined ? ` data-ramka="${c.ramka}"` : ''} style="${esc(st)}"></div>`;
     } else if (c.kom === 'tekst') {
       const tr = field(c.args[4], !f.has('bez_formatowania'));
       if (tr.empty || tr.s.trim() === '') continue;
@@ -1327,7 +1379,7 @@ async function zbudujTeraz() {
   }
   const tekstSzablonu = await tplFiles[0][1].text();
 
-  TALIE = []; PALETA = {};
+  TALIE = []; PALETA = {}; INSTRUKCJA_PLIK = ''; ZBUDOWANY_SZABLON = skrot(tekstSzablonu);
   RAPORT = { tekst: tekstSzablonu, talie: [], icons, formatowanie: new Set() };
   PROJEKT = SZABLON.split('/').pop().replace(/\.txt$/i, '').trim() || 'NowaGra';
   WERSJA = '';
@@ -1338,6 +1390,7 @@ async function zbudujTeraz() {
     for (const [n, v] of t.kolory) { PALETA[n.toLowerCase()] = v; PALETA[plain(n)] = v; }
     if (t.projekt) PROJEKT = t.projekt;
     if (t.wersja) WERSJA = t.wersja;
+    INSTRUKCJA_PLIK = t.instrukcja || '';
     for (const talia of t.talie) {
       if (TALIE.some((x) => x.nazwa === talia.nazwa)) warn.add(`${talia.plik}: talia „${talia.nazwa}” występuje dwa razy – pominięto drugą (zmień NAZWA).`);
       else TALIE.push(talia);
@@ -1464,16 +1517,278 @@ async function zbudujTeraz() {
   }
   edytorBledy(linie);
 
+  UWAGI_KART = warn;
+  await zbudujInstrukcje();
+  pokazUwagi();
+  if (!$('raport').hidden) pokazRaport(true);
+  window.zbudowano = true;                       // zlecenia z pliku czekają na pierwsze karty
+}
+// Panel Uwag: Uwagi kart (z odnośnikiem do wiersza szablonu w edytorze) i Uwagi instrukcji z dopiskiem „Instrukcja:” (#160).
+let UWAGI_KART = new Set(), UWAGI_INSTRUKCJI = new Set();
+function pokazUwagi() {
+  const plikSzablonu = SZABLON.split('/').pop();
+  const liniaUwagi = (w) => { const m = /^(.+?), wiersz (\d+): /.exec(w); return m && m[1] === plikSzablonu ? +m[2] : 0; };
+  const lista = [...UWAGI_KART, ...[...UWAGI_INSTRUKCJI].map((w) => 'Instrukcja: ' + w)];
   const u = $('uwagi');
-  u.innerHTML = warn.size ? '<b>Uwagi:</b><ul>' + [...warn].map((w) => {
+  u.innerHTML = lista.length ? '<b>Uwagi:</b><ul>' + lista.map((w) => {
     const n = liniaUwagi(w);
     return n ? `<li><a href="#" data-linia="${n}">${esc(w)}</a></li>` : '<li>' + esc(w) + '</li>';
   }).join('') + '</ul>' : '';
   for (const a of u.querySelectorAll('[data-linia]')) a.onclick = (e) => { e.preventDefault(); idzDoLinii(+a.dataset.linia); };
-  u.classList.toggle('widoczne', warn.size > 0);
-  if (!$('raport').hidden) pokazRaport(true);
-  window.zbudowano = true;                       // zlecenia z pliku czekają na pierwsze karty
+  u.classList.toggle('widoczne', lista.length > 0);
 }
+
+// ── Instrukcja gry (#160, etap 1) ───────────────────────────────────────────
+// Szablon stron (INSTRUKCJA = … w szablonie kart) + tekst w Markdownie (TREŚĆ = …). Parser i style – instrukcja.js
+// (window.Instrukcja, test w Node: scripts/test-instrukcja.js). Tu: rysowanie stron (renderCard – strona jak karta,
+// RAMKA jako PROSTOKĄT z data-ramka), tekst ramek (bloki w stylach akapitów), pomiar przepełnienia, widok i Uwagi.
+// Karty: bez zmian HTML (data-ramka tylko przy c.ramka, którego szablony kart nie mają).
+let INSTRUKCJA_PLIK = '';        // INSTRUKCJA = … w szablonie kart (ścieżka względem folderu projektu)
+let INSTRUKCJA = null;           // ostatnia zbudowana instrukcja – stan dla testu i zleceń
+let WIDOK = 'karty';             // Widok → Karty (⌘1) / Instrukcja (⌘2)
+const pomocInstrukcji = () => ({ splitArgs, unq, plain, stripComment, num });
+
+// Pliki do wczytania z szablonu instrukcji: teksty (TREŚĆ) i pliki wskazane wprost (obrazki, czcionki).
+function plikiInstrukcji(text, rel) {
+  const plik = rel.split('/').pop();
+  const d = Instrukcja.parseDokument(text, plik, pomocInstrukcji());
+  const linie = text.replace(/^﻿/, '').split(/\r?\n/);
+  const bierz = new Set([...d.globalne, ...d.wzorzec.wspolny, ...d.wzorzec.lewa, ...d.wzorzec.prawa, ...d.strony.flatMap((s) => s.linie)]);
+  const t = parseTemplate(linie.map((l, i) => (bierz.has(i) ? (d.zamiany.has(i) ? d.zamiany.get(i) : l) : '')).join('\n'), plik);
+  return { tresc: d.tresc, pliki: t.pliki };
+}
+
+// Zmiana tylko plików instrukcji: przebudowa samej instrukcji w tej samej kolejce co karty.
+function budujInstrukcje() {
+  const p = KOLEJKA_BUDOWY.then(() => KONIEC_EKSPORTU).then(async () => { await zbudujInstrukcje(); pokazUwagi(); });
+  KOLEJKA_BUDOWY = p.catch(() => {});
+  return p;
+}
+
+const odmianaAkapitow = (n) => n === 1 ? 'akapit' : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) ? 'akapity' : 'akapitów';
+
+// CSS stylów akapitów: klasa .s<N> na bloku, znak listy / numer w .znak (wcięcie wiszące: tekst od wcięcie=,
+// znak od wcięcie_znaku=). Styl znakowy: <b> (**…**) i <i> (*…*) na stronach.
+function cssStylow(d, warn) {
+  const r = [], nazwy = Object.keys(d.style);
+  const kol = (v, gdzie) => { const k = color(v, `${d.plik}: ${gdzie}`, warn); return k ? k : null; };
+  nazwy.forEach((n, i) => {
+    const s = d.style[n], st = [];
+    if (s.czcionka) st.push('font-family:' + fontFamily(s.czcionka));
+    st.push(`font-size:${s.rozmiar ?? 10}pt`, `line-height:${s.interlinia ?? 1.2}`, 'text-align:' + (ALIGN_H[s.wyrownanie] || 'left'),
+      `margin-top:${s.przed || 0}mm`, `margin-bottom:${s.po || 0}mm`, `font-weight:${s.pogrubienie ? 600 : 400}`);
+    if (s.kolor) { const k = kol(s.kolor, `STYL ${n}`); if (k) st.push('color:' + k); }
+    const znak = s.znak || s.numer, wc = s.wciecie || 0, wz = s.wciecie_znaku ?? Math.max(0, wc - 4);
+    if (wc) st.push(`padding-left:${wc}mm`);
+    if (znak) st.push(`text-indent:${wz - wc}mm`); else if (s.wciecie_pierwszego) st.push(`text-indent:${s.wciecie_pierwszego}mm`);
+    if (s.wciecie_prawe) st.push(`padding-right:${s.wciecie_prawe}mm`);
+    if (s.wersaliki) st.push('text-transform:uppercase');
+    if (s.kursywa) st.push('font-style:italic');
+    if (s.ikony) st.push('--ik:' + s.ikony);
+    r.push(`.strona .blok.s${i}{${st.join(';')}}`);
+    if (znak) {
+      const z = [`min-width:${Math.max(0, wc - wz)}mm`, `font-weight:${s.pogrubienie_znaku ? 600 : 'inherit'}`];
+      if (s.czcionka_znaku) z.push('font-family:' + fontFamily(s.czcionka_znaku));
+      if (s.rozmiar_znaku) z.push(`font-size:${s.rozmiar_znaku}pt`);
+      if (s.kolor_znaku) { const k = kol(s.kolor_znaku, `STYL ${n}`); if (k) z.push('color:' + k); }
+      r.push(`.strona .blok.s${i}>.znak{${z.join(';')}}`);
+    }
+  });
+  for (const [n, sel, dom] of [['pogrubienie', 'b, .strona strong', 'font-weight:600'], ['kursywa', 'i, .strona em', 'font-style:italic']]) {
+    const s = d.znakowe[n]; if (!s) continue;
+    const st = [dom];
+    if (s.czcionka) st.push('font-family:' + fontFamily(s.czcionka));
+    if (s.grubosc && !Number.isNaN(num(s.grubosc))) st.push('font-weight:' + num(s.grubosc));
+    if (s.kolor) { const k = kol(s.kolor, `STYL_ZNAKOWY ${n}`); if (k) st.push('color:' + k); }
+    r.push(`.strona ${sel}{${st.join(';')}}`);
+  }
+  return { css: r.join('\n'), klasa: new Map(nazwy.map((n, i) => [n, 's' + i])) };
+}
+
+// Treść akapitu: ikony {…}, **pogrubienie**, *kursywa*, ~~przekreślenie~~, <br> i znaczniki jak na kartach (<u>, <small>…).
+function trescBloku(tekst, pt, warn, where) {
+  const w = { add: (x) => warn.add(`${where}: ${x}`) };
+  let h = renderText(tekst, RAPORT.icons || {}, w).replace(/&lt;br\s*\/?&gt;/gi, '<br>')
+    .replace(/\*\*([\s\S]+?)\*\*/g, '<b>$1</b>').replace(/\*([^*\s](?:[^*]*?[^*\s])?)\*/g, '<i>$1</i>');
+  if (h.includes('~~')) h = h.replace(/~~([\s\S]+?)~~/g, '<s>$1</s>');
+  if (!h.includes('&lt;')) return h;
+  const z = znacznikiTekstu(h, pt);
+  if (z.niedomkniete.length) w.add(`niedomknięty znacznik ${z.niedomkniete.map((x) => '<' + x + '>').join(' ')} – domknięty na końcu akapitu`);
+  if (z.nadmiarowe.length) w.add(`znacznik ${z.nadmiarowe.map((x) => '</' + x + '>').join(' ')} bez otwarcia – zostaje tekstem`);
+  if (z.zle.length) w.add(`${z.zle.join(' ')} – potrzebny rozmiar w pt, np. <rozmiar=12> – zostaje tekstem`);
+  return z.html;
+}
+
+function blokHtml(b, d, css, warn, plikMd) {
+  let nazwa = Instrukcja.stylBloku(b);
+  if (!d.style[nazwa]) {
+    const zast = Instrukcja.stylBloku({ ...b, styl: null });
+    warn.add(`${plikMd}, wiersz ${b.linia}: nie ma stylu „${b.styl}” (STYL = ${b.styl}, … w szablonie instrukcji) – użyto ${zast}`);
+    nazwa = zast;
+  }
+  const s = d.style[nazwa];
+  const znak = b.znacznik ? `<span class="znak">${esc(b.znacznik)}</span>` : '';
+  return `<div class="blok ${css.klasa.get(nazwa)}" data-styl="${esc(nazwa)}" data-linia="${b.linia}">${znak}${trescBloku(b.tekst, s.rozmiar ?? 10, warn, `${plikMd}, wiersz ${b.linia}`)}</div>`;
+}
+
+// Ile tekstu nie mieści się w ramce: akapity wystające poza dolny brzeg (bez marginesu) i ich niewidoczne znaki
+// (wiersz ucięty u dołu też jest niewidoczny). Pomiar bez obrotu i od góry ramki (pion= nie zmienia wyniku).
+function zmierzRamke(el) {
+  const t = el.firstElementChild;
+  if (!t) return { bloki: 0, znaki: 0 };
+  const obrot = el.style.transform, pion = t.style.justifyContent;
+  el.style.transform = 'none'; t.style.justifyContent = 'flex-start';
+  try {
+    const dol = t.getBoundingClientRect().top + t.clientTop + t.clientHeight - parseFloat(getComputedStyle(t).paddingBottom) + 0.5;
+    const r = document.createRange();
+    let bloki = 0, znaki = 0;
+    for (const b of t.children) {
+      const br = b.getBoundingClientRect();
+      if (br.bottom <= dol) continue;
+      let ukryte = 0;
+      const w = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
+      for (let n = w.nextNode(); n; n = w.nextNode()) {
+        const len = n.nodeValue.length;
+        if (!len || n.parentElement.classList.contains('znak')) continue;
+        r.selectNodeContents(n);
+        const rs = r.getClientRects();
+        if (!rs.length || rs[rs.length - 1].bottom <= dol) continue;
+        if (rs[0].bottom > dol) { ukryte += len; continue; }
+        let lo = 0, hi = len;                        // najdłuższy widoczny początek węzła
+        while (lo < hi) {
+          const m = (lo + hi + 1) >> 1;
+          r.setStart(n, 0); r.setEnd(n, m);
+          const q = r.getClientRects();
+          if (q.length && q[q.length - 1].bottom <= dol) lo = m; else hi = m - 1;
+        }
+        ukryte += len - lo;
+      }
+      if (ukryte || br.top >= dol) { bloki++; znaki += ukryte; }
+    }
+    return { bloki, znaki };
+  } finally { el.style.transform = obrot; t.style.justifyContent = pion; }
+}
+
+async function zbudujInstrukcje() {
+  const warn = new Set();
+  UWAGI_INSTRUKCJI = warn;
+  const box = $('strony'), opis = $('instrukcjaOpis');
+  $('widokPrzycisk').hidden = !INSTRUKCJA_PLIK;
+  INSTRUKCJA = null;
+  const pusto = (t) => { box.innerHTML = t ? `<div class="start"><p>${t}</p></div>` : ''; opis.textContent = ''; $('style-instrukcji').textContent = ''; };
+  if (!INSTRUKCJA_PLIK) return pusto('Projekt nie ma instrukcji gry. Dodaj w szablonie kart <code>INSTRUKCJA = Instrukcja/instrukcja.txt</code> – opis w dokumentacji (Komendy szablonów → Instrukcja gry).');
+  if (!window.Instrukcja) { warn.add('nie wczytano modułu instrukcji (instrukcja.js)'); return pusto(''); }
+  const f = files.get(norm(INSTRUKCJA_PLIK));
+  if (!f) { warn.add(`nie znaleziono pliku ${INSTRUKCJA_PLIK} (komenda INSTRUKCJA w szablonie kart)`); return pusto(''); }
+  const plik = INSTRUKCJA_PLIK.split('/').pop(), h = pomocInstrukcji();
+  const tekst = await f.text();
+  const d = Instrukcja.parseDokument(tekst, plik, h);
+  d.bledy.forEach((b) => warn.add(b));
+  const teksty = new Map();
+  for (const t of d.tresc) {
+    const mf = files.get(norm(t));
+    if (!mf) { warn.add(`${plik}: nie znaleziono pliku tekstu ${t} (TREŚĆ)`); continue; }
+    const nazwaMd = t.split('/').pop(), md = Instrukcja.parsujMarkdown(await mf.text(), nazwaMd, h);
+    md.bledy.forEach((b) => warn.add(b));
+    for (const x of md.teksty) {
+      if (teksty.has(x.nazwa)) teksty.get(x.nazwa).bloki.push(...x.bloki);
+      else teksty.set(x.nazwa, { ...x, plik: nazwaMd });
+    }
+  }
+  if (!d.w || !d.h || !d.strony.length) return pusto('');
+  const linie = tekst.replace(/^﻿/, '').split(/\r?\n/);
+  // Kolory, czcionki z pliku i Google – z wierszy działających w całym pliku (KOLOR, CZCIONKA_PLIK, CZCIONKA_GOOGLE).
+  const glob = parseTemplate(Instrukcja.tekstCzesci(linie, d, { nr: 1, bezWzorca: true, linie: [] }, 'strona'), plik);
+  for (const [n, v] of glob.kolory) { PALETA[n.toLowerCase()] = v; PALETA[plain(n)] = v; }
+  const fontCss = [];
+  for (const { nazwa, plik: pf } of glob.czcionki) {
+    const u = fileUrl(pf);
+    if (u) fontCss.push(`@font-face { font-family: "${nazwa.replace(/"/g, '')}"; src: url("${u}"); }`);
+    else warn.add(`${plik}: brak pliku czcionki ${pf}`);
+  }
+  $('czcionki-instrukcji').textContent = fontCss.join('\n');
+  for (const g of glob.google) if (!googleFonts.has(g)) {
+    googleFonts.add(g);
+    const l = document.createElement('link'); l.rel = 'stylesheet';
+    const [fam, axes] = g.split(':');
+    l.href = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(fam.trim()).replace(/%20/g, '+') + (axes ? ':' + axes.trim() : '') + '&display=swap';
+    document.head.appendChild(l);
+  }
+  const css = cssStylow(d, warn);
+  $('style-instrukcji').textContent = css.css;
+  // Strony: wzorzec (wspólny + lewy/prawy) pod elementami strony, rysowane jak karta.
+  const komendy = (txt) => { const t = parseTemplate(txt, plik); t.bledy.forEach((b) => warn.add(b)); return t.talie[0].awers; };
+  const wzorce = new Map();
+  const wbudowane = { wersja: WERSJA, projekt: PROJEKT, talia: '', liczba: d.strony.length, data: new Date().toLocaleDateString('pl-PL') };
+  const tal = { w: d.w, h: d.h, spad: d.spad, karta: {}, rewers: [] };
+  const strona = (s) => {
+    const klucz = s.bezWzorca ? '-' : s.nr % 2 ? 'prawa' : 'lewa';
+    if (!wzorce.has(klucz)) wzorce.set(klucz, komendy(Instrukcja.tekstCzesci(linie, d, s, 'wzorzec')));
+    const wlasne = komendy(Instrukcja.tekstCzesci(linie, d, s, 'strona'));
+    for (const c of wlasne) {
+      const n = +((/, wiersz (\d+)$/.exec(c.where) || [])[1]);
+      if (c.kom === 'prostokat' && d.ramki.has(n)) c.ramka = n;
+    }
+    const label = `Strona ${s.nr}`;
+    const r = renderCard(tal, [...wzorce.get(klucz), ...wlasne], {}, { warn, icons: RAPORT.icons || {}, label: `${plik}, strona ${s.nr}`, plik, kolumny: true, wbudowane: { ...wbudowane, numer: s.nr, id: s.nr } });
+    return `<figure class="strona-podglad"><div class="karta strona" data-strona="${s.nr}" title="${esc(label)}" style="${esc(r.style)}">${r.html}</div><figcaption>${s.nr}</figcaption></figure>`;
+  };
+  // Rozkładówki: strona 1 sama (prawa), potem 2–3, 4–5…
+  let html = '';
+  for (let i = 0; i < d.strony.length; i = i ? i + 2 : 1)
+    html += `<div class="rozkladowka${i ? '' : ' pierwsza'}">${d.strony.slice(i, i ? i + 2 : 1).map(strona).join('')}</div>`;
+  box.style.setProperty('--szer-strony', d.w + 'mm');
+  box.innerHTML = html;
+  // Ramki tekstu: tekst o nazwie z tekst= (bez nazwy – początek pliku przed pierwszym <tekst=…>). Etap 1: jedna ramka
+  // na tekst; <następna_ramka> kończy tekst w ramce, dalszy ciąg czeka na wątki (0.8.1) i liczy się jako niezmieszczony.
+  const uzyte = new Map(), wypelnione = [];
+  for (const el of box.querySelectorAll('.el.ksztalt[data-ramka]')) {
+    const r = d.ramki.get(+el.dataset.ramka), gdzie = `${plik}, wiersz ${r.linia}`;
+    const t = teksty.get(r.tekst);
+    if (!t) { warn.add(`${gdzie}: nie ma tekstu ${r.tekst ? `„${r.nazwa}” (znacznik <tekst=${r.nazwa}> w pliku z TREŚĆ)` : 'bez nazwy (początek pliku z TREŚĆ przed pierwszym <tekst=…>)'}`); continue; }
+    if (uzyte.has(r.tekst)) { warn.add(`${gdzie}: tekst ${r.nazwa ? `„${r.nazwa}”` : 'bez nazwy'} jest już w ramce na stronie ${uzyte.get(r.tekst).strona} – łączenie ramek w wątek będzie w następnej wersji KarKi, ta ramka zostaje pusta`); continue; }
+    uzyte.set(r.tekst, r);
+    const bloki = Instrukcja.numeruj(t.bloki.map((b) => ({ ...b })), d.style);
+    const k = bloki.findIndex((b) => b.typ === 'nastepna');
+    const widoczne = k < 0 ? bloki : bloki.slice(0, k), reszta = k < 0 ? [] : bloki.slice(k + 1).filter((b) => b.typ !== 'nastepna');
+    el.innerHTML = `<div class="ramka-tekst" style="padding:${r.margines}mm;justify-content:${FLEX_V[r.pion] || 'flex-start'}">${widoczne.map((b) => blokHtml(b, d, css, warn, t.plik)).join('')}</div>`;
+    const zostalo = document.createElement('div');
+    zostalo.innerHTML = reszta.map((b) => blokHtml(b, d, css, new Set(), t.plik)).join('');
+    wypelnione.push({ el, r, t, reszta: { bloki: reszta.length, znaki: zostalo.textContent.length } });
+  }
+  for (const [n, t] of teksty) if (!uzyte.has(n) && t.bloki.length)
+    warn.add(`${t.plik}, wiersz ${t.linia}: tekst ${n ? `„${t.etykieta}”` : 'bez nazwy'} nie ma ramki – dodaj w ${plik} RAMKA = x, y, szer, wys${n ? ', tekst=' + t.etykieta : ''}`);
+  // Czcionki stylów przed pomiarem (inaczej wiersze łamią się czcionką zastępczą).
+  const rodziny = new Set(['"EB Garamond"']);
+  for (const s of [...Object.values(d.style), ...Object.values(d.znakowe)]) for (const c of [s.czcionka, s.czcionka_znaku]) if (c) rodziny.add(fontFamily(c));
+  await Promise.all([...rodziny].flatMap((r) => [`10pt ${r}`, `600 10pt ${r}`, `italic 10pt ${r}`].map((x) => document.fonts.load(x).catch(() => null))));
+  await waitForImages(box);
+  for (const l of new Set(fitAll(box))) warn.add(`${l}: tekst w polu TEKST nie mieści się nawet po zmniejszeniu (czerwona ramka)`);
+  const ramki = [];
+  for (const { el, r, t, reszta } of wypelnione) {
+    const m = zmierzRamke(el), bloki = m.bloki + reszta.bloki, znaki = m.znaki + reszta.znaki;
+    ramki.push({ strona: r.strona, linia: r.linia, tekst: r.nazwa, bloki, znaki, poZnaczniku: reszta.bloki });
+    if (!bloki) continue;
+    el.classList.add('przepelniona');
+    const x = parseFloat(el.style.left) + parseFloat(el.style.width) - 3, y = parseFloat(el.style.top) + parseFloat(el.style.height) - 3;
+    el.insertAdjacentHTML('afterend', `<div class="plus-ramki" style="left:${x}mm;top:${y}mm" title="Tekst nie mieści się w ramce">+</div>`);
+    warn.add(`${plik}, wiersz ${r.linia}: tekst ${r.nazwa ? `„${r.nazwa}”` : 'bez nazwy'} nie mieści się w ramce na stronie ${r.strona} – zostało ${bloki} ${odmianaAkapitow(bloki)} (ok. ${znaki} znaków)`
+      + (reszta.bloki ? `, w tym ${reszta.bloki} po <następna_ramka> – łączenie ramek w wątek będzie w następnej wersji KarKi` : ''));
+  }
+  INSTRUKCJA = { plik, strony: d.strony.length, w: d.w, h: d.h, spad: d.spad, ramki, czas: Date.now(), style: Object.keys(d.style) };
+  opis.textContent = `${d.strony.length} ${d.strony.length === 1 ? 'strona' : d.strony.length % 10 >= 2 && d.strony.length % 10 <= 4 && (d.strony.length % 100 < 12 || d.strony.length % 100 > 14) ? 'strony' : 'stron'} · ${d.w} × ${d.h} mm${d.spad ? ` · spad ${d.spad} mm` : ''} · ${INSTRUKCJA_PLIK} · odświeżono ${new Date().toLocaleTimeString('pl-PL')}`;
+}
+
+// Widok: karty albo strony instrukcji (niewidoczny ma wysokość 0 – pomiary działają w obu).
+function pokazWidok(w = WIDOK === 'karty' ? 'instrukcja' : 'karty') {
+  WIDOK = w === 'instrukcja' ? 'instrukcja' : 'karty';
+  document.body.classList.toggle('widok-instrukcja', WIDOK === 'instrukcja');
+  $('widokPrzycisk').textContent = WIDOK === 'instrukcja' ? 'Karty' : 'Instrukcja';
+  window.scrollTo(0, 0);
+  return WIDOK;
+}
+$('widokPrzycisk').onclick = () => pokazWidok();
+$('ramkiInstrukcji').onchange = (e) => $('instrukcja').classList.toggle('z-ramkami', e.target.checked);
 
 // ── Raport projektu ─────────────────────────────────────────────────────────
 // Duplikaty ID, puste pola używanych kolumn, nieużywane kolumny, obrazki i ikony.
