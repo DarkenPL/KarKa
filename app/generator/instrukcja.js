@@ -13,9 +13,9 @@
   // tylko podane opcje; style poza akapit bazują domyślnie na akapit (zmiana czcionki akapitu zmienia wszystkie).
   const WBUDOWANE = {
     akapit: { rozmiar: 10, interlinia: 1.2, po: 1.5, wyrownanie: 'lewo' },
-    h1: { rozmiar: 16, pogrubienie: true, przed: 3, po: 2 },
-    h2: { rozmiar: 13, pogrubienie: true, przed: 2.5, po: 1.5 },
-    h3: { rozmiar: 11, pogrubienie: true, przed: 2, po: 1 },
+    h1: { rozmiar: 16, pogrubienie: true, przed: 3, po: 2, z_nastepnym: true },
+    h2: { rozmiar: 13, pogrubienie: true, przed: 2.5, po: 1.5, z_nastepnym: true },
+    h3: { rozmiar: 11, pogrubienie: true, przed: 2, po: 1, z_nastepnym: true },
     lista1: { wciecie: 4, wciecie_znaku: 0, znak: '•', po: 0.8 },
     lista2: { wciecie: 8, wciecie_znaku: 4, znak: '–', po: 0.8 },
     lista3: { wciecie: 12, wciecie_znaku: 8, znak: '·', po: 0.8 },
@@ -26,7 +26,7 @@
   const OPCJE_STYLU = ['czcionka', 'rozmiar', 'kolor', 'wyrownanie', 'interlinia', 'przed', 'po', 'wciecie', 'wciecie_pierwszego',
     'wciecie_prawe', 'wciecie_znaku', 'znak', 'numer', 'czcionka_znaku', 'rozmiar_znaku', 'kolor_znaku', 'ikony', 'bazuje'];
   const LICZBOWE = ['rozmiar', 'interlinia', 'przed', 'po', 'wciecie', 'wciecie_pierwszego', 'wciecie_prawe', 'wciecie_znaku', 'rozmiar_znaku', 'ikony'];
-  const FLAGI_STYLU = ['pogrubienie', 'kursywa', 'wersaliki', 'pogrubienie_znaku'];
+  const FLAGI_STYLU = ['pogrubienie', 'kursywa', 'wersaliki', 'pogrubienie_znaku', 'z_nastepnym'];   // z_następnym – nie zostaje sam na dole ramki
   const WYROWNANIA = ['lewo', 'srodek', 'prawo', 'wyjustuj'];
   const NIE = /^(nie|brak|0|false)$/i;
 
@@ -337,5 +337,32 @@
     return bloki;
   }
 
-  return { WBUDOWANE, parseDokument, tekstCzesci, parsujMarkdown, stylBloku, formatNumeru, numeruj, rozwiazStyle, opcjeTekstu };
+  // ── Wątki ramek (etap 1b) ──────────────────────────────────────────────────
+  // Ramki z tym samym tekst= tworzą wątek: kolejność – numer strony, na stronie – kolejność w pliku (wiersz).
+  // Wynik: Map(nazwa tekstu → [ramki]); każda ramka dostaje nr (od 1) i z (ile ramek w wątku).
+  function watki(d) {
+    const w = new Map();
+    for (const r of d.ramki.values()) {
+      if (!w.has(r.tekst)) w.set(r.tekst, []);
+      w.get(r.tekst).push(r);
+    }
+    for (const lista of w.values()) {
+      lista.sort((a, b) => a.strona - b.strona || a.linia - b.linia);
+      lista.forEach((r, i) => { r.nr = i + 1; r.z = lista.length; });
+    }
+    return w;
+  }
+
+  // Bloki tekstu podzielone na odcinki <następna_ramka>: odcinek N zaczyna się w kolejnej ramce po odcinku N−1.
+  // Wynik: [{ bloki, linia }] – linia: wiersz znacznika, który zaczyna odcinek (0 dla pierwszego).
+  function odcinki(bloki) {
+    const out = [{ bloki: [], linia: 0 }];
+    for (const b of bloki) {
+      if (b.typ === 'nastepna') out.push({ bloki: [], linia: b.linia });
+      else out[out.length - 1].bloki.push(b);
+    }
+    return out;
+  }
+
+  return { WBUDOWANE, parseDokument, watki, odcinki, tekstCzesci, parsujMarkdown, stylBloku, formatNumeru, numeruj, rozwiazStyle, opcjeTekstu };
 });

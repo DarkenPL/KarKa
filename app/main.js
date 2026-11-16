@@ -4159,13 +4159,18 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const poz = (el) => { const s = el.closest('.karta.strona'), a = s.getBoundingClientRect(), r = el.getBoundingClientRect(); return [r.left - a.left, r.top - a.top, r.width, r.height].map(mm).concat(+s.dataset.strona); };
       const ramki = [...document.querySelectorAll('#strony [data-ramka]')].map(poz);
       const zielone = strony.map((s) => [...s.querySelectorAll('.el.ksztalt')].filter((e) => getComputedStyle(e).backgroundColor === 'rgb(78, 122, 58)').map((e) => poz(e)[0]));
-      const r2 = strony[1].querySelector('.ramka-tekst'), r4 = strony[3].querySelector('.ramka-tekst');
+      const r2 = strony[1].querySelector('.ramka-tekst');
       const bloki = (r) => [...r.children].map((x) => ({ styl: x.dataset.styl, znak: x.querySelector('.znak') ? x.querySelector('.znak').textContent : '',
-        cz: getComputedStyle(x).fontFamily, czZnaku: x.querySelector('.znak') ? getComputedStyle(x.querySelector('.znak')).fontFamily : '', wyr: getComputedStyle(x).textAlign, br: !!x.querySelector('br') }));
-      const b2 = bloki(r2), b4 = bloki(r4);
+        cz: getComputedStyle(x).fontFamily, czZnaku: x.querySelector('.znak') ? getComputedStyle(x.querySelector('.znak')).fontFamily : '', wyr: getComputedStyle(x).textAlign, br: !!x.querySelector('br'),
+        klasy: [...x.classList].filter((k) => /^(urwany|ciag|po-br)$/.test(k)).join(' '), wciecie: getComputedStyle(x).paddingLeft, ostatni: getComputedStyle(x).textAlignLast, linia: +x.dataset.linia,
+        mt: getComputedStyle(x).marginTop, mb: getComputedStyle(x).marginBottom }));
+      // wątek „zasady” (etap 1b): strona 2 → strona 4 (ramka górna, dwie kolumny)
+      const r4 = [...strony[3].querySelectorAll('.ramka-tekst')];
+      const b2 = bloki(r2), b4 = r4.flatMap(bloki), b4r = r4.map(bloki);
+      const etykiety = [...document.querySelectorAll('#strony .nr-ramki')].map((e) => e.textContent);
       const pogr = r2.querySelector('b'), ikony = strony[0].querySelectorAll('[data-ramka] img.ikona').length;
       const obrot = [...strony[2].querySelectorAll('.el.obrazek')].map((e) => e.style.transform || '');
-      return { I, uwagi: [...UWAGI_INSTRUKCJI], panel: document.getElementById('uwagi').innerText, stron: strony.length,
+      return { I, uwagi: [...UWAGI_INSTRUKCJI], panel: document.getElementById('uwagi').innerText, stron: strony.length, b4r, etykiety,
         szer: strony.map((s) => mm(s.getBoundingClientRect().width)), wys: mm(strony[0].getBoundingClientRect().height), ramki, zielone, b2, b4, ikony, obrot,
         pogr: pogr ? getComputedStyle(pogr).color + ' ' + getComputedStyle(pogr).fontWeight : '',
         stopka: [...strony[1].querySelectorAll('.el.tekst')].map((e) => e.textContent).find((t) => /strona/.test(t)) || '',
@@ -4175,7 +4180,45 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     if (s0.stron !== 4 || I.strony !== 4) b.push('stron: ' + s0.stron);
     if (s0.szer.some((w) => Math.abs(w - 105) > 0.05) || Math.abs(s0.wys - 148) > 0.05) b.push('rozmiar strony ' + s0.szer + ' × ' + s0.wys);
     const ramkaOk = (r, oc) => oc.every((v, i) => Math.abs(r[i] - v) <= 0.05);
-    if (s0.ramki.length !== 4 || !ramkaOk(s0.ramki[0], [12, 80, 81, 56, 1]) || !ramkaOk(s0.ramki[1], [10, 10, 85, 128, 2]) || !ramkaOk(s0.ramki[3], [10, 10, 85, 128, 4])) b.push('ramki ' + JSON.stringify(s0.ramki));
+    if (s0.ramki.length !== 6 || !ramkaOk(s0.ramki[0], [12, 80, 81, 56, 1]) || !ramkaOk(s0.ramki[1], [10, 10, 85, 128, 2]) || !ramkaOk(s0.ramki[3], [10, 10, 85, 44, 4])
+      || !ramkaOk(s0.ramki[4], [10, 58, 40.5, 80, 4]) || !ramkaOk(s0.ramki[5], [54.5, 58, 40.5, 80, 4])) b.push('ramki ' + JSON.stringify(s0.ramki));
+    // Wątek (etap 1b): który akapit (wiersz instrukcja.md) zaczyna każdą ramkę i czy to ciąg podzielonego akapitu.
+    // Strona 2 → punkt 4 listy dzielony do ramki górnej strony 4; <następna_ramka> → „Przebieg gry” w kolumnie 1;
+    // kolumna 1 → 2 – akapit dzielony na granicy wiersza.
+    const zas = (I.ramki || []).filter((r) => r.tekst === 'zasady');
+    const starty = zas.map((r) => `${r.strona}:${r.nr}/${r.z}:${r.start ? r.start.linia + (r.start.ciag ? '+' : '') : '-'}`).join(' ');
+    if (starty !== '2:1/4:14 4:2/4:27+ 4:3/4:36 4:4/4:44+') b.push('początki ramek wątku ' + starty);
+    const [gora, kol1, kol2] = s0.b4r, ost2 = s0.b2[s0.b2.length - 1];
+    if (!gora || ost2.klasy !== 'urwany' || ost2.znak !== '4.' || ost2.mb !== '0px' || gora[0].klasy !== 'ciag' || gora[0].znak || gora[0].styl !== 'numer1' || gora[0].wciecie !== ost2.wciecie || gora[0].mt !== '0px')
+      b.push('punkt listy dzielony między ramki ' + JSON.stringify([ost2, gora && gora[0]]));
+    if (!gora || !gora[1] || gora[1].znak !== '5.') b.push('numeracja przez ramki ' + JSON.stringify(gora && gora[1]));
+    const ostK1 = kol1 && kol1[kol1.length - 1];
+    if (!ostK1 || ostK1.klasy !== 'urwany' || ostK1.ostatni !== 'justify' || ostK1.styl !== 'akapit' || !kol2 || kol2[0].klasy !== 'ciag' || kol2[0].linia !== ostK1.linia || kol2[0].ostatni === 'justify')
+      b.push('akapit dzielony między kolumny ' + JSON.stringify([ostK1, kol2 && kol2[0]]));
+    if (!kol1 || kol1[0].styl !== 'h1' || kol1[0].mt !== '0px') b.push('<następna_ramka> – nagłówek na początku kolumny ' + JSON.stringify(kol1 && kol1[0]));
+    if (JSON.stringify(s0.etykiety) !== JSON.stringify(['wstęp 1/1', 'zasady 1/4', 'podpis 1/1', 'zasady 2/4', 'zasady 3/4', 'zasady 4/4'])) b.push('numery ramek w wątku ' + JSON.stringify(s0.etykiety));
+    if (!(I.czasBudowy >= 0)) b.push('brak czasu budowy instrukcji');
+    // Nagłówek (z_następnym) nie zostaje sam na dole ramki: ramka próbna kończy się tuż pod nagłówkiem – nagłówek
+    // przechodzi dalej z akapitem; bez flagi (klasa trzymaj) zostaje. Akapit z ikoną dzieli się przed wierszem ikony.
+    const trzymaj = await js(`(() => {
+      const strona = document.querySelector('#strony .karta.strona');
+      const kl = (s) => document.querySelector('#strony .blok[data-styl="' + s + '"]').className.replace(/ (urwany|ciag|po-br)/g, '');
+      const zdanie = 'Akapit do wypełnienia ramki testowej, kilka zwykłych słów. ';
+      const proba = (zFlaga) => {
+        const el = document.createElement('div');
+        el.className = 'el ksztalt'; el.style.cssText = 'position:absolute;left:0;top:0;width:85mm;height:140mm;overflow:hidden';
+        el.innerHTML = '<div class="ramka-tekst"><div class="' + kl('akapit') + '" data-linia="1">' + zdanie.repeat(3) + '</div><div class="' + kl('h2').replace(zFlaga ? /$/ : / trzymaj/, '') + '" data-linia="2">Nagłówek</div><div class="'
+          + kl('akapit') + '" data-linia="3">' + zdanie.repeat(4) + '</div></div>';
+        strona.append(el);
+        const h = el.querySelector('[data-linia="2"]'), r = el.getBoundingClientRect();
+        el.style.height = (h.getBoundingClientRect().bottom - r.top + 2) + 'px';
+        const dalej = podzielRamke(el).map((x) => x.dataset.linia + (x.classList.contains('ciag') ? '+' : ''));
+        el.remove();
+        return dalej.join();
+      };
+      return { z: proba(true), bez: proba(false) };
+    })()`);
+    if (trzymaj.z !== '2,3' || trzymaj.bez !== '3') b.push('nagłówek z następnym akapitem ' + JSON.stringify(trzymaj));
     if ((I.ramki || []).some((r) => r.bloki)) b.push('tekst nie mieści się: ' + JSON.stringify(I.ramki));
     if (s0.uwagi.length || /Instrukcja/.test(s0.panel)) b.push('Uwagi instrukcji: ' + s0.uwagi.join(' | '));
     // wzorzec: strona 1 i 3 (prawe) – pasek z lewej (x = -3), 2 i 4 (lewe) – z prawej (x = 101)
@@ -4195,6 +4238,11 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     await js("pokazWidok('instrukcja'); document.getElementById('ramkiInstrukcji').checked = false");
     wc.setZoomFactor(0.45); await czekaj(700);
     fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-instrukcja.png', (await wc.capturePage()).toPNG());
+    // „Pokaż ramki”: obrys ramek i numer ramki w wątku (etap 1b)
+    await js("document.getElementById('ramkiInstrukcji').checked = true; document.getElementById('instrukcja').classList.add('z-ramkami')");
+    await czekaj(200);
+    fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-instrukcja-ramki.png', (await wc.capturePage()).toPNG());
+    await js("document.getElementById('ramkiInstrukcji').checked = false; document.getElementById('instrukcja').classList.remove('z-ramkami')");
     wc.setZoomFactor(1);
     let zmiana = null;
     if (!jestPrzykladem(szablon)) {
@@ -4205,15 +4253,17 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       fs.writeFileSync(md, oryginal + '\n' + dlugi + '\n\n<następna_ramka>\n\nPo znaczniku.\n\nI jeszcze jeden akapit.\n');
       const c1 = await czas(c0);
       const s1 = await js(`({ uwagi: [...UWAGI_INSTRUKCJI], panel: document.getElementById('uwagi').innerText, karty: !!document.querySelector('#podglad .karta[data-test-instrukcji]'),
-        plus: document.querySelectorAll('#strony .plus-ramki').length, przep: [...document.querySelectorAll('#strony .przepelniona')].map((e) => e.closest('.karta.strona').dataset.strona), ramki: INSTRUKCJA.ramki })`);
+        plus: document.querySelectorAll('#strony .plus-ramki').length, przep: [...document.querySelectorAll('#strony .przepelniona')].map((e) => e.closest('.karta.strona').dataset.strona), ramki: INSTRUKCJA.ramki, czasBudowy: INSTRUKCJA.czasBudowy })`);
       fs.writeFileSync(md, oryginal);
       const c2 = await czas(c1);
       const s2 = await js(`({ uwagi: [...UWAGI_INSTRUKCJI], plus: document.querySelectorAll('#strony .plus-ramki').length, karty: !!document.querySelector('#podglad .karta[data-test-instrukcji]') })`);
-      const r4 = (s1.ramki || []).find((r) => r.strona === 4) || {};
+      const r4 = (s1.ramki || []).find((r) => r.strona === 4 && r.nr === r.z) || {};
       const u = s1.uwagi.find((x) => /nie mieści się w ramce na stronie 4/.test(x)) || '';
-      zmiana = { c1: !!c1, c2: !!c2, uwaga: u, r4, przep: s1.przep, plus: s1.plus, kartyBezPrzebudowy: s1.karty && s2.karty, poPrzywroceniu: s2.uwagi };
+      const un = s1.uwagi.find((x) => /<następna_ramka> – tekst „zasady” nie ma już następnej ramki/.test(x)) || '';
+      zmiana = { c1: !!c1, c2: !!c2, uwaga: u, uwagaZnacznika: un, czas: s1.czasBudowy, r4, przep: s1.przep, plus: s1.plus, kartyBezPrzebudowy: s1.karty && s2.karty, poPrzywroceniu: s2.uwagi };
       if (!c1 || !c2) b.push('instrukcja nie odświeżyła się po zmianie pliku');
-      if (!/^instrukcja\.txt, wiersz \d+: tekst „przebieg” nie mieści się w ramce na stronie 4 – zostało \d+ akapit(y|ów)? \(ok\. \d+ znaków\), w tym 2 po <następna_ramka>/.test(u)
+      if (!/^instrukcja\.md, wiersz \d+: <następna_ramka> – tekst „zasady” nie ma już następnej ramki \(wątek: 4 ramki, ostatnia na stronie 4\)/.test(un)) b.push('Uwaga o <następna_ramka> bez ramki ' + JSON.stringify(s1.uwagi));
+      if (!/^instrukcja\.txt, wiersz \d+: tekst „zasady” nie mieści się w ramce na stronie 4 \(ostatniej z 4 ramek wątku\) – zostało \d+ akapit(y|ów)? \(ok\. \d+ znaków\), w tym 2 po <następna_ramka>/.test(u)
         || !/Instrukcja: instrukcja\.txt, wiersz/.test(s1.panel) || r4.poZnaczniku !== 2 || !(r4.bloki >= 3) || !(r4.znaki > 100)) b.push('Uwaga o przepełnieniu ' + JSON.stringify({ u, r4 }));
       if (s1.przep.join() !== '4' || s1.plus !== 1) b.push('oznaczenie przepełnionej ramki ' + JSON.stringify(s1.przep));
       if (!s1.karty || !s2.karty) b.push('zmiana tekstu instrukcji przebudowała karty');

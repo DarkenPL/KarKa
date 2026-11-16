@@ -2,6 +2,7 @@
 ;  INSTRUKCJA GRY – szablon stron (wskazuje go INSTRUKCJA = … w Szablony/ogrod.txt)
 ;  • strony A6 ze spadem, wzorzec wspólny i osobny dla stron lewych i prawych,
 ;  • ramki tekstu (RAMKA) z instrukcja.md, style akapitów (STYL), podpisy (TEKST styl=…),
+;  • wątek „zasady”: strona 2 → strona 4 (ramka górna i dwie kolumny) – tekst przelewa się sam,
 ;  • strona 3 – rysunek: obrazki obrócone, pola z zaokrąglonymi rogami i obrysem.
 ;  Widok → Instrukcja gry (⌘2); tekst odświeża się po zapisie instrukcja.md.
 ; ═══════════════════════════════════════════════════════════════════
@@ -38,8 +39,9 @@ TEKST   = 10, 12, 85, 20, "Ogród", czcionka="Patrick Hand", rozmiar=40, kolor=z
 OBRAZEK = 32, 34, 40, 40, Ikony/slonecznik.svg
 RAMKA   = 12, 80, 81, 56, tekst=wstęp, kolor=#ffffff, obwódka=0.35, kolor_obwódki=zieleń, zaokrąglenie=3, margines=3, pion=środek
 
+; Wątek: ramki z tym samym tekst= – kolejność stron, na stronie kolejność w pliku (strona 3 pominięta)
 [STRONA 2]
-RAMKA = 10, 10, 85, 128, tekst=przygotowanie
+RAMKA = 10, 10, 85, 128, tekst=zasady
 
 [STRONA 3]
 TEKST     = 10, 10, 85, 10, "Przykładowy ogród", styl=podpis, rozmiar=14
@@ -56,4 +58,7 @@ TEKST     = 20, 112, 65, 8, "Burza do góry nogami", styl=podpis, obrót=180
 RAMKA     = 15, 122, 75, 14, tekst=podpis, pion=środek
 
 [STRONA 4]
-RAMKA = 10, 10, 85, 128, tekst=przebieg
+RAMKA = 10, 10, 85, 44, tekst=zasady                 ; dalszy ciąg ze strony 2
+RAMKA = 10, 58, 40.5, 80, tekst=zasady               ; dwie kolumny – <następna_ramka> zaczyna tu „Przebieg gry”
+RAMKA = 54.5, 58, 40.5, 80, tekst=zasady
+LINIA = 52.5, 60, 52.5, 136, kolor=zieleń, grubość=0.2
