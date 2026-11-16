@@ -191,6 +191,7 @@ button.wlaczony { background: #4a453f; border-color: #4a453f; color: #fff; }
    Widok kart i instrukcji: niewidoczny ma wysokość 0 (nie display:none) – pomiar tekstu i kart działa w obu.
    ═══════════════════════════════════════════════════════════════════════════ */
 body.widok-instrukcja #podglad, body.widok-instrukcja #podgladRewersy, body:not(.widok-instrukcja) #instrukcja { height: 0; overflow: hidden; }
+body:not(.widok-instrukcja) #instrukcja { visibility: hidden; }      /* bez fokusu z klawiatury w ukrytym widoku */
 body.widok-instrukcja #start { display: none; }
 .instrukcja-pasek { display: flex; gap: 14px; align-items: center; margin: 12px 16px 0; font-size: 13px; color: #4a453f; }
 .instrukcja-pasek .opis { color: #8a8378; font-size: 12px; }
@@ -334,7 +335,8 @@ async function fetchFile(rel) {
 const PLIK_RE = /\.(png|jpe?g|gif|webp|svg|ttf|otf|woff2?|csv|xlsx)$/i;
 
 // tylkoNowe: podgląd na żywo z edytora – pliki już wczytane bierzemy z pamięci, pobieramy tylko nowe.
-async function loadFromServer({ tylkoNowe = false } = {}) {
+// wymus: ręczne odświeżenie (⌘R) i zlecenie z dysku – zawsze pełna przebudowa kart.
+async function loadFromServer({ tylkoNowe = false, wymus = false } = {}) {
   const next = new Map(), paths = [];
   const put = async (rel) => {
     rel = String(rel || '').trim();
@@ -365,9 +367,11 @@ async function loadFromServer({ tylkoNowe = false } = {}) {
   const fi = sciezkaInstr && next.get(norm(sciezkaInstr));
   if (sciezkaInstr) plikiInstr.add(norm(sciezkaInstr));
   if (fi && window.Instrukcja) {
-    const { tresc, pliki } = plikiInstrukcji(await fi.text(), sciezkaInstr);
-    tresc.forEach((r) => { refs.add(r); plikiInstr.add(norm(r)); });
-    pliki.forEach((r) => refs.add(r));
+    try {
+      const { tresc, pliki } = plikiInstrukcji(await fi.text(), sciezkaInstr);
+      tresc.forEach((r) => { refs.add(r); plikiInstr.add(norm(r)); });
+      pliki.forEach((r) => refs.add(r));
+    } catch (e) { /* błąd pokaże zbudujInstrukcje jako Uwagę */ }
     await Promise.all([...refs].map(put));
   }
   // 3) obrazki i ikony, do których odwołują się dane, oraz ikony z folderów Ikony/ i Icons/
@@ -387,7 +391,7 @@ async function loadFromServer({ tylkoNowe = false } = {}) {
   // Treść szablonu musi być tą, z której zbudowano karty: edytor buduje bez loadFromServer, a zlecenie z dysku
   // podmienia treść bez zmiany daty pliku (#160 – blok zlecenia).
   const odcisk = [...next].filter(([k]) => !plikiInstr.has(k)).map(([k, f]) => k + '@' + f.lastModified + ':' + f.size).sort().join('|') + '#' + spisIkon;
-  const tylkoInstrukcja = !tylkoNowe && window.zbudowano && odcisk === ODCISK_KART && !!tf && skrot(await tf.text()) === ZBUDOWANY_SZABLON;
+  const tylkoInstrukcja = !tylkoNowe && !wymus && plikiInstr.size > 0 && window.zbudowano && odcisk === ODCISK_KART && !!tf && skrot(await tf.text()) === ZBUDOWANY_SZABLON;
   files = next; serverPaths = paths;
   if (tylkoInstrukcja) await budujInstrukcje(); else await build();
   ODCISK_KART = odcisk;
@@ -414,7 +418,7 @@ async function serverStamp() {
 
 let AUTO_ODSWIEZANIE = true;      // menu Widok → Odświeżaj automatycznie
 window.ustawAuto = (b) => { AUTO_ODSWIEZANIE = !!b; };
-window.odswiezKarty = () => loadFromServer();
+window.odswiezKarty = () => loadFromServer({ wymus: true });
 $('filtr').onchange = () => { applyFilter(); odswiezRewersyKart(); };
 
 // Automatyczne odświeżanie: co 1,5 s sprawdzamy daty zmian wczytanych plików (jedno sprawdzenie naraz).
@@ -1545,6 +1549,7 @@ function pokazUwagi() {
 // Karty: bez zmian HTML (data-ramka tylko przy c.ramka, którego szablony kart nie mają).
 let INSTRUKCJA_PLIK = '';        // INSTRUKCJA = … w szablonie kart (ścieżka względem folderu projektu)
 let INSTRUKCJA = null;           // ostatnia zbudowana instrukcja – stan dla testu i zleceń
+let UZYCIE_INSTRUKCJI = { tekst: '', pliki: [] };   // teksty i pliki instrukcji – raport (ikony i obrazki nieużywane)
 let WIDOK = 'karty';             // Widok → Karty (⌘1) / Instrukcja (⌘2)
 const pomocInstrukcji = () => ({ splitArgs, unq, plain, stripComment, num });
 
@@ -1669,26 +1674,38 @@ function zmierzRamke(el) {
   } finally { el.style.transform = obrot; t.style.justifyContent = pion; }
 }
 
+// Błąd w instrukcji nie może przerwać budowy kart (zbudowano, Uwagi, zlecenia) – wyjątek zostaje Uwagą (przegląd #161).
+// Paleta: kolory z szablonu stron działają tylko na stronach – po złożeniu wraca paleta kart.
 async function zbudujInstrukcje() {
+  const paletaKart = { ...PALETA };
+  try { await zbudujInstrukcjeTeraz(); }
+  catch (e) { UWAGI_INSTRUKCJI.add(`błąd przy składaniu instrukcji – ${(e && e.message) || e}. Strony mogą być niepełne; zgłoś to razem z plikiem instrukcji.`); }
+  finally { PALETA = paletaKart; }
+}
+async function zbudujInstrukcjeTeraz() {
   const warn = new Set();
   UWAGI_INSTRUKCJI = warn;
   const box = $('strony'), opis = $('instrukcjaOpis');
   $('widokPrzycisk').hidden = !INSTRUKCJA_PLIK;
-  INSTRUKCJA = null;
+  const byla = INSTRUKCJA !== null;
+  INSTRUKCJA = null; UZYCIE_INSTRUKCJI = { tekst: '', pliki: [] };
   const pusto = (t) => { box.innerHTML = t ? `<div class="start"><p>${t}</p></div>` : ''; opis.textContent = ''; $('style-instrukcji').textContent = ''; };
+  if (!INSTRUKCJA_PLIK && byla && WIDOK === 'instrukcja') pokazWidok('karty');      // INSTRUKCJA usunięta z szablonu – wróć do kart
   if (!INSTRUKCJA_PLIK) return pusto('Projekt nie ma instrukcji gry. Dodaj w szablonie kart <code>INSTRUKCJA = Instrukcja/instrukcja.txt</code> – opis w dokumentacji (Komendy szablonów → Instrukcja gry).');
   if (!window.Instrukcja) { warn.add('nie wczytano modułu instrukcji (instrukcja.js)'); return pusto(''); }
   const f = files.get(norm(INSTRUKCJA_PLIK));
   if (!f) { warn.add(`nie znaleziono pliku ${INSTRUKCJA_PLIK} (komenda INSTRUKCJA w szablonie kart)`); return pusto(''); }
   const plik = INSTRUKCJA_PLIK.split('/').pop(), h = pomocInstrukcji();
   const tekst = await f.text();
+  UZYCIE_INSTRUKCJI = { tekst, pliki: plikiInstrukcji(tekst, INSTRUKCJA_PLIK).pliki };
   const d = Instrukcja.parseDokument(tekst, plik, h);
   d.bledy.forEach((b) => warn.add(b));
   const teksty = new Map();
   for (const t of d.tresc) {
     const mf = files.get(norm(t));
     if (!mf) { warn.add(`${plik}: nie znaleziono pliku tekstu ${t} (TREŚĆ)`); continue; }
-    const nazwaMd = t.split('/').pop(), md = Instrukcja.parsujMarkdown(await mf.text(), nazwaMd, h);
+    const tekstMd = await mf.text(), nazwaMd = t.split('/').pop(), md = Instrukcja.parsujMarkdown(tekstMd, nazwaMd, h);
+    UZYCIE_INSTRUKCJI.tekst += '\n' + tekstMd;
     md.bledy.forEach((b) => warn.add(b));
     for (const x of md.teksty) {
       if (teksty.has(x.nazwa)) teksty.get(x.nazwa).bloki.push(...x.bloki);
@@ -2875,7 +2892,7 @@ async function raportProjektu(o = {}) {
   lista('Obrazki poniżej 300 dpi', await obrazkiNiskiejRozdzielczosci(), 'obrazki mają co najmniej 300 dpi w rozmiarze na karcie');
 
   // Ikony: znaczniki {x} użyte w szablonie i danych
-  const uzyteZnaczniki = new Set([...wszystkieWartosci.matchAll(/\{([^{}]+)\}/g)].flatMap((m) => [iconKey(m[1]), plain(iconKey(m[1]))]));
+  const uzyteZnaczniki = new Set([...(wszystkieWartosci + '\n' + UZYCIE_INSTRUKCJI.tekst).matchAll(/\{([^{}]+)\}/g)].flatMap((m) => [iconKey(m[1]), plain(iconKey(m[1]))]));
   const ikonyNieuzywane = [], plikiIkonUzyte = new Set();
   const widziane = new Set();
   for (const [k, v] of Object.entries(RAPORT.icons)) {
@@ -2887,10 +2904,11 @@ async function raportProjektu(o = {}) {
 
   // Obrazki w folderach, do których odwołuje się projekt (i Ikony/), ale których nic nie używa.
   const t = parseTemplate(tekst, SZABLON.split('/').pop());
-  const uzyte = new Set([...plikiZDanych, ...plikiIkonUzyte, ...t.pliki.map(norm)]);
-  for (const m of tekst.matchAll(/[^\s",=]+\.(png|jpe?g|gif|webp|svg)/gi)) uzyte.add(norm(m[0]));
+  const plikiInstr = UZYCIE_INSTRUKCJI.pliki.map(norm);      // obrazki stron instrukcji (#160)
+  const uzyte = new Set([...plikiZDanych, ...plikiIkonUzyte, ...t.pliki.map(norm), ...plikiInstr]);
+  for (const m of (tekst + '\n' + UZYCIE_INSTRUKCJI.tekst).matchAll(/[^\s",=]+\.(png|jpe?g|gif|webp|svg)/gi)) uzyte.add(norm(m[0]));
   const foldery = new Set(FOLDERY_IKON);
-  for (const u of [...plikiZDanych, ...t.pliki.map(norm)]) if (u.includes('/') && OBRAZ_RE.test(u)) foldery.add(u.slice(0, u.lastIndexOf('/')));
+  for (const u of [...plikiZDanych, ...t.pliki.map(norm), ...plikiInstr]) if (u.includes('/') && OBRAZ_RE.test(u)) foldery.add(u.slice(0, u.lastIndexOf('/')));
   // Ikona jest nieużywana, gdy nie ma jej znacznika i jej pliku nie używa nic innego (inny znacznik, dane).
   const ikonyBez = ikonyNieuzywane.filter(([, f]) => !f || !uzyte.has(f));
   lista('Ikony nieużywane', ikonyBez.map(([k]) => `{${esc(k)}}`), 'wszystkie ikony są używane');
@@ -4082,7 +4100,7 @@ async function wykonajZlecenie(polecenie, surowe = {}) {
   let wynik;
   ZLECENIE_TRWA = true;
   try {
-    if (zDysku) { ZLECENIE_Z_DYSKU = true; await loadFromServer(); lastStamp = await serverStamp(); }
+    if (zDysku) { ZLECENIE_Z_DYSKU = true; await loadFromServer({ wymus: true }); lastStamp = await serverStamp(); }
     else {
       // Zlecenie zawsze na aktualnych plikach z dysku – także gdy automatyczne odświeżanie stoi
       // (okno zasłonięte, odświeżanie wyłączone w menu Widok; issue #30).

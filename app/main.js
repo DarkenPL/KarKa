@@ -4218,6 +4218,28 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       if (s1.przep.join() !== '4' || s1.plus !== 1) b.push('oznaczenie przepełnionej ramki ' + JSON.stringify(s1.przep));
       if (!s1.karty || !s2.karty) b.push('zmiana tekstu instrukcji przebudowała karty');
       if (s2.uwagi.length || s2.plus) b.push('Uwagi po przywróceniu tekstu: ' + s2.uwagi.join(' | '));
+      // Przegląd #161: wyjątek w instrukcji nie przerywa budowy kart (Uwaga, zbudowano, karty); ⌘R zawsze przebudowuje karty;
+      // ikona użyta tylko w tekście instrukcji nie jest w raporcie „nieużywana”.
+      const wyjatek = await js(`(async () => {
+        const oryg = Instrukcja.parseDokument; window.zbudowano = false;
+        Instrukcja.parseDokument = () => { throw new Error('próba z testu'); };
+        try { await build(); } finally { Instrukcja.parseDokument = oryg; }
+        const w = { zbudowano: window.zbudowano, karty: document.querySelectorAll('#podglad .karta').length, uwaga: [...UWAGI_INSTRUKCJI].some((x) => /błąd przy składaniu instrukcji – próba z testu/.test(x)),
+          panel: /Instrukcja: błąd przy składaniu/.test(document.getElementById('uwagi').innerText) };
+        await build(); return { ...w, poNaprawie: [...UWAGI_INSTRUKCJI] };
+      })()`);
+      if (!wyjatek.zbudowano || !wyjatek.karty || !wyjatek.uwaga || !wyjatek.panel || wyjatek.poNaprawie.length) b.push('wyjątek w instrukcji ' + JSON.stringify(wyjatek));
+      await js("document.querySelector('#podglad .karta').dataset.testInstrukcji = '2'");
+      await js('odswiezKarty()');
+      if (await js("!!document.querySelector('#podglad .karta[data-test-instrukcji]')")) b.push('⌘R (odswiezKarty) nie przebudował kart');
+      fs.copyFileSync(path.join(projekt, 'Ikony', 'marchew.svg'), path.join(projekt, 'Ikony', 'tylko-instrukcja.svg'));
+      fs.writeFileSync(md, oryginal + '\nIkona tylko w instrukcji {tylko-instrukcja}.\n');
+      const c3 = await czas(await js('INSTRUKCJA.czas'));
+      const raport = await js("raportProjektu()");
+      fs.writeFileSync(md, oryginal); fs.rmSync(path.join(projekt, 'Ikony', 'tylko-instrukcja.svg'));
+      await czas(c3);
+      if (!c3 || /tylko-instrukcja/.test(raport)) b.push('raport: ikona z instrukcji jako nieużywana');
+      zmiana.przeglad = { wyjatek, raport: !/tylko-instrukcja/.test(raport) };
     }
     await js("pokazWidok('karty')");
     instrukcja = { ok: !b.length, bledy: b, stan: I, zmiana };

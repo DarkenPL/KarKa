@@ -87,6 +87,10 @@ sprawdz(w1[12] === linie[12] && w1[16] === linie[16] && w1[14] === '', 'strona 1
 sprawdz(w2[14] === linie[14] && w2[16] === '', 'strona 2 – wzorzec lewy', w2.slice(11, 17));
 sprawdz(I.tekstCzesci(linie, d, d.strony[2], 'wzorzec').split('\n').every((l, i) => !l || [3].includes(i)), 'bez_wzorca – tylko globalne');
 
+sprawdz(/wiersz 2: nieznana sekcja \[,\]/.test(I.parseDokument('DOKUMENT = 10, 10\n[,]\n', 'z.txt', h).bledy.join()), 'sekcja [,] – Uwaga, nie wyjątek');
+const cudz = I.parseDokument('DOKUMENT = 10, 10\n[STRONA 1]\nTEKST = 1, 1, 5, 5, "a, styl=x"\n', 'c.txt', h);
+sprawdz(!cudz.bledy.length && !cudz.zamiany.size, 'styl= w cudzysłowie to tekst', cudz.bledy);
+sprawdz(I.parsujMarkdown('# Wersja C#\n## Tytuł ##\n', 'h.md', h).teksty[0].bloki.map((b) => b.tekst).join('|') === 'Wersja C#|Tytuł', 'zamykające # nagłówka');
 const bez = I.parseDokument('[STRONA 1]\nTEKST = 1, 1, 10, 10, "x", styl=brak\nRAMKA = 1,1,1,1\n', 'i.txt', h);
 sprawdz(/brak komendy DOKUMENT/.test(bez.bledy.join()) && /nie ma stylu „brak”/.test(bez.bledy.join()), 'brak DOKUMENT, nieznany styl', bez.bledy);
 sprawdz(bez.strony[0].ramki[0].tekst === '', 'ramka bez tekst= – tekst bez nazwy', bez.strony[0].ramki);

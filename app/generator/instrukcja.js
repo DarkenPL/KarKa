@@ -101,7 +101,9 @@
       const sec = /^\[\s*([^\]]+?)\s*\]$/.exec(line);
       if (sec) {
         const [glowa, ...opcje] = h.splitArgs(sec[1]);
-        const m = /^(\S+)(?:\s+(.+))?$/.exec(glowa.trim()), co = h.plain(m[1]), arg = (m[2] || '').trim();
+        const m = /^(\S+)(?:\s+(.+))?$/.exec(String(glowa || '').trim());
+        if (!m) { d.bledy.push(`${where}: nieznana sekcja ${line} – w instrukcji są [WZORZEC], [WZORZEC LEWA], [WZORZEC PRAWA] i [STRONA N]`); cel = []; strona = null; return; }
+        const co = h.plain(m[1]), arg = (m[2] || '').trim();
         if (co === 'wzorzec') {
           const s = h.plain(arg);
           if (!arg) cel = d.wzorzec.wspolny; else if (s === 'lewa' || s === 'prawa') cel = d.wzorzec[s];
@@ -182,7 +184,7 @@
         d.zamiany.set(i, 'PROSTOKĄT = kolor=brak, ' + m[2]);
         strona.linie.push(i); return;
       }
-      if (m && kom === 'tekst' && /(?:^|,)\s*styl\s*=/.test(m[2])) d.styleTekstu = (d.styleTekstu || []).concat([{ i, reszta: m[2], where }]);
+      if (m && kom === 'tekst' && rozbierz(m[2], h).opt.styl !== undefined) d.styleTekstu = (d.styleTekstu || []).concat([{ i, reszta: m[2], where }]);
       if (cel === null) {
         // przed sekcjami: CZCIONKA działa dalej w całym pliku, elementy są wspólne dla stron (jak [WZORZEC])
         if (kom === 'czcionka' || kom === 'projekt' || kom === 'wersja') d.globalne.push(i); else d.wzorzec.wspolny.push(i);
@@ -256,7 +258,7 @@
         biezacy.bloki.push({ typ: 'nastepna', linia });
         return;
       }
-      const hd = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(t);
+      const hd = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/.exec(t);      // zamykające # tylko po spacji (CommonMark)
       if (hd) {
         zamknij(); wciecia = [];
         let poziom = hd[1].length;
