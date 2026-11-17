@@ -449,11 +449,31 @@ OBRAZEK = 40, 84, 25, 25, Ikony/burza.svg, obrót=180
 | `STYL_ZNAKOWY = pogrubienie, …` | Wygląd `**…**` (albo `kursywa` – `*…*`) w całej instrukcji: `czcionka=`, `grubość=` (np. 600), `kolor=`. |
 | `[WZORZEC]`, `[WZORZEC LEWA]`, `[WZORZEC PRAWA]` | Elementy rysowane pod każdą stroną / pod stronami parzystymi / nieparzystymi. Elementy przed pierwszą sekcją też należą do wzorca. |
 | `[STRONA N]` | Elementy strony N (od 1). `[STRONA N, bez_wzorca]` – bez wzorca. Kolejność sekcji w pliku jest dowolna. |
-| `RAMKA = x, y, szer, wys, tekst=nazwa` | Ramka tekstu z Markdownu: część pliku zaczęta `<tekst=nazwa>` (bez `tekst=` – początek pliku przed pierwszym `<tekst=…>`). Rysuje się jak `PROSTOKĄT` (domyślnie bez wypełnienia): `kolor=`, `obwódka=`, `kolor_obwódki=`, `zaokrąglenie=`, `obrót=`, `krycie=`. `margines=` – odstęp tekstu od brzegu ramki (mm), `pion=góra \| środek \| dół`. |
+| `RAMKA = x, y, szer, wys, tekst=nazwa` | Ramka tekstu z Markdownu: część pliku zaczęta `<tekst=nazwa>` (bez `tekst=` – początek pliku przed pierwszym `<tekst=…>`). Kilka ramek z tym samym `tekst=` to **wątek** – tekst przelewa się z ramki do ramki (niżej). Rysuje się jak `PROSTOKĄT` (domyślnie bez wypełnienia): `kolor=`, `obwódka=`, `kolor_obwódki=`, `zaokrąglenie=`, `obrót=`, `krycie=`. `margines=` – odstęp tekstu od brzegu ramki (mm), `pion=góra \| środek \| dół`. |
 | Elementy kart | `TŁO`, `PROSTOKĄT`, `ELIPSA`, `LINIA`, `OBRAZEK`, `IKONA`, `TEKST` – jak na kartach, w mm od lewego górnego rogu strony (bez spadu), z `obrót=`; kolejność w pliku = kolejność rysowania (wzorzec pod stroną). `KOLOR`, `STAŁA`, `CZCIONKA_PLIK`, `CZCIONKA_GOOGLE` działają w całym pliku, `CZCIONKA` – od miejsca wpisania w swojej sekcji. Pola wbudowane: `[_numer]` (numer strony), `[_liczba]` (liczba stron), `[_projekt]`, `[_wersja]`, `[_data]`. |
 | `TEKST … styl=nazwa` | Krótki tekst (podpis) w stylu akapitu: czcionka, rozmiar, kolor, wyrównanie, interlinia, ikony i flagi stylu; opcje wpisane w wierszu mają pierwszeństwo, styl – przed `CZCIONKA`. Za długi tekst zmniejsza się jak na kartach. |
 
-**Etap 1 (0.8.0):** jeden tekst w jednej ramce. Łączenie ramek w wątek (tekst przelewa się do następnej ramki) – w następnej wersji; na razie druga ramka z tym samym `tekst=` zostaje pusta (z Uwagą). Tekst, który się nie mieści, jest ucięty: ramka dostaje czerwony obrys i znak „+”, a Uwaga podaje, ile akapitów i znaków zostało.
+### Wątek ramek (od 0.8.1)
+
+Ramki z tym samym `tekst=` tworzą **wątek**: tekst wypełnia pierwszą ramkę, a to, co się nie mieści, przechodzi do następnej. Kolejność ramek: według numeru strony, a na jednej stronie – według kolejności wierszy `RAMKA` w pliku (dwie kolumny: najpierw wpisz lewą). Ramki mogą być na dowolnych stronach (strony bez ramki wątku są pomijane) i mieć różną wielkość.
+
+```
+[STRONA 2]
+RAMKA = 10, 10, 85, 128, tekst=zasady            ; 1. ramka wątku
+[STRONA 4]
+RAMKA = 10, 10, 85, 44, tekst=zasady             ; 2. – strona 3 pominięta
+RAMKA = 10, 58, 40.5, 80, tekst=zasady           ; 3. – lewa kolumna
+RAMKA = 54.5, 58, 40.5, 80, tekst=zasady         ; 4. – prawa kolumna
+```
+
+- Akapit dzieli się między ramki na granicy wiersza. Ostatni wiersz pierwszej części wyjustowanego akapitu jest wyjustowany do końca; dalszy ciąg nie ma wcięcia pierwszego wiersza ani odstępu `przed=`.
+- Punkt listy podzielony między ramki zachowuje wcięcie – znak albo numer stoi tylko przy pierwszej części. Numeracja list ciągnie się przez ramki.
+- Odstęp `przed=` pierwszego akapitu w ramce jest pomijany.
+- Nagłówek (styl z `z_następnym` – domyślnie `h1`–`h3`) nie zostaje sam na dole ramki: przechodzi do następnej razem z akapitem, który za nim stoi. Nagłówek się nie dzieli.
+- `<następna_ramka>` w tekście przenosi dalszy ciąg do następnej ramki wątku (np. rozdział od nowej strony). Gdy następnej ramki nie ma – Uwaga z wierszem znacznika.
+- Tekst, który nie mieści się w **ostatniej** ramce wątku, jest ucięty: ramka dostaje czerwony obrys i znak „+”, a Uwaga podaje, ile akapitów i znaków zostało. Ramka, do której tekst nie dotarł, zostaje pusta bez Uwagi.
+- **Pokaż ramki** (nad stronami) pokazuje nad każdą ramką nazwę tekstu i numer w wątku (`zasady 2/4`; „pusta” – tekst nie dotarł).
+- Wdów i sierot (pojedynczych wierszy akapitu na dole albo na górze ramki) KarKa na razie nie pilnuje.
 
 ### Style akapitów
 
@@ -472,6 +492,7 @@ Wbudowane style (używa ich Markdown bez znacznika): `akapit`, `h1`–`h3` (nag�
 | `czcionka_znaku=`, `rozmiar_znaku=`, `kolor_znaku=`, `pogrubienie_znaku` | znak i numer własną czcionką – np. gdy czcionka tekstu nie ma znaku „•” |
 | `ikony=` | wysokość ikon `{…}` względem tekstu |
 | `bazuje=` | styl bazowy |
+| `z_następnym` | akapit nie zostaje sam na dole ramki wątku – przechodzi dalej z następnym (domyślnie w `h1`–`h3`; `z_następnym=nie` wyłącza) |
 | flagi `pogrubienie`, `kursywa`, `wersaliki` | `pogrubienie=nie` wyłącza flagę ze stylu bazowego (np. w nagłówkach) |
 
 Numeracja: punkty listy liczą się od 1 w każdej liście; akapit bez znaku i nagłówek zaczynają liczenie od nowa, punkt wyższego poziomu – na niższych poziomach.
@@ -503,5 +524,5 @@ Gra toczy się w turach. **Słońce** {slonce} pomaga roślinom.
 | `<br>`, `\` albo dwie spacje na końcu wiersza | złamanie wiersza w akapicie |
 | `<styl=nazwa>` na początku akapitu albo punktu | inny styl tego akapitu (np. druga lista numerowana) |
 | `<tekst=nazwa>` w osobnym wierszu | zaczyna tekst dla ramki z `tekst=nazwa` |
-| `<następna_ramka>` w osobnym wierszu | dalszy tekst – do następnej ramki (od wersji z wątkami; teraz liczy się jako niezmieszczony) |
+| `<następna_ramka>` w osobnym wierszu | dalszy tekst – do następnej ramki wątku (od 0.8.1) |
 | `<!-- … -->` | komentarz – pomijany |

@@ -207,6 +207,11 @@ body.widok-instrukcja #start { display: none; }
 .strona .ramka-tekst > .blok { flex: none; overflow-wrap: break-word; --pole: 1em; }
 .strona .ramka-tekst > .blok:first-child { margin-top: 0 !important; }
 .strona .blok > .znak { display: inline-block; text-indent: 0; white-space: nowrap; }
+.strona .blok.urwany { margin-bottom: 0 !important; }                  /* akapit dzielony między ramki: część pierwsza */
+.strona .blok.ciag { margin-top: 0 !important; text-indent: 0 !important; }   /* …i ciąg w następnej ramce (bez znaku) */
+.strona .nr-ramki { display: none; position: absolute; padding: 0 0.8mm; background: #2f6fd6; color: #fff; font: 2.2mm/3mm sans-serif; white-space: nowrap; z-index: 3; }
+#instrukcja.z-ramkami .strona .nr-ramki { display: block; }
+#instrukcja.z-ramkami .strona .nr-ramki.pusta { background: #8a8378; }
 .strona .el.ksztalt.przepelniona { outline: 0.5mm solid #d00; }
 .strona .plus-ramki { position: absolute; width: 3mm; height: 3mm; background: #d00; color: #fff; font: bold 2.6mm/3mm sans-serif; text-align: center; z-index: 3; }
 #instrukcja.z-ramkami .strona .el.ksztalt[data-ramka] { outline: 0.25mm dashed #2f6fd6; }
@@ -1591,6 +1596,8 @@ function cssStylow(d, warn) {
     if (s.kursywa) st.push('font-style:italic');
     if (s.ikony) st.push('--ik:' + s.ikony);
     r.push(`.strona .blok.s${i}{${st.join(';')}}`);
+    // część pierwsza akapitu dzielonego między ramki: jej ostatni wiersz nie kończy akapitu – wyjustowany do końca
+    if (s.wyrownanie === 'wyjustuj') r.push(`.strona .blok.s${i}.urwany:not(.po-br){text-align-last:justify}`);
     if (znak) {
       const z = [`min-width:${Math.max(0, wc - wz)}mm`, `font-weight:${s.pogrubienie_znaku ? 600 : 'inherit'}`];
       if (s.czcionka_znaku) z.push('font-family:' + fontFamily(s.czcionka_znaku));
@@ -1633,7 +1640,7 @@ function blokHtml(b, d, css, warn, plikMd) {
   }
   const s = d.style[nazwa];
   const znak = b.znacznik ? `<span class="znak">${esc(b.znacznik)}</span>` : '';
-  return `<div class="blok ${css.klasa.get(nazwa)}" data-styl="${esc(nazwa)}" data-linia="${b.linia}">${znak}${trescBloku(b.tekst, s.rozmiar ?? 10, warn, `${plikMd}, wiersz ${b.linia}`)}</div>`;
+  return `<div class="blok ${css.klasa.get(nazwa)}${s.z_nastepnym ? ' trzymaj' : ''}" data-styl="${esc(nazwa)}" data-linia="${b.linia}">${znak}${trescBloku(b.tekst, s.rozmiar ?? 10, warn, `${plikMd}, wiersz ${b.linia}`)}</div>`;
 }
 
 // Ile tekstu nie mieści się w ramce: akapity wystające poza dolny brzeg (bez marginesu) i ich niewidoczne znaki
@@ -1674,6 +1681,110 @@ function zmierzRamke(el) {
   } finally { el.style.transform = obrot; t.style.justifyContent = pion; }
 }
 
+// Dolna granica tekstu ramki (wnętrze bez dolnego marginesu) i pomiar bez obrotu, od góry ramki – jak zmierzRamke.
+function dolRamki(t) {
+  return t.getBoundingClientRect().top + t.clientTop + t.clientHeight - parseFloat(getComputedStyle(t).paddingBottom) + 0.5;
+}
+function bezObrotu(el, f) {
+  const t = el.firstElementChild, obrot = el.style.transform, pion = t.style.justifyContent;
+  el.style.transform = 'none'; t.style.justifyContent = 'flex-start';
+  try { return f(t); } finally { el.style.transform = obrot; t.style.justifyContent = pion; }
+}
+
+// Początek pierwszego niewidocznego wiersza akapitu (etap 1b). Atomy: znaki węzłów tekstu (bez .znak) i ikony w kolejności;
+// nowy wiersz, gdy atom wraca w lewo albo jego środek leży niżej niż dół poprzedniego (prostokąty znaków sąsiednich
+// wierszy zachodzą na siebie przy interlinii ≤ 1,2, a przy wyrównaniu do środka/prawej wiersz nie musi wracać w lewo). Wiersz jest niewidoczny, gdy choć jeden jego atom
+// wystaje poza dol (jak w zmierzRamke – wiersz ucięty u dołu też; wysoka ikona przenosi cały swój wiersz). Znak po znaku
+// tylko w akapicie, który przecina dolny brzeg. Wynik: null – wszystkie wiersze widoczne; 0 – niewidoczny już pierwszy;
+// { node, offset } albo { przed: element } – miejsce podziału.
+function punktPodzialu(b, dol) {
+  const w = document.createTreeWalker(b, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, { acceptNode: (n) => n.nodeType === 3 ? NodeFilter.FILTER_ACCEPT
+    : n.classList.contains('znak') ? NodeFilter.FILTER_REJECT : (n.tagName === 'IMG' || n.classList.contains('ikona-kolor')) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP });
+  const r = document.createRange();
+  let prev = null, start = null, wiersz = 0;
+  const atom = (rect, poz) => {
+    if (!prev || rect.left < prev.left - 0.5 || (rect.top + rect.bottom) / 2 > prev.bottom) { if (prev) wiersz++; start = poz; }
+    prev = rect;
+    return rect.bottom > dol;
+  };
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    if (n.nodeType === 1) {
+      const rect = n.getBoundingClientRect();
+      if ((rect.width || rect.height) && atom(rect, { przed: n })) return wiersz ? start : 0;
+      continue;
+    }
+    for (let i = 0; i < n.nodeValue.length; i++) {
+      r.setStart(n, i); r.setEnd(n, i + 1);
+      const q = r.getClientRects();
+      if (q.length && atom(q[0], { node: n, offset: i })) return wiersz ? start : 0;
+    }
+  }
+  return null;
+}
+
+// Skrajny węzeł bloku (tekst, <br>, ikona albo pusty element), bez wchodzenia w .znak – do czyszczenia końców po podziale.
+function skrajny(b, koniec) {
+  let n = koniec ? b.lastChild : b.firstChild;
+  while (n && n.nodeType === 1 && n.tagName !== 'IMG' && n.tagName !== 'BR' && !n.classList.contains('ikona-kolor') && !n.classList.contains('znak') && n.firstChild)
+    n = koniec ? n.lastChild : n.firstChild;
+  return n;
+}
+function obetnij(b, koniec) {
+  let br = false;
+  for (let n = skrajny(b, koniec); n; n = skrajny(b, koniec)) {
+    if (n.nodeType === 3) {
+      const v = koniec ? n.nodeValue.replace(/[ \t\n\r\f]+$/, '') : n.nodeValue.replace(/^[ \t\n\r\f]+/, '');   // twarda spacja zostaje
+      if (v) { n.nodeValue = v; break; }
+      n.remove(); continue;
+    }
+    if (n.tagName === 'BR' && koniec) { br = true; n.remove(); continue; }
+    if (n.tagName !== 'IMG' && n.tagName !== 'BR' && !n.classList.contains('ikona-kolor') && !n.classList.contains('znak') && !n.firstChild) { n.remove(); continue; }
+    break;
+  }
+  return br;
+}
+
+// Wypełnienie ramki wątku (etap 1b): ramka ma już tekst; to, co wystaje poza dolny brzeg, wychodzi z ramki i wraca
+// jako lista bloków do następnej. Akapit dzieli się na granicy wiersza (Range.extractContents domyka znaczniki w obu
+// częściach): część pierwsza – .urwany (bez po=, ostatni wiersz wyjustowany), ciąg – .ciag (bez znaku listy, bez przed=
+// i wcięcia pierwszego wiersza, to samo wcięcie). Styl z z_następnym (nagłówki) nie dzieli się i nie zostaje sam na dole –
+// przechodzi z następnym akapitem, chyba że ramka zostałaby pusta.
+function podzielRamke(el) {
+  return bezObrotu(el, (t) => {
+    const dol = dolRamki(t), bloki = [...t.children];
+    for (let k = 0; k < bloki.length; k++) {
+      const b = bloki[k];
+      if (b.getBoundingClientRect().bottom <= dol) continue;
+      let cut = punktPodzialu(b, dol);
+      if (cut === null && b.getBoundingClientRect().top < dol) continue;   // wystaje tylko interlinia – wiersze widoczne
+      if (cut === null) cut = 0;                     // blok bez tekstu cały pod dołem – dalej (jak bloki++ w zmierzRamke)
+      if (b.classList.contains('trzymaj')) cut = 0;
+      if (cut) {
+        const r = document.createRange();
+        if (cut.przed) r.setStartBefore(cut.przed); else r.setStart(cut.node, cut.offset);
+        r.setEnd(b, b.childNodes.length);
+        const c = b.cloneNode(false);
+        c.classList.add('ciag');
+        c.append(r.extractContents());
+        obetnij(c, false);
+        b.classList.add('urwany');
+        if (obetnij(b, true)) b.classList.add('po-br');
+        const dalej = bloki.slice(k + 1);
+        dalej.forEach((x) => x.remove());
+        return [c, ...dalej];
+      }
+      // akapit przechodzi cały; nagłówki nad nim idą z nim (chyba że ramka zostałaby pusta)
+      let od = k;
+      while (od > 0 && bloki[od - 1].classList.contains('trzymaj')) od--;
+      if (od === 0 && k > 0) od = k;
+      const dalej = bloki.slice(od);
+      dalej.forEach((x) => x.remove());
+      return dalej;
+    }
+    return [];
+  });
+}
+
 // Błąd w instrukcji nie może przerwać budowy kart (zbudowano, Uwagi, zlecenia) – wyjątek zostaje Uwagą (przegląd #161).
 // Paleta: kolory z szablonu stron działają tylko na stronach – po złożeniu wraca paleta kart.
 async function zbudujInstrukcje() {
@@ -1683,7 +1794,7 @@ async function zbudujInstrukcje() {
   finally { PALETA = paletaKart; }
 }
 async function zbudujInstrukcjeTeraz() {
-  const warn = new Set();
+  const warn = new Set(), startBudowy = performance.now();
   UWAGI_INSTRUKCJI = warn;
   const box = $('strony'), opis = $('instrukcjaOpis');
   $('widokPrzycisk').hidden = !INSTRUKCJA_PLIK;
@@ -1756,24 +1867,31 @@ async function zbudujInstrukcjeTeraz() {
     html += `<div class="rozkladowka${i ? '' : ' pierwsza'}">${d.strony.slice(i, i ? i + 2 : 1).map(strona).join('')}</div>`;
   box.style.setProperty('--szer-strony', d.w + 'mm');
   box.innerHTML = html;
-  // Ramki tekstu: tekst o nazwie z tekst= (bez nazwy – początek pliku przed pierwszym <tekst=…>). Etap 1: jedna ramka
-  // na tekst; <następna_ramka> kończy tekst w ramce, dalszy ciąg czeka na wątki (0.8.1) i liczy się jako niezmieszczony.
-  const uzyte = new Map(), wypelnione = [];
-  for (const el of box.querySelectorAll('.el.ksztalt[data-ramka]')) {
-    const r = d.ramki.get(+el.dataset.ramka), gdzie = `${plik}, wiersz ${r.linia}`;
-    const t = teksty.get(r.tekst);
-    if (!t) { warn.add(`${gdzie}: nie ma tekstu ${r.tekst ? `„${r.nazwa}” (znacznik <tekst=${r.nazwa}> w pliku z TREŚĆ)` : 'bez nazwy (początek pliku z TREŚĆ przed pierwszym <tekst=…>)'}`); continue; }
-    if (uzyte.has(r.tekst)) { warn.add(`${gdzie}: tekst ${r.nazwa ? `„${r.nazwa}”` : 'bez nazwy'} jest już w ramce na stronie ${uzyte.get(r.tekst).strona} – łączenie ramek w wątek będzie w następnej wersji KarKi, ta ramka zostaje pusta`); continue; }
-    uzyte.set(r.tekst, r);
-    const bloki = Instrukcja.numeruj(t.bloki.map((b) => ({ ...b })), d.style);
-    const k = bloki.findIndex((b) => b.typ === 'nastepna');
-    const widoczne = k < 0 ? bloki : bloki.slice(0, k), reszta = k < 0 ? [] : bloki.slice(k + 1).filter((b) => b.typ !== 'nastepna');
-    el.innerHTML = `<div class="ramka-tekst" style="padding:${r.margines}mm;justify-content:${FLEX_V[r.pion] || 'flex-start'}">${widoczne.map((b) => blokHtml(b, d, css, warn, t.plik)).join('')}</div>`;
-    const zostalo = document.createElement('div');
-    zostalo.innerHTML = reszta.map((b) => blokHtml(b, d, css, new Set(), t.plik)).join('');
-    wypelnione.push({ el, r, t, reszta: { bloki: reszta.length, znaki: zostalo.textContent.length } });
+  // Ramki tekstu (etap 1b): ramki z tym samym tekst= tworzą wątek (Instrukcja.watki – kolejność stron, na stronie –
+  // wiersza w pliku). Cały tekst wątku trafia najpierw do pierwszej ramki (wczytanie ikon i czcionek), potem przelewa
+  // się ramka po ramce (podzielRamke); <następna_ramka> zaczyna odcinek w następnej ramce. Ostatnia ramka zatrzymuje
+  // resztę – zmierzRamke liczy, ile się nie mieści. Tekst bez nazwy – początek pliku przed pierwszym <tekst=…>.
+  const watki = Instrukcja.watki(d), elRamki = new Map(), przelewy = [];
+  for (const el of box.querySelectorAll('.el.ksztalt[data-ramka]')) elRamki.set(+el.dataset.ramka, el);
+  for (const [linia, el] of elRamki) {
+    const r = d.ramki.get(linia);
+    el.innerHTML = `<div class="ramka-tekst" style="padding:${r.margines}mm;justify-content:${FLEX_V[r.pion] || 'flex-start'}"></div>`;
+    // numer ramki w wątku („Pokaż ramki”) – nad ramką, żeby nie zasłaniał tekstu
+    el.insertAdjacentHTML('afterend', `<span class="nr-ramki" data-dla="${linia}" style="left:${parseFloat(el.style.left)}mm;top:${Math.max(0, parseFloat(el.style.top) - 3)}mm">${esc(r.nazwa || 'bez nazwy')} ${r.nr}/${r.z}</span>`);
   }
-  for (const [n, t] of teksty) if (!uzyte.has(n) && t.bloki.length)
+  const nazwaTekstu = (r) => r.nazwa ? `„${r.nazwa}”` : 'bez nazwy';
+  for (const [nazwa, lista] of watki) {
+    const ramkiW = lista.map((r) => ({ r, el: elRamki.get(r.linia) })).filter((x) => x.el);
+    if (!ramkiW.length) continue;
+    const t = teksty.get(nazwa), r0 = ramkiW[0].r;
+    if (!t) { warn.add(`${plik}, wiersz ${r0.linia}: nie ma tekstu ${nazwa ? `„${r0.nazwa}” (znacznik <tekst=${r0.nazwa}> w pliku z TREŚĆ)` : 'bez nazwy (początek pliku z TREŚĆ przed pierwszym <tekst=…>)'}`); continue; }
+    const bloki = Instrukcja.numeruj(t.bloki.map((b) => ({ ...b })), d.style);
+    const tmp = document.createElement('div');
+    const odc = Instrukcja.odcinki(bloki).map((o) => { tmp.innerHTML = o.bloki.map((b) => blokHtml(b, d, css, warn, t.plik)).join(''); return { linia: o.linia, wezly: [...tmp.children] }; });
+    ramkiW[0].el.firstElementChild.append(...odc.flatMap((o) => o.wezly));
+    przelewy.push({ nazwa, t, ramkiW, odc });
+  }
+  for (const [n, t] of teksty) if (!watki.has(n) && t.bloki.length)
     warn.add(`${t.plik}, wiersz ${t.linia}: tekst ${n ? `„${t.etykieta}”` : 'bez nazwy'} nie ma ramki – dodaj w ${plik} RAMKA = x, y, szer, wys${n ? ', tekst=' + t.etykieta : ''}`);
   // Czcionki stylów przed pomiarem (inaczej wiersze łamią się czcionką zastępczą).
   const rodziny = new Set(['"EB Garamond"']);
@@ -1781,18 +1899,47 @@ async function zbudujInstrukcjeTeraz() {
   await Promise.all([...rodziny].flatMap((r) => [`10pt ${r}`, `600 10pt ${r}`, `italic 10pt ${r}`].map((x) => document.fonts.load(x).catch(() => null))));
   await waitForImages(box);
   for (const l of new Set(fitAll(box))) warn.add(`${l}: tekst w polu TEKST nie mieści się nawet po zmniejszeniu (czerwona ramka)`);
-  const ramki = [];
-  for (const { el, r, t, reszta } of wypelnione) {
-    const m = zmierzRamke(el), bloki = m.bloki + reszta.bloki, znaki = m.znaki + reszta.znaki;
-    ramki.push({ strona: r.strona, linia: r.linia, tekst: r.nazwa, bloki, znaki, poZnaczniku: reszta.bloki });
-    if (!bloki) continue;
-    el.classList.add('przepelniona');
-    const x = parseFloat(el.style.left) + parseFloat(el.style.width) - 3, y = parseFloat(el.style.top) + parseFloat(el.style.height) - 3;
-    el.insertAdjacentHTML('afterend', `<div class="plus-ramki" style="left:${x}mm;top:${y}mm" title="Tekst nie mieści się w ramce">+</div>`);
-    warn.add(`${plik}, wiersz ${r.linia}: tekst ${r.nazwa ? `„${r.nazwa}”` : 'bez nazwy'} nie mieści się w ramce na stronie ${r.strona} – zostało ${bloki} ${odmianaAkapitow(bloki)} (ok. ${znaki} znaków)`
-      + (reszta.bloki ? `, w tym ${reszta.bloki} po <następna_ramka> – łączenie ramek w wątek będzie w następnej wersji KarKi` : ''));
+  const t0 = performance.now(), ramki = [];
+  for (const { nazwa, t, ramkiW, odc } of przelewy) {
+    ramkiW[0].el.firstElementChild.replaceChildren();
+    let fi = 0, poZnaczniku = { bloki: 0, znaki: 0 };
+    for (let si = 0; si < odc.length; si++) {
+      if (si > 0 && ++fi >= ramkiW.length) {
+        // <następna_ramka> bez następnej ramki – dalszy tekst się nie mieści
+        const reszta = odc.slice(si).flatMap((o) => o.wezly);
+        if (reszta.length) {
+          poZnaczniku = { bloki: reszta.length, znaki: reszta.reduce((a, x) => a + x.textContent.length, 0) };
+          const ost = ramkiW[ramkiW.length - 1].r;
+          warn.add(`${t.plik}, wiersz ${odc[si].linia}: <następna_ramka> – tekst ${nazwaTekstu(ost)} nie ma już następnej ramki (wątek: ${ramkiW.length} ${ramkiW.length === 1 ? 'ramka' : ramkiW.length < 5 ? 'ramki' : 'ramek'}, ostatnia na stronie ${ost.strona}) – dodaj RAMKA z tekst=${ost.nazwa || '…'} na dalszej stronie albo usuń znacznik`);
+        }
+        break;
+      }
+      let wezly = odc[si].wezly;
+      while (wezly.length) {
+        const { el } = ramkiW[fi];
+        el.firstElementChild.append(...wezly);
+        if (fi === ramkiW.length - 1) break;           // ostatnia ramka – reszta zostaje (zmierzRamke)
+        wezly = podzielRamke(el);
+        if (wezly.length) fi++;
+      }
+    }
+    ramkiW.forEach(({ r, el }, i) => {
+      const ost = i === ramkiW.length - 1, m = zmierzRamke(el), tx = el.firstElementChild, pierwszy = tx.firstElementChild;
+      const bloki = m.bloki + (ost ? poZnaczniku.bloki : 0), znaki = m.znaki + (ost ? poZnaczniku.znaki : 0);
+      if (!pierwszy) { const n = box.querySelector(`.nr-ramki[data-dla="${r.linia}"]`); n.classList.add('pusta'); n.textContent += ' – pusta'; }
+      ramki.push({ strona: r.strona, linia: r.linia, tekst: r.nazwa, nr: r.nr, z: r.z, bloki, znaki, poZnaczniku: ost ? poZnaczniku.bloki : 0,
+        start: pierwszy ? { linia: +pierwszy.dataset.linia, ciag: pierwszy.classList.contains('ciag') } : null, akapitow: tx.children.length });
+      if (!bloki) return;
+      el.classList.add('przepelniona');
+      const x = parseFloat(el.style.left) + parseFloat(el.style.width) - 3, y = parseFloat(el.style.top) + parseFloat(el.style.height) - 3;
+      el.insertAdjacentHTML('afterend', `<div class="plus-ramki" style="left:${x}mm;top:${y}mm" title="Tekst nie mieści się w ramce">+</div>`);
+      warn.add(`${plik}, wiersz ${r.linia}: tekst ${nazwaTekstu(r)} nie mieści się w ramce na stronie ${r.strona}${r.z > 1 ? ` (ostatniej z ${r.z} ramek wątku)` : ''} – zostało ${bloki} ${odmianaAkapitow(bloki)} (ok. ${znaki} znaków)`
+        + (ost && poZnaczniku.bloki ? `, w tym ${poZnaczniku.bloki} po <następna_ramka>` : '') + ' – powiększ ramkę albo dodaj następną z tym samym tekst=');
+    });
   }
-  INSTRUKCJA = { plik, strony: d.strony.length, w: d.w, h: d.h, spad: d.spad, ramki, czas: Date.now(), style: Object.keys(d.style) };
+  const czasPrzelewu = Math.round(performance.now() - t0);
+  INSTRUKCJA = { plik, strony: d.strony.length, w: d.w, h: d.h, spad: d.spad, ramki, czas: Date.now(), style: Object.keys(d.style),
+    czasBudowy: Math.round(performance.now() - startBudowy), czasPrzelewu };
   opis.textContent = `${d.strony.length} ${d.strony.length === 1 ? 'strona' : d.strony.length % 10 >= 2 && d.strony.length % 10 <= 4 && (d.strony.length % 100 < 12 || d.strony.length % 100 > 14) ? 'strony' : 'stron'} · ${d.w} × ${d.h} mm${d.spad ? ` · spad ${d.spad} mm` : ''} · ${INSTRUKCJA_PLIK} · odświeżono ${new Date().toLocaleTimeString('pl-PL')}`;
 }
 

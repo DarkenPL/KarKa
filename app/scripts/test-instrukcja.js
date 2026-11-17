@@ -150,5 +150,30 @@ sprawdz(zn === '- 1. 2. – 1. · 3. - - - - • 1. • -', 'znaczniki i numery 
 sprawdz(I.formatNumeru('a)', 28) === 'ab)' && I.formatNumeru('(i)', 14) === '(xiv)' && I.formatNumeru('A.', 3) === 'C.' && I.formatNumeru('•', 2) === '•' && I.formatNumeru('Faza 1:', 3) === 'Faza 3:' && I.formatNumeru('Krok a)', 2) === 'Krok b)', 'formaty numerów');
 sprawdz(I.stylBloku({ typ: 'li', poziom: 2, numerowana: true }) === 'numer2' && I.stylBloku({ typ: 'h', poziom: 3 }) === 'h3', 'style wbudowane bloków');
 
+// ── Wątki ramek (etap 1b): to samo tekst= – kolejność stron, na stronie – kolejność w pliku; strona pominięta ──
+const wat = I.parseDokument(`DOKUMENT = 100, 140
+STYL = tytul, bazuje=h1
+STYL = h2, z_następnym=nie
+[STRONA 4]
+RAMKA = 50, 10, 40, 120, tekst=Zasady
+RAMKA = 10, 10, 40, 120, tekst=zasady
+[STRONA 2]
+RAMKA = 10, 10, 80, 120, tekst=zasady
+RAMKA = 10, 10, 80, 20, tekst=podpis
+`, 'w.txt', h);
+const wl = I.watki(wat);
+const zas = wl.get('zasady') || [];
+sprawdz(zas.map((r) => `${r.strona}:${r.linia}:${r.nr}/${r.z}`).join() === '2:8:1/3,4:5:2/3,4:6:3/3', 'kolejność ramek wątku (strona, potem wiersz)', zas.map((r) => [r.strona, r.linia, r.nr, r.z]));
+sprawdz(wl.get('podpis').length === 1 && wl.get('podpis')[0].nr === 1 && wl.get('podpis')[0].z === 1, 'ramka poza wątkiem – 1/1', wl.get('podpis'));
+sprawdz(!wat.bledy.length, 'wątek bez Uwag szablonu', wat.bledy);
+sprawdz(wat.style.h1.z_nastepnym === true && wat.style.h3.z_nastepnym === true && wat.style.tytul.z_nastepnym === true && wat.style.h2.z_nastepnym === false && !wat.style.akapit.z_nastepnym && !wat.style.lista1.z_nastepnym,
+  'z_następnym: nagłówki domyślnie, dziedziczenie, wyłączenie', [wat.style.h1, wat.style.h2, wat.style.tytul]);
+const od = I.odcinki([{ typ: 'p', linia: 1 }, { typ: 'nastepna', linia: 3 }, { typ: 'nastepna', linia: 4 }, { typ: 'h', linia: 6 }, { typ: 'p', linia: 7 }]);
+sprawdz(od.map((o) => o.linia + ':' + o.bloki.map((b) => b.linia).join('+')).join() === '0:1,3:,4:6+7', 'odcinki <następna_ramka> (dwa pod rząd – pusty odcinek)', od);
+sprawdz(I.odcinki([]).length === 1 && !I.odcinki([])[0].bloki.length, 'odcinki pustego tekstu');
+// numeracja ciągnie się przez <następna_ramka>
+const nb = I.numeruj([{ typ: 'li', poziom: 1, numerowana: true }, { typ: 'nastepna' }, { typ: 'li', poziom: 1, numerowana: true }], I.rozwiazStyle([], h, []));
+sprawdz(nb[2].znacznik === '2.', 'numeracja przez <następna_ramka>', nb);
+
 console.log(bledow ? `test-instrukcja: ${bledow} błędów` : 'test-instrukcja: ok');
 process.exit(bledow ? 1 : 0);
