@@ -4322,6 +4322,51 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     await js("pokazWidok('karty')");
     instrukcja = { ok: !b.length, bledy: b, stan: I, zmiana };
   }
+  // Ikony z nazwą pliku w NFD (#164, --test-edytor, na kopii projektu): plik „Żołądź.svg” zapisany jako „Z” + znak łączący
+  // (jak z pakietu InDesigna / HFS+) i wiersz ikony.csv ze znacznikiem i plikiem w NFD – znaczniki w tekście (NFC) trafiają
+  // w ikony na karcie i w treści instrukcji (renderText), bez Uwag „Nieznany znacznik” / „Brak pliku ikony”.
+  let ikonyNfd = null;
+  if (testBloku('ikonyNfd') && !jestPrzykladem(szablon)) {
+    const js = (k) => wc.executeJavaScript(k);
+    const ikony = path.join(projekt, 'Ikony'), csv = path.join(projekt, 'ikony.csv');
+    const wzor = fs.readdirSync(ikony).find((n) => /\.svg$/i.test(n));
+    const nfd = 'Żołądź'.normalize('NFD'), plikNfd = path.join(ikony, nfd + '.svg');
+    const csvByl = fs.existsSync(csv) ? fs.readFileSync(csv, 'utf8') : null;
+    if (wzor) {
+      fs.copyFileSync(path.join(ikony, wzor), plikNfd);
+      const wiersz = `{${'Żółw'.normalize('NFD')}};🐢;tak;Ikony/${nfd}.svg;Test NFD\n`;
+      fs.writeFileSync(csv, csvByl ? csvByl.replace(/\n?$/, '\n') + wiersz : 'Znacznik;Znak;Odstęp;Plik;Opis\n' + wiersz);
+      await js('odswiezKarty()'); await czekaj(300);
+      ikonyNfd = await js(`(async () => {
+        const t = parseTemplate('[TALIA Test]\\nKARTA = 63, 30\\nTŁO = #f4ecd8\\nTEKST = 3, 3, 57, 24, "Plik: {Żołądź} {żołądź} csv: {Żółw}", rozmiar=10\\n', 'test.txt').talie[0];
+        const warn = new Set();
+        const r = renderCard(t, t.awers, {}, { warn, icons: RAPORT.icons, label: 'Test NFD', plik: 'test.txt', kolumny: true, wbudowane: {} });
+        const d = document.createElement('div');
+        d.id = 'test-ikony-nfd';
+        d.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;background:#fff;padding:8px';
+        d.innerHTML = '<div class="karta" data-talia="Test" title="NFD" style="' + esc(r.style) + '">' + r.html + '</div>';
+        document.body.appendChild(d);
+        fitAll(d);
+        const imgi = [...d.querySelectorAll('img.ikona')];
+        await Promise.all(imgi.map((i) => i.decode().catch(() => {})));
+        const wi = new Set(), instr = renderText('Instrukcja: {Żołądź} {Żółw}', RAPORT.icons, wi);
+        const uwagi = document.getElementById('uwagi').innerText;
+        const rect = d.getBoundingClientRect();
+        return { imgi: imgi.length, zaladowane: imgi.filter((i) => i.complete && i.naturalWidth > 0).length, uwagiKarty: [...warn],
+          instrukcja: (instr.match(/<img class="ikona"/g) || []).length, uwagiInstrukcji: [...wi], uwagi: uwagi.slice(0, 300),
+          rect: { x: 0, y: 0, width: Math.ceil(rect.width), height: Math.ceil(rect.height) } };
+      })()`);
+      ikonyNfd.naDysku = fs.readdirSync(ikony).some((n) => n !== n.normalize('NFC'));
+      await czekaj(200);
+      fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-ikony-nfd.png', (await wc.capturePage(ikonyNfd.rect)).toPNG());
+      await js("document.getElementById('test-ikony-nfd').remove()");
+      fs.rmSync(plikNfd, { force: true });
+      if (csvByl === null) fs.rmSync(csv, { force: true }); else fs.writeFileSync(csv, csvByl);
+      await js('odswiezKarty()'); await czekaj(300);
+      ikonyNfd.ok = ikonyNfd.imgi === 3 && ikonyNfd.zaladowane === 3 && !ikonyNfd.uwagiKarty.length && ikonyNfd.instrukcja === 2
+        && !ikonyNfd.uwagiInstrukcji.length && !/Nieznany znacznik|Brak pliku ikony/.test(ikonyNfd.uwagi);
+    } else ikonyNfd = { ok: false, blad: 'brak pliku .svg w Ikony/ do skopiowania' };
+  }
   // Ramki przy cięciu na projekcie (#138): raport drukarni (pierwszy – z pomiarem z obrazu każdej karty) bez UWAG i BŁĘDÓW
   // z pomiaru obrazu i bez kart niezmierzonych; INFO nie liczy się do wyniku. Czas pierwszego raportu – w wyniku.
   let ramkiPrzyklad = null;
@@ -4350,8 +4395,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
     && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!obrotKarty || obrotKarty.pominiety || obrotKarty.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!filtrWTrakcie || filtrWTrakcie.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!naroznikTest || naroznikTest.ok) && (!otokTest || otokTest.ok) && (!stykTest || stykTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok) && (!instrukcja || instrukcja.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, obrotKarty, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, naroznik: naroznikTest, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, instrukcja, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!naroznikTest || naroznikTest.ok) && (!otokTest || otokTest.ok) && (!stykTest || stykTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok) && (!instrukcja || instrukcja.ok) && (!ikonyNfd || ikonyNfd.ok);
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, obrotKarty, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, naroznik: naroznikTest, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, instrukcja, ikonyNfd, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 

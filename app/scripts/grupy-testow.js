@@ -22,7 +22,8 @@ const path = require('path');
 
 const BLOKI = {
   '03-ogrod': ['edytor', 'wybor', 'drukarnia', 'drukarniaPdf', 'obrotKarty', 'oknaDruku',   // kilka talii, rewersy, jeśli=
-    'instrukcja'],                                                      // instrukcja gry (#160) – Instrukcja/
+    'instrukcja',                                                       // instrukcja gry (#160) – Instrukcja/
+    'ikonyNfd'],                                                        // ikona z nazwą pliku w NFD (#164) – Ikony/, ikony.csv
   '05-zaklecia': ['raportStart'],                                       // tekst ok. 2 mm od krawędzi (#111)
   '07-gildie:zlecenia': ['cmykTest', 'zlecenia', 'hist', 'zmienione', 'katalog'],
   '07-gildie:zakladki': ['zakladki', 'zleceniaWTle'],

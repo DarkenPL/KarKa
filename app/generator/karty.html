@@ -310,7 +310,8 @@ let WERSJA = '';             // WERSJA = … w szablonie – pole [_wersja] na k
 // ═══════════════════════════════════════════════════════════════════════════
 const $ = (id) => document.getElementById(id);
 const norm = (s) => String(s).normalize('NFC').toLowerCase().replace(/\\/g, '/').replace(/^\.\//, '');
-const iconKey = (s) => String(s || '').replace(/[{}:\s]/g, '').toLowerCase();
+// NFC: nazwy plików z pakietu InDesigna / HFS+ bywają w NFD („Ż” jako „Z” + znak łączący) – bez tego {Żołądź} nie trafia w Żołądź.svg (#164).
+const iconKey = (s) => String(s || '').normalize('NFC').replace(/[{}:\s]/g, '').toLowerCase();
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 let files = new Map();       // ścieżka (znormalizowana, względem folderu projektu) → File
