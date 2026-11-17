@@ -4219,6 +4219,34 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       return { z: proba(true), bez: proba(false) };
     })()`);
     if (trzymaj.z !== '2,3' || trzymaj.bez !== '3') b.push('nagłówek z następnym akapitem ' + JSON.stringify(trzymaj));
+    // Podział akapitu na ramce próbnej o różnych wysokościach (przegląd #163): nic nie ginie (tekst bez spacji, ikony,
+    // pogrubienia, <br>), część pierwsza nie zostawia pustego wiersza; także wyrównanie do środka z interlinią 1.
+    const podzial = await js(`(() => {
+      const strona = document.querySelector('#strony .karta.strona');
+      const kl = (s) => (document.querySelector('#strony .blok[data-styl="' + s + '"]') || document.querySelector('#strony .blok')).className.replace(/ (urwany|ciag|po-br|trzymaj)/g, '');
+      const ik = (document.querySelector('#strony img.ikona') || { getAttribute: () => '' }).getAttribute('src');
+      const tresc = ('Słowo <b>pogrubione <i>dwa</i> słowa</b> i ikona <img class="ikona" src="' + ik + '"> dalej, a\u00a0spójnik. ').repeat(7) + 'Koniec<br>po złamaniu wiersza.';
+      const bezSpacji = (x) => x.textContent.replace(/\\s+/g, '');
+      const zle = [];
+      for (const [styl, lh, cz] of [['akapit', '', ''], ['ramka', '1', ''], ['ramka', '0.85', 'font-family:"Patrick Hand";']]) for (let mm = 8; mm <= 40; mm += 2) {
+        const el = document.createElement('div');
+        el.className = 'el ksztalt'; el.style.cssText = 'position:absolute;left:0;top:0;width:60mm;height:' + mm + 'mm;overflow:hidden';
+        el.innerHTML = '<div class="ramka-tekst"><div class="' + kl(styl) + '" data-linia="1" style="' + cz + 'line-height:' + lh + '">' + tresc + '</div></div>';
+        strona.append(el);
+        const t = el.firstElementChild, b0 = t.firstElementChild, przed = bezSpacji(b0), ikon = b0.querySelectorAll('img').length, pogr = b0.querySelectorAll('b').length;
+        const wiersz = parseFloat(getComputedStyle(b0).lineHeight), dol = t.getBoundingClientRect().bottom;
+        const dalej = podzielRamke(el);
+        const reszta = dalej.map(bezSpacji).join(''), zostalo = t.firstElementChild ? bezSpacji(t.firstElementChild) : '';
+        const ik2 = el.querySelectorAll('img').length + dalej.reduce((a, x) => a + x.querySelectorAll('img').length, 0);
+        const luka = t.firstElementChild ? dol - t.firstElementChild.getBoundingClientRect().bottom : 0;
+        if (zostalo + reszta !== przed || ik2 !== ikon) zle.push(styl + lh + ' ' + mm + 'mm: zgubiony tekst albo ikona');
+        if (dalej.length && t.firstElementChild && luka > wiersz * 1.6) zle.push(styl + lh + ' ' + mm + 'mm: pusty wiersz na dole (' + Math.round(luka) + ' px)');
+        if (dalej.length && t.firstElementChild && !/^\\S/.test(dalej[0].textContent) && !/^<img/.test(dalej[0].innerHTML)) zle.push(styl + lh + ' ' + mm + 'mm: ciąg zaczyna się spacją: ' + dalej[0].innerHTML.slice(0, 40));
+        el.remove();
+      }
+      return zle;
+    })()`);
+    if (podzial.length) b.push('podział akapitu: ' + podzial.join(' | '));
     if ((I.ramki || []).some((r) => r.bloki)) b.push('tekst nie mieści się: ' + JSON.stringify(I.ramki));
     if (s0.uwagi.length || /Instrukcja/.test(s0.panel)) b.push('Uwagi instrukcji: ' + s0.uwagi.join(' | '));
     // wzorzec: strona 1 i 3 (prawe) – pasek z lewej (x = -3), 2 i 4 (lewe) – z prawej (x = 101)

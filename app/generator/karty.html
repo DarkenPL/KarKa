@@ -1692,7 +1692,8 @@ function bezObrotu(el, f) {
 }
 
 // Początek pierwszego niewidocznego wiersza akapitu (etap 1b). Atomy: znaki węzłów tekstu (bez .znak) i ikony w kolejności;
-// nowy wiersz, gdy atom wraca w lewo albo leży niżej niż poprzedni. Wiersz jest niewidoczny, gdy choć jeden jego atom
+// nowy wiersz, gdy atom wraca w lewo albo jego środek leży niżej niż dół poprzedniego (prostokąty znaków sąsiednich
+// wierszy zachodzą na siebie przy interlinii ≤ 1,2, a przy wyrównaniu do środka/prawej wiersz nie musi wracać w lewo). Wiersz jest niewidoczny, gdy choć jeden jego atom
 // wystaje poza dol (jak w zmierzRamke – wiersz ucięty u dołu też; wysoka ikona przenosi cały swój wiersz). Znak po znaku
 // tylko w akapicie, który przecina dolny brzeg. Wynik: null – wszystkie wiersze widoczne; 0 – niewidoczny już pierwszy;
 // { node, offset } albo { przed: element } – miejsce podziału.
@@ -1702,7 +1703,7 @@ function punktPodzialu(b, dol) {
   const r = document.createRange();
   let prev = null, start = null, wiersz = 0;
   const atom = (rect, poz) => {
-    if (!prev || rect.left < prev.left - 0.5 || rect.top >= prev.bottom - 0.5) { if (prev) wiersz++; start = poz; }
+    if (!prev || rect.left < prev.left - 0.5 || (rect.top + rect.bottom) / 2 > prev.bottom) { if (prev) wiersz++; start = poz; }
     prev = rect;
     return rect.bottom > dol;
   };
@@ -1732,7 +1733,7 @@ function obetnij(b, koniec) {
   let br = false;
   for (let n = skrajny(b, koniec); n; n = skrajny(b, koniec)) {
     if (n.nodeType === 3) {
-      const v = koniec ? n.nodeValue.replace(/\s+$/, '') : n.nodeValue.replace(/^\s+/, '');
+      const v = koniec ? n.nodeValue.replace(/[ \t\n\r\f]+$/, '') : n.nodeValue.replace(/^[ \t\n\r\f]+/, '');   // twarda spacja zostaje
       if (v) { n.nodeValue = v; break; }
       n.remove(); continue;
     }
@@ -1755,7 +1756,8 @@ function podzielRamke(el) {
       const b = bloki[k];
       if (b.getBoundingClientRect().bottom <= dol) continue;
       let cut = punktPodzialu(b, dol);
-      if (cut === null) continue;                    // wystaje tylko interlinia – wiersze widoczne
+      if (cut === null && b.getBoundingClientRect().top < dol) continue;   // wystaje tylko interlinia – wiersze widoczne
+      if (cut === null) cut = 0;                     // blok bez tekstu cały pod dołem – dalej (jak bloki++ w zmierzRamke)
       if (b.classList.contains('trzymaj')) cut = 0;
       if (cut) {
         const r = document.createRange();
