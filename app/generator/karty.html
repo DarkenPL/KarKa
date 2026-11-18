@@ -403,13 +403,21 @@ async function loadFromServer({ tylkoNowe = false, wymus = false } = {}) {
   // Treść szablonu musi być tą, z której zbudowano karty: edytor buduje bez loadFromServer, a zlecenie z dysku
   // podmienia treść bez zmiany daty pliku (#160 – blok zlecenia).
   const odcisk = [...next].filter(([k]) => !plikiInstr.has(k)).map(([k, f]) => k + '@' + f.lastModified + ':' + f.size).sort().join('|') + '#' + spisIkon;
-  const tylkoInstrukcja = !tylkoNowe && !wymus && plikiInstr.size > 0 && window.zbudowano && odcisk === ODCISK_KART && !!tf && skrot(await tf.text()) === ZBUDOWANY_SZABLON;
+  const tenSzablon = !!tf && skrot(await tf.text()) === ZBUDOWANY_SZABLON;
+  const tylkoInstrukcja = !tylkoNowe && !wymus && plikiInstr.size > 0 && window.zbudowano && odcisk === ODCISK_KART && tenSzablon;
+  // Przyczyna pełnej przebudowy (#167) – do diagnozy w teście: które warunki skrótu „tylko instrukcja” nie zaszły.
+  if (!tylkoInstrukcja) {
+    const stary = new Set(ODCISK_KART.split('|')), nowy = new Set(odcisk.split('|'));
+    OSTATNIA_PRZEBUDOWA = { czas: Date.now(), wymus, tylkoNowe, bezInstrukcji: !plikiInstr.size, niezbudowano: !window.zbudowano, innySzablon: !tenSzablon,
+      odcisk: odcisk === ODCISK_KART ? null : { ubylo: [...stary].filter((x) => !nowy.has(x)).slice(0, 20), doszlo: [...nowy].filter((x) => !stary.has(x)).slice(0, 20) } };
+  }
   files = next; serverPaths = paths;
   if (tylkoInstrukcja) await budujInstrukcje(); else await build();
   ODCISK_KART = odcisk;
   if (!tylkoNowe) zapiszHistorie();
 }
 let ODCISK_KART = '', ZBUDOWANY_SZABLON = '';            // pliki projektu poza plikami instrukcji – przy zmianie tylko instrukcji karty się nie przebudowują
+var OSTATNIA_PRZEBUDOWA = null;                          // przyczyna ostatniej pełnej przebudowy w loadFromServer (#167, test)
 
 // Odcisk plików projektu. Listy są sortowane: pliki wczytują się równolegle, więc kolejność w serverPaths
 // bywa za każdym razem inna – bez sortowania każde przeładowanie zmieniało odcisk i odświeżanie kręciło się w kółko.
@@ -449,11 +457,22 @@ async function sprawdzZmianyPlikow(teraz = false) {
   SPRAWDZANIE = true;
   try {
     const stamp = await serverStamp();
-    if (lastStamp && stamp !== lastStamp) await loadFromServer();
-    lastStamp = lastStamp && stamp !== lastStamp ? await serverStamp() : stamp;
+    if (lastStamp && stamp !== lastStamp) await wczytajZeZnacznikiem(stamp);
+    else lastStamp = stamp;
   } finally { SPRAWDZANIE = false; }
 }
 setInterval(sprawdzZmianyPlikow, 1500);
+// Przebudowa po zmianie plików (#167): lastStamp = znacznik sprzed wczytania. Znacznik odczytany po przebudowie
+// zawierał też plik zapisany w jej trakcie – taka zmiana przepadała (karty ze starych danych, a następna zmiana
+// samej instrukcji przebudowywała całe karty). Plik zmieniony między znacznikiem a wczytaniem da najwyżej jedną
+// zbędną przebudowę. Gdy zmieniła się lista sprawdzanych plików (nowy plik w szablonie, nowa ikona), znacznik
+// sprzed wczytania nie pasuje do nowej listy – wtedy świeży (tu wyścig zostaje, ale to rzadkie).
+async function wczytajZeZnacznikiem(stamp, opcje) {
+  const lista = () => [...serverPaths].sort().join('|') + '#' + [...serverWanted].sort().join('|');
+  const przed = lista();
+  await loadFromServer(opcje);
+  lastStamp = stamp && lista() === przed ? stamp : await serverStamp();
+}
 document.addEventListener('visibilitychange', () => { if (!document.hidden) sprawdzZmianyPlikow(true); });   // powrót do okna – od razu
 
 // ── CSV / XLSX ───────────────────────────────────────────────────────────────
@@ -4543,7 +4562,7 @@ async function wykonajZlecenie(polecenie, surowe = {}) {
   let wynik;
   ZLECENIE_TRWA = true;
   try {
-    if (zDysku) { ZLECENIE_Z_DYSKU = true; await loadFromServer({ wymus: true }); lastStamp = await serverStamp(); }
+    if (zDysku) { ZLECENIE_Z_DYSKU = true; await wczytajZeZnacznikiem(serverPaths.length ? await serverStamp() : '', { wymus: true }); }
     else {
       // Zlecenie zawsze na aktualnych plikach z dysku – także gdy automatyczne odświeżanie stoi
       // (okno zasłonięte, odświeżanie wyłączone w menu Widok; issue #30).
@@ -4551,7 +4570,7 @@ async function wykonajZlecenie(polecenie, surowe = {}) {
       await KOLEJKA_BUDOWY;
       if (serverPaths.length) {
         const stamp = await serverStamp();
-        if (stamp !== lastStamp) { await loadFromServer(); lastStamp = await serverStamp(); }
+        if (stamp !== lastStamp) await wczytajZeZnacznikiem(stamp);
       }
     }
     if (o.id) {

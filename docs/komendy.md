@@ -29,7 +29,7 @@ KOMENDA = argument, argument, opcja=wartość, flaga
 |---|---|
 | `PROJEKT = Złota Wyprawa` | Nazwa projektu (gry): w nazwach plików JPG i PDF. Bez tej komendy – nazwa pliku szablonu. Zwykle w części wspólnej szablonu. |
 | `WERSJA = v0.3` | Wersja projektu, do wstawienia na kartę polem `[_wersja]` (patrz [Pola wbudowane](#pola-wbudowane)). |
-| `IKONY = środek` | Ikony `{…}` w tekście wyśrodkowane na wysokości cyfr (od 0.9.1) – `−1 {drewno}` stoi w jednej osi także przy dużych `ikony=`. `IKONY = linia` (i brak komendy) – ikona w linii pisma, jak przed 0.9.1. Działa w całym szablonie (karty i instrukcja gry); pojedyncze pole zmienia `ikony_pion=`. Szablon startowy ma `IKONY = środek` od początku; w starym projekcie wystarczy dopisać ten wiersz – patrz [Ikony wyśrodkowane](#ikony-wyśrodkowane--ikony--środek-od-091). |
+| `IKONY = środek` | Ikony `{…}` w tekście wyśrodkowane na wysokości cyfr (od 0.9.3) – `−1 {drewno}` stoi w jednej osi także przy dużych `ikony=`. `IKONY = linia` (i brak komendy) – ikona w linii pisma, jak przed 0.9.3. Działa w całym szablonie (karty i instrukcja gry); pojedyncze pole zmienia `ikony_pion=`. Szablon startowy ma `IKONY = środek` od początku; w starym projekcie wystarczy dopisać ten wiersz – patrz [Ikony wyśrodkowane](#ikony-wyśrodkowane--ikony--środek-od-093). |
 | `STAŁA = margines, 4` | Stała: `[=margines]` w dowolnej komendzie zostaje zamienione na `4`. Wygodne dla powtarzanych liczb i kolorów (`STAŁA = złoty, #C9A227` → `kolor=[=złoty]`). Stała działa w całym pliku szablonu, także w taliach i rewersach. |
 | `NAZWA = Przedmioty` | Nazwa talii (podgląd, pliki JPG, eksport). Domyślnie nazwa z `[TALIA …]` albo z nazwy pliku. |
 | `DANE = przedmioty.csv, przedmioty.xlsx` | Plik(i) z kartami. Pierwszy znaleziony wygrywa. Plik może leżeć w podfolderze projektu: `DANE = dane/przedmioty.csv`. |
@@ -198,7 +198,7 @@ Flagi: `pogrubienie`, `kursywa`, `podkreślenie`, `wersaliki`, `jedna_linia`, `b
 - Za długi tekst zmniejsza się sam. Jeśli nadal się nie mieści, karta dostaje w podglądzie czerwoną ramkę, a w Uwagach pojawia się wpis.
 - Jeśli **wszystkie** `[Kolumny]` w treści są puste, element nie jest rysowany. Na przykład `"**Efekt:** [Efekt]"` znika, gdy Efekt jest pusty.
 
-### Ikony wyśrodkowane – `IKONY = środek` (od 0.9.1)
+### Ikony wyśrodkowane – `IKONY = środek` (od 0.9.3)
 
 Ikona w tekście ma wysokość `ikony=` × wielkość tekstu. Bez komendy stoi w linii pisma (dół ikony trochę pod linią), więc przy dużych ikonach (`ikony=1.5` i więcej) wystaje w górę, a liczby obok wyglądają na opuszczone. `IKONY = środek` w części wspólnej szablonu stawia środek każdej ikony na połowie wysokości cyfr (wysokość wersalików czcionki pola – dobra także dla czcionek odręcznych i przy zmianie czcionki w środku tekstu). Ikony kolorów `{kolor-…}` też.
 
@@ -209,7 +209,7 @@ TEKST = 6, 50, 51, 20, [Efekt], ikony=1.5, ikony_długie=1.2, wyrównanie=środe
 TEKST = 6, 5, 51, 9, [Koszt], ikony=1.8, ikony_pion=linia   ; to pole jak dawniej
 ```
 
-- **Stare projekty bez zmian:** bez komendy karty wyglądają jak przed 0.9.1 i nie są „zmienione od ostatniego PDF” po aktualizacji. Dopisanie `IKONY = środek` zmienia wygląd (i odcisk) kart z ikonami w tekście.
+- **Stare projekty bez zmian:** bez komendy karty wyglądają jak przed 0.9.3 i nie są „zmienione od ostatniego PDF” po aktualizacji. Dopisanie `IKONY = środek` zmienia wygląd (i odcisk) kart z ikonami w tekście.
 - **`ikony_długie=`** – efekt, który łamie się na więcej niż 2 linie, czyta się lepiej z ikonami niewiele większymi od tekstu (ok. `1.2`); krótki („−1 {drewno} → +2 {zloto}”) – z dużymi. KarKa najpierw dopasowuje pole z ikonami z `ikony=`, liczy linie i przy więcej niż 2 zmienia ikony na `ikony_długie=` (i dopasowuje jeszcze raz). Zostają mniejsze, nawet gdy tekst zmieści się wtedy w 2 liniach – karta nie przeskakuje między wielkościami.
 - Pole samych ikon (`IKONA = …`) nie zmienia się – ikona wypełnia całe pole.
 - `IKONY =` działa na cały projekt, także gdy stoi w sekcji `[TALIA …]` (ostatni wiersz z tą komendą wygrywa) – dla jednej talii albo pola użyj `ikony_pion=`.

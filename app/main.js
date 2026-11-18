@@ -4296,25 +4296,30 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     if (!jestPrzykladem(szablon)) {
       const md = path.join(projekt, 'Instrukcja', 'instrukcja.md'), oryginal = fs.readFileSync(md, 'utf8');
       const czas = async (od) => { for (let i = 0; i < 40; i++) { await czekaj(250); const c = await js('INSTRUKCJA && INSTRUKCJA.czas'); if (c && c !== od) return c; } return null; };
-      const c0 = await js("document.querySelector('#podglad .karta').dataset.testInstrukcji = '1'; INSTRUKCJA.czas");
+      // #167: przywrócenie pliku celowo w trakcie przebudowy – budujInstrukcje po zbudowaniu czeka 1,5 s (raz), a test
+      // zapisuje plik zaraz po nowym INSTRUKCJA.czas. Znacznik plików odczytany po przebudowie gubił taki zapis (c2 = false).
+      const c0 = await js(`document.querySelector('#podglad .karta').dataset.testInstrukcji = '1'; OSTATNIA_PRZEBUDOWA = null;
+        (() => { const oryg = budujInstrukcje; budujInstrukcje = async (...a) => { budujInstrukcje = oryg; const w = await oryg(...a); await new Promise((r) => setTimeout(r, 1500)); return w; }; })();
+        INSTRUKCJA.czas`);
       const dlugi = Array.from({ length: 12 }, (x, i) => `Akapit dopisany w teście numer ${i + 1}, który ma kilka słów, żeby zająć wiersz albo dwa w ramce strony czwartej.`).join('\n\n');
       fs.writeFileSync(md, oryginal + '\n' + dlugi + '\n\n<następna_ramka>\n\nPo znaczniku.\n\nI jeszcze jeden akapit.\n');
       const c1 = await czas(c0);
       const s1 = await js(`({ uwagi: [...UWAGI_INSTRUKCJI], panel: document.getElementById('uwagi').innerText, karty: !!document.querySelector('#podglad .karta[data-test-instrukcji]'),
-        plus: document.querySelectorAll('#strony .plus-ramki').length, przep: [...document.querySelectorAll('#strony .przepelniona')].map((e) => e.closest('.karta.strona').dataset.strona), ramki: INSTRUKCJA.ramki, czasBudowy: INSTRUKCJA.czasBudowy })`);
+        plus: document.querySelectorAll('#strony .plus-ramki').length, przep: [...document.querySelectorAll('#strony .przepelniona')].map((e) => e.closest('.karta.strona').dataset.strona), ramki: INSTRUKCJA.ramki, czasBudowy: INSTRUKCJA.czasBudowy, przebudowa: OSTATNIA_PRZEBUDOWA })`);
       fs.writeFileSync(md, oryginal);
       const c2 = await czas(c1);
-      const s2 = await js(`({ uwagi: [...UWAGI_INSTRUKCJI], plus: document.querySelectorAll('#strony .plus-ramki').length, karty: !!document.querySelector('#podglad .karta[data-test-instrukcji]') })`);
+      const s2 = await js(`({ uwagi: [...UWAGI_INSTRUKCJI], plus: document.querySelectorAll('#strony .plus-ramki').length, karty: !!document.querySelector('#podglad .karta[data-test-instrukcji]'), przebudowa: OSTATNIA_PRZEBUDOWA })`);
       const r4 = (s1.ramki || []).find((r) => r.strona === 4 && r.nr === r.z) || {};
       const u = s1.uwagi.find((x) => /nie mieści się w ramce na stronie 4/.test(x)) || '';
       const un = s1.uwagi.find((x) => /<następna_ramka> – tekst „zasady” nie ma już następnej ramki/.test(x)) || '';
-      zmiana = { c1: !!c1, c2: !!c2, uwaga: u, uwagaZnacznika: un, czas: s1.czasBudowy, r4, przep: s1.przep, plus: s1.plus, kartyBezPrzebudowy: s1.karty && s2.karty, poPrzywroceniu: s2.uwagi };
+      zmiana = { c1: !!c1, c2: !!c2, uwaga: u, uwagaZnacznika: un, czas: s1.czasBudowy, r4, przep: s1.przep, plus: s1.plus, kartyBezPrzebudowy: s1.karty && s2.karty, kartyPoZmianie: s1.karty, kartyPoPrzywroceniu: s2.karty,
+        przyczynaPrzebudowy: s1.przebudowa || s2.przebudowa, poPrzywroceniu: s2.uwagi };
       if (!c1 || !c2) b.push('instrukcja nie odświeżyła się po zmianie pliku');
       if (!/^instrukcja\.md, wiersz \d+: <następna_ramka> – tekst „zasady” nie ma już następnej ramki \(wątek: 4 ramki, ostatnia na stronie 4\)/.test(un)) b.push('Uwaga o <następna_ramka> bez ramki ' + JSON.stringify(s1.uwagi));
       if (!/^instrukcja\.txt, wiersz \d+: tekst „zasady” nie mieści się w ramce na stronie 4 \(ostatniej z 4 ramek wątku\) – zostało \d+ akapit(y|ów)? \(ok\. \d+ znaków\), w tym 2 po <następna_ramka>/.test(u)
         || !/Instrukcja: instrukcja\.txt, wiersz/.test(s1.panel) || r4.poZnaczniku !== 2 || !(r4.bloki >= 3) || !(r4.znaki > 100)) b.push('Uwaga o przepełnieniu ' + JSON.stringify({ u, r4 }));
       if (s1.przep.join() !== '4' || s1.plus !== 1) b.push('oznaczenie przepełnionej ramki ' + JSON.stringify(s1.przep));
-      if (!s1.karty || !s2.karty) b.push('zmiana tekstu instrukcji przebudowała karty');
+      if (!s1.karty || !s2.karty) b.push(`zmiana tekstu instrukcji przebudowała karty (${!s1.karty ? 'pierwsza' : 'druga'} zmiana; przyczyna: ${JSON.stringify(s1.przebudowa || s2.przebudowa)})`);
       if (s2.uwagi.length || s2.plus) b.push('Uwagi po przywróceniu tekstu: ' + s2.uwagi.join(' | '));
       // Przegląd #161: wyjątek w instrukcji nie przerywa budowy kart (Uwaga, zbudowano, karty); ⌘R zawsze przebudowuje karty;
       // ikona użyta tylko w tekście instrukcji nie jest w raporcie „nieużywana”.
@@ -4330,6 +4335,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       await js("document.querySelector('#podglad .karta').dataset.testInstrukcji = '2'");
       await js('odswiezKarty()');
       if (await js("!!document.querySelector('#podglad .karta[data-test-instrukcji]')")) b.push('⌘R (odswiezKarty) nie przebudował kart');
+      const przyczynaR = await js('OSTATNIA_PRZEBUDOWA');
+      if (!przyczynaR || przyczynaR.wymus !== true) b.push('⌘R: brak przyczyny przebudowy ' + JSON.stringify(przyczynaR));
       fs.copyFileSync(path.join(projekt, 'Ikony', 'marchew.svg'), path.join(projekt, 'Ikony', 'tylko-instrukcja.svg'));
       fs.writeFileSync(md, oryginal + '\nIkona tylko w instrukcji {tylko-instrukcja}.\n');
       const c3 = await czas(await js('INSTRUKCJA.czas'));
