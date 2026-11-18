@@ -405,7 +405,7 @@ TEKST = 6, 70, 26, 12, "Rekord plonu!", jeśli=[Grządka]=grzyby | [Plon]>=7 & [
 
 ## Instrukcja gry (od 0.8.0)
 
-Instrukcję gry składasz strona w stronę z dwóch plików: **szablonu stron** (format, strony, ramki i obrazki w mm, style akapitów – składnia jak w szablonie kart) i **tekstu w Markdownie**. Strony oglądasz w **Widok → Instrukcja gry (⌘2)**, obok kart (⌘1 wraca do kart); odświeżają się po zapisie każdego z tych plików, a karty się wtedy nie przebudowują. Uwagi instrukcji są w panelu Uwag z dopiskiem „Instrukcja:”. Cały przykład: `przyklady/03-ogrod/Instrukcja`.
+Instrukcję gry składasz strona w stronę z dwóch plików: **szablonu stron** (format, strony, ramki i obrazki w mm, style akapitów – składnia jak w szablonie kart) i **tekstu w Markdownie**. Strony oglądasz w **Widok → Instrukcja gry (⌘2)**, obok kart (⌘1 wraca do kart); odświeżają się po zapisie każdego z tych plików, a karty się wtedy nie przebudowują. Uwagi instrukcji są w panelu Uwag z dopiskiem „Instrukcja:”. Cały przykład: `przyklady/03-ogrod/Instrukcja`. PDF dla drukarni i lekki PDF do sieci: **Plik → Instrukcja gry** (od 0.9.0, [opis](aplikacja.md#pdf-instrukcji)) – tło i elementy przy krawędzi przygotuj ze spadem z `DOKUMENT … spad=`; elementy obrócone (`obrót=`) nie są przedłużane w spad, więc przy krawędzi wyprowadź je do końca spadu (np. `OBRAZEK = 90, 86, 18, 18, …, obrót=90` przy stronie 105 mm i spadzie 3 mm).
 
 W szablonie kart (część wspólna) wskaż szablon stron – ścieżka względem folderu projektu, jak `DANE`:
 

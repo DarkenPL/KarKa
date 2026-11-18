@@ -60,6 +60,8 @@ Ikony autorstwa:
 | `Ikony/konewka.svg` | [watering-can](https://game-icons.net/1x1/delapouite/watering-can.html) | Delapouite |
 | `Ikony/koniczyna.svg` | [clover](https://game-icons.net/1x1/lorc/clover.html) | Lorc |
 
+Ikona `Ikony/nasiono.png` oraz tła stron instrukcji `Instrukcja/tlo-lewa.jpg` i `Instrukcja/tlo-prawa.jpg` są narysowane na potrzeby przykładu (od 0.9.0).
+
 ## Ikona aplikacji i szablon startowy
 
 Ikona aplikacji (`app/build/icon.svg`) oraz ikony i obrazek w szablonie nowego projektu (`app/szablon-startowy/`) są narysowane na potrzeby projektu.

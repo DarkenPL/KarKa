@@ -4039,6 +4039,7 @@ const KLUCZE_ZLECEN = {
   obrazki: ['dpi', 'format', 'talie', 'id', 'rewersy'],
   pcio: ['dpi', 'talie', 'id'],
   instrukcja: ['ramki', 'strony', 'dpi'],
+  'instrukcja-pdf': ['uklad', 'drukarnia', 'profil', 'pdfx', 'nadrukczerni', 'ppi', 'plik'],
 };
 const ALIASY_ZLECEN = { talia: 'talie', rewers: 'rewersy', zmienione: 'tylkozmienione', rozdzielczosc: 'dpi', wspolne: 'wspolnearkusze', nadruk: 'nadrukczerni' };
 const OKNO_ZLECENIA = { obrazki: 'obrazki', pcio: 'pcio' };     // pdf – ustawieniaDruku()
@@ -4073,6 +4074,40 @@ function opcjeZlecenia(polecenie, surowe = {}) {
     if (Number.isFinite(x) && x >= min && x <= max) return x;
     bledy.push(`${k}: „${v[k]}” – liczba od ${min} do ${max}`);
   };
+  // PDF instrukcji (#160, etap 2): uklad = drukarnia (domyślnie; profil drukarni z klucza drukarnia albo wybrany ostatnio
+  // w oknie „PDF dla drukarni”) | siec (lekki PDF, ppi – domyślnie 100). Przy profilu innym niż „Własne ustawienia”
+  // klucze profil / pdfx / nadrukczerni ustala profil (pominięte z ostrzeżeniem, jak w zleceniu pdf).
+  if (polecenie === 'instrukcja-pdf') {
+    const ip = { uklad: v.uklad !== undefined ? wybor('uklad', ['drukarnia', 'siec'], { 'sieć': 'siec', web: 'siec', lekki: 'siec', internet: 'siec' }) : 'drukarnia' };
+    if (ip.uklad === 'siec') {
+      const zbedne = ['drukarnia', 'profil', 'pdfx', 'nadrukczerni'].filter((k) => v[k] !== undefined);
+      if (zbedne.length) ostrzezenia.push(`${zbedne.join(', ')}: działa tylko przy uklad = drukarnia – pominięte`);
+      ip.ppi = v.ppi !== undefined ? Math.round(liczba('ppi', 50, 600) || 0) : PPI_SIECI;
+    } else if (ip.uklad === 'drukarnia') {
+      if (v.ppi !== undefined) ostrzezenia.push('ppi: działa tylko przy uklad = siec – pominięty');
+      const id = v.drukarnia !== undefined ? wybor('drukarnia', profileDrukarni().map((p) => p.id), { 'wlasne ustawienia': 'wlasne', wlasny: 'wlasne', wlasneustawienia: 'wlasne' }) : null;
+      const prof = id ? profilDrukarni(id) : v.drukarnia === undefined ? profilInstrukcji() : null;
+      if (prof) {
+        Object.assign(ip, opcjeProfilu(prof));
+        const ustala = ['profil', 'pdfx', 'nadrukczerni'].filter((k) => v[k] !== undefined);
+        if (prof.id !== 'wlasne' && ustala.length) {
+          ostrzezenia.push(`${ustala.join(', ')}: ustala profil drukarni ${prof.nazwa} – pominięte (własne wartości: drukarnia = wlasne)`);
+          for (const k of ustala) delete v[k];
+        }
+      }
+      if (v.profil !== undefined && /^(nie|brak|rgb|0|false|no)$/.test(plain(v.profil))) { ip.cmyk = false; delete ip.profil; }
+      else if (v.profil !== undefined) {
+        const k = plain(v.profil).replace(/[\s_-]/g, ''), znany = ['iso300', 'fogra39', 'fogra51'].includes(k);
+        ip.cmyk = true; ip.profil = znany ? k : v.profil;
+        if (!znany && !/\.ic[cm]$/i.test(v.profil)) bledy.push(`profil: „${v.profil}” – możliwe: iso300, fogra39, fogra51, rgb albo ścieżka do pliku .icc`);
+      }
+      if (v.pdfx !== undefined) ip.pdfx = tak('pdfx');
+      if (v.nadrukczerni !== undefined) ip.nadrukCzerni = tak('nadrukczerni');
+    }
+    if (v.plik !== undefined) ip.plik = v.plik;
+    if (bledy.length) throw new Error(bledy.join('; '));
+    return { o: ip, ostrzezenia };
+  }
   if (v.talie !== undefined) {
     o.talie = lista(v.talie); o.pominTalie = [];
     const sa = nazwyTalii(), jest = new Set(sa.map(plain));
@@ -4251,6 +4286,134 @@ async function stronyInstrukcjiPng(o = {}) {
 }
 window.stronyInstrukcjiPng = stronyInstrukcjiPng;
 
+// ── Instrukcja gry – PDF (#160, etap 2, 0.9.0; decyzje właściciela 18.11.2026) ─────────────────────────────
+// Dwa eksporty tą samą drogą co PDF kart w układzie drukarnia (#druk → main.js pdfDoPliku → drukarnia.js):
+// • uklad = drukarnia – jeden plik, strona instrukcji na stronę PDF ze spadem (kartaZeSpadem), TrimBox, CMYK, PDF/X-4,
+//   TAC, nadruk czerni i kontrola ppi z profilu drukarni wybranego ostatnio w oknie „PDF dla drukarni” (zlecenie:
+//   klucz drukarnia = …). Spad z DOKUMENT … spad= (jak spad= talii, #84): mniejszy niż w profilu – błąd, większy –
+//   przycięty, brak – dorabiany z ostrzeżeniem. Obrócone obrazki i kształty nie są przedłużane w spad – element
+//   obrócony, który dotyka linii cięcia, a nie sięga do krawędzi spadu, daje ostrzeżenie;
+// • uklad = siec – lekki PDF: strony bez spadu, RGB, obrazy zmniejszane w main.js Ghostscriptem do ok. ppi (domyślnie 100),
+//   bez spisu treści i linków; rozmiar powyżej ok. 1 MB – ostrzeżenie.
+const PPI_SIECI = 100, CEL_SIECI_MB = 1;
+const profilInstrukcji = () => profilDrukarni(ustawieniaOkna('drukarnia').drukarnia) || profilDrukarni('wlasne');
+// Obrócony obrazek / kształt przy linii cięcia, który nie sięga do krawędzi spadu (kartaZeSpadem go nie przedłuża).
+// Obwiednia po obrocie wokół środka; → [{ krawedz, wystaje (mm poza linię cięcia), plik }].
+function obroconePrzyKrawedzi(k, w, h, s) {
+  const zle = [], E = SPAD_E;
+  for (const el of k.querySelectorAll(':scope > .el.obrazek, :scope > .el.ksztalt')) {
+    const m = /rotate\((-?[\d.]+)deg\)/.exec(el.style.transform || '');
+    if (!m || !(+m[1] % 360)) continue;
+    const x = naMmKarty(el.style.left, w), y = naMmKarty(el.style.top, h), ew = naMmKarty(el.style.width, w), eh = naMmKarty(el.style.height, h);
+    if ([x, y, ew, eh].some(Number.isNaN)) continue;
+    const a = +m[1] * Math.PI / 180, c = Math.abs(Math.cos(a)), si = Math.abs(Math.sin(a));
+    const cx = x + ew / 2, cy = y + eh / 2, hw = (ew * c + eh * si) / 2, hh = (ew * si + eh * c) / 2;
+    const img = el.querySelector('img'), plik = img ? (URL_PLIK.get(img.src) || '').replace(/@[^@]*$/, '') : '';
+    for (const [krawedz, wystaje] of [['lewa', -(cx - hw)], ['górna', -(cy - hh)], ['prawa', cx + hw - w], ['dolna', cy + hh - h]])
+      if (wystaje >= -E && wystaje < s - E) zle.push({ krawedz, wystaje: Math.max(0, wystaje), plik: plik || (el.classList.contains('ksztalt') ? 'kształt' : 'obrazek') });
+  }
+  return zle;
+}
+// Strony instrukcji do #druk; → plan druku (jak buildPrint w układzie drukarnia: szer, wys, spad, pliki, strony).
+function drukInstrukcji(o = {}) {
+  const druk = $('druk');
+  druk.innerHTML = ''; druk.classList.remove('szkic');
+  const I = INSTRUKCJA, w = I.w, h = I.h, dS = I.spad || 0, strony = [...$('strony').querySelectorAll('.karta.strona')];
+  const plan = { uklad: 'drukarnia', instrukcja: o.uklad, pliki: [''], strony: [], ostrzezenia: [], informacje: [], bledy: [] };
+  let s = 0;
+  if (o.uklad === 'drukarnia') {
+    s = num(o.spad ?? SPAD_DRUKARNI) || 0;
+    const kto = o.profilDrukarni ? `drukarnia ${o.profilDrukarni.nazwa}` : 'drukarnia';
+    if (!dS && s) plan.ostrzezenia.push(`DOKUMENT nie deklaruje spadu – spad ${mmTxt(s)} jest w PDF dorabiany (tło powiększone, obrazki przy krawędzi przedłużone). Do druku w drukarni dopisz w szablonie instrukcji np. DOKUMENT = ${w}, ${h}, spad=${String(s).replace('.', ',')} i przygotuj tło i obrazki przy krawędzi ze spadem`);
+    else if (dS < s) plan.bledy.push(`spad w DOKUMENT ${mmTxt(dS)}, a ${kto} wymaga ${mmTxt(s)} – spadu nie da się dorobić; zwiększ spad= w DOKUMENT i przygotuj tło i obrazki przy krawędzi z większym spadem`);
+    else if (dS > s) plan.informacje.push(`spad w DOKUMENT ${mmTxt(dS)}, ${kto} wymaga ${mmTxt(s)} – w PDF przycięty do ${mmTxt(s)}`);
+  }
+  // Zapas spadu jak w buildPrint: Chromium zaokrągla stronę PDF, main.js przycina ją do pw × ph (MediaBox).
+  const pw = w + 2 * s, ph = h + 2 * s, ZAPAS = s ? 0.5 : 0;
+  Object.assign(plan, { szer: pw, wys: ph, spad: s });
+  for (const k of strony) {
+    if (s) for (const x of obroconePrzyKrawedzi(k, w, h, s))
+      plan.ostrzezenia.push(`strona ${k.dataset.strona}: obrócony ${x.plik} przy ${x.krawedz} krawędzi sięga w spad ${mmTxt(x.wystaje)} z ${mmTxt(s)} – elementy obrócone nie są przedłużane w spad; przesuń albo powiększ go do krawędzi spadu (w spadzie będzie tło)`);
+    plan.strony.push({ plik: 0, ciecie: [s, s, w, h] });
+    const a = document.createElement('div'); a.className = 'arkusz';
+    a.style.cssText = `width:${pw}mm;height:${ph}mm;`;
+    if (ZAPAS) a.style.overflow = 'visible';
+    const c = s ? kartaZeSpadem(k, w, h, s + ZAPAS) : k.cloneNode(true);
+    c.classList.remove('za-dlugi');
+    c.style.boxShadow = 'none'; c.style.outline = 'none'; c.style.margin = '0';
+    for (const x of c.querySelectorAll('.plus-ramki, .nr-ramki')) x.remove();          // oznaczenia widoku, nie druku
+    for (const x of c.querySelectorAll('.przepelniona')) x.classList.remove('przepelniona');
+    c.style.position = 'absolute'; c.style.left = '0'; c.style.top = '0';
+    c.style.transform = `translate(${mm(-ZAPAS)}, ${mm(-ZAPAS)})`;
+    a.appendChild(c);
+    druk.appendChild(a);
+  }
+  $('styl-strony').textContent = `@page { size: ${pw + 2 * ZAPAS}mm ${ph + 2 * ZAPAS}mm; margin: 0; }`;
+  return (PLAN_DRUKU = plan);
+}
+const mbTxt = (b) => String(Math.round(b / 1048576 * 100) / 100).replace('.', ',') + ' MB';
+// o: { uklad: drukarnia | siec, zlecenie, plik, ppi, + opcje profilu drukarni (opcjeProfilu) }. Bez opcji profilu –
+// profil wybrany ostatnio w oknie „PDF dla drukarni”. → wynik (pliki, rozmiar, strony, Uwagi) albo null (anulowano).
+async function zapiszPdfInstrukcji(o = {}) {
+  const uklad = o.uklad === 'siec' ? 'siec' : 'drukarnia';
+  const blad = (t) => { status('PDF instrukcji nie powstał: ' + t); if (o.zlecenie) throw new Error(t); return null; };
+  if (!INSTRUKCJA_PLIK) return blad('projekt nie ma instrukcji gry (INSTRUKCJA = … w szablonie kart)');
+  if (EKSPORT_TRWA) return blad('trwa inny eksport – spróbuj za chwilę');
+  if (uklad === 'drukarnia' && !o.profilDrukarni) { await odswiezDrukarnie(); o = { ...o, ...opcjeProfilu(profilInstrukcji()) }; }
+  return naWylacznosc(async () => {
+    if (!INSTRUKCJA) return blad('instrukcja się nie złożyła – szczegóły w uwagach');
+    const strony = [...$('strony').querySelectorAll('.karta.strona')];
+    if (!strony.length) return blad('instrukcja nie ma stron');
+    await waitForImages($('strony'));
+    const plan = drukInstrukcji({ ...o, uklad });
+    if (plan.bledy.length) return blad(plan.bledy.join('; '));
+    // ppi obrazków w rozmiarze na stronie (jak Raport, próg 300) – tylko dla drukarni (lekki PDF zmniejsza je sam).
+    let minPpiPlikow = Infinity;                 // najniższe ppi plików ze stron – po konwersji tylko to, co niżej (np. gradienty)
+    if (uklad === 'drukarnia') {
+      const niskie = (await obrazkiNiskiejRozdzielczosci(300, strony)).map((x) => x.replace(/<[^>]+>/g, '').replace(/\s*\(\)$/, ''));
+      for (const x of niskie) minPpiPlikow = Math.min(minPpiPlikow, parseFloat((/– ([\d,]+) dpi/.exec(x) || [])[1].replace(',', '.')));
+      if (niskie.length) plan.ostrzezenia.push(`obrazki poniżej 300 ppi na stronach instrukcji: ${niskie.join('; ')}`);
+    }
+    const druk = { szer: plan.szer, wys: plan.wys, spad: plan.spad, pliki: plan.pliki, strony: plan.strony };
+    if (uklad === 'siec') druk.siec = { ppi: +o.ppi || PPI_SIECI };
+    else if (o.cmyk) druk.cmyk = { profil: o.profil || 'fogra39', nadruk: o.nadrukCzerni !== false, pdfx: o.pdfx !== false ? 'PDF/X-4' : null, tac: o.tac || null };
+    else plan.ostrzezenia.push(`profil drukarni ${o.profilDrukarni ? o.profilDrukarni.nazwa : ''} ma kolory RGB – PDF instrukcji bez konwersji do CMYK`);
+    const info = await APP.info();
+    const nazwa = `${PROJEKT || info.nazwa || 'gra'} – instrukcja – ${uklad === 'siec' ? 'sieć' : 'drukarnia'}`;
+    status(uklad === 'siec' ? 'Zapisywanie lekkiego PDF instrukcji…' : 'Zapisywanie PDF instrukcji dla drukarni…');
+    let w;
+    try { w = o.zlecenie ? await APP.zapiszPdfZlecenia(o.plik || nazwa + '.pdf', druk) : await APP.zapiszPdf(nazwa, druk); }
+    catch (e) { return blad(String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
+    if (!w) { status('Zapis PDF instrukcji anulowany.'); return null; }
+    const pliki = [].concat(w.pliki || w), c = w.cmyk || null, sc = w.siec || null;
+    const wynik = { pliki, uklad, strony: strony.length, strona: [plan.szer, plan.wys].map((x) => Math.round(x * 100) / 100), spad: plan.spad };
+    if (c) {
+      const p = c.pliki[0] || {};
+      wynik.rozmiar = p.rozmiar ?? null;
+      wynik.cmyk = c;
+      if (c.limitTAC && c.stronPonadLimit) plan.ostrzezenia.push(`TAC do ${c.maksTAC} % – ${c.stronPonadLimit} ${c.stronPonadLimit === 1 ? 'strona' : 'stron(y)'} powyżej limitu drukarni ${c.limitTAC} % (sprawdź ciemne kolory i czerń czterokolorową w grafikach)`);
+      const nizej = (p.obrazkiNiskiePpi || []).filter((x) => Math.min(x.ppi[0], x.ppi[1]) < minPpiPlikow - 1);
+      if (nizej.length) plan.ostrzezenia.push(`po konwersji do CMYK obrazki poniżej 300 ppi: ${nizej.length} (najniżej ${Math.min(...nizej.map((x) => Math.min(x.ppi[0], x.ppi[1])))} ppi, strony ${[...new Set(nizej.map((x) => x.strona))].join(', ')}) – zwykle gradienty CSS/SVG zamienione przez Ghostscripta na obrazki`);
+    }
+    if (o.profilDrukarni && uklad === 'drukarnia') wynik.drukarnia = o.profilDrukarni.id;
+    if (sc) {
+      wynik.siec = sc;
+      if (sc.brakGs) plan.ostrzezenia.push(`brak Ghostscripta (${sc.brakGs}) – obrazy w pełnej rozdzielczości, plik nie jest zmniejszony`);
+      if (sc.po > CEL_SIECI_MB * 1048576) plan.ostrzezenia.push(`lekki PDF ma ${mbTxt(sc.po)} (cel ok. ${CEL_SIECI_MB} MB) – zmniejsz ppi = w zleceniu albo obrazy na stronach`);
+    }
+    const rozmiar = sc ? sc.po : wynik.rozmiar;
+    if (rozmiar) wynik.rozmiarMB = Math.round(rozmiar / 1048576 * 100) / 100;
+    if (plan.ostrzezenia.length) wynik.ostrzezenia = plan.ostrzezenia;
+    if (plan.informacje.length) wynik.informacje = plan.informacje;
+    wynik.uwagiInstrukcji = [...UWAGI_INSTRUKCJI];
+    punktHistorii((uklad === 'siec' ? 'PDF instrukcji – sieć' : 'PDF instrukcji – drukarnia') + (o.zlecenie ? ' (zlecenie)' : ''));
+    status(`Zapisano PDF instrukcji ${uklad === 'siec' ? 'do sieci' : 'dla drukarni' + (o.profilDrukarni ? ' ' + o.profilDrukarni.nazwa : '') + (c ? ` w CMYK (${c.profil}${c.pdfx ? ', ' + c.pdfx : ''})` : '')}`
+      + `: ${pliki.join(', ')}${rozmiar ? ` (${mbTxt(rozmiar)})` : ''}` + (plan.ostrzezenia.length ? ' · Uwaga: ' + plan.ostrzezenia.join('; ') : '') + (plan.informacje.length ? ' · ' + plan.informacje.join('; ') : ''));
+    return wynik;
+  });
+}
+window.zapiszPdfInstrukcji = zapiszPdfInstrukcji;
+
 const ZADANIA_ZLECEN = {
   async katalog(o) {
     const r = await zapiszKatalog({ talie: o.talie, id: o.id }, 'zlecenie');
@@ -4296,6 +4459,11 @@ const ZADANIA_ZLECEN = {
     return { ok: true, pliki: r.nazwy.map((n) => r.folder + '/' + n) };
   },
   async instrukcja(o) { return { ok: true, ...(await stronyInstrukcjiPng(o)) }; },
+  async 'instrukcja-pdf'(o) {
+    const r = await zapiszPdfInstrukcji({ ...o, zlecenie: true });
+    if (!r) throw new Error('PDF instrukcji nie został zapisany');
+    return { ok: true, ...r };
+  },
   async pcio(o) {
     const r = await exportPcio({ ...o, zlecenie: true });
     if (!r) throw new Error('brak kart do pokoju playingcards.io – sprawdź talie i id');
@@ -4305,7 +4473,7 @@ const ZADANIA_ZLECEN = {
 
 async function wykonajZlecenie(polecenie, surowe = {}) {
   let o, ostrzezenia = [];
-  if (polecenie === 'pdf') await odswiezDrukarnie();          // „Własne ustawienia” mogły się zmienić w innej zakładce
+  if (polecenie === 'pdf' || polecenie === 'instrukcja-pdf') await odswiezDrukarnie();   // „Własne ustawienia” mogły się zmienić w innej zakładce
   try { ({ o, ostrzezenia } = opcjeZlecenia(polecenie, surowe)); }
   catch (e) { return { ok: false, pliki: [], blad: String(e.message || e), ...stanZlecenia() }; }
   const zDysku = !!(SZABLON && ED.zmiany);

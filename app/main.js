@@ -453,6 +453,16 @@ async function pdfDoPliku(webContents, plik, druk) {
   if (!druk) { fs.writeFileSync(plik, dane); return plik; }
   const czesci = await drukarnia.przygotujDruk(dane, druk, plik, ZASOBY);
   let raport = null;
+  // Lekki PDF instrukcji do sieci (#160, etap 2): RGB, obrazy zmniejszone Ghostscriptem do ok. druk.siec.ppi.
+  // Bez Ghostscripta plik powstaje bez zmniejszenia (siec.brakGs – Uwaga w oknie i w wyniku zlecenia).
+  if (druk.siec) {
+    const c = czesci[0], w = await cmyk.lekkiPdf(c.bufor, { gs: cmyk.znajdzGs({ odswiez: true }), ppi: druk.siec.ppi || 100, PDFLib: drukarnia.pdfLib(ZASOBY),
+      tytul: path.basename(c.plik, '.pdf'), narzedzie: `KarKa ${WERSJA}` });
+    if (w.strony !== c.strony) throw new Error(`${path.basename(c.plik)}: po zmniejszeniu ${w.strony} stron zamiast ${c.strony}`);
+    fs.writeFileSync(c.plik, w.bufor);
+    const { bufor, ...siec } = w;
+    return { pliki: [c.plik], siec };
+  }
   if (druk.cmyk) {
     const gs = cmyk.znajdzGs({ odswiez: true });
     if (!gs.ok) throw new Error(gs.powod);
@@ -478,7 +488,7 @@ async function pdfDoPliku(webContents, plik, druk) {
       // TAC po konwersji (#85): przekroczenie limitu profilu drukarni = ostrzeżenie, nie blokada.
       const t = await cmyk.zmierzTAC(w.bufor, { gs, limit: raport.limitTAC });
       raport.czas += w.czas;
-      raport.pliki.push({ plik: c.plik, ...k, maksTAC: t.maksTAC, stronPonadLimit: t.stronPonadLimit, tacStron: t.strony.map((x) => x.maks), czas: w.czas });
+      raport.pliki.push({ plik: c.plik, ...k, maksTAC: t.maksTAC, stronPonadLimit: t.stronPonadLimit, tacStron: t.strony.map((x) => x.maks), czas: w.czas, rozmiar: w.bufor.length });
     }
   }
   for (const c of czesci) fs.writeFileSync(c.plik, c.bufor);
@@ -678,12 +688,12 @@ setInterval(() => {
   }
 }, 3000);
 // Zlecenia z pliku (np. od Claude): .generator/zlecenia/<polecenie> w folderze otwartego projektu.
-// Polecenia: katalog, stan, raport, pdf, obrazki, pcio. Treść (opcjonalnie): wiersze „klucz = wartość”
+// Polecenia: katalog, stan, raport, pdf, obrazki, pcio, instrukcja, instrukcja-pdf. Treść (opcjonalnie): wiersze „klucz = wartość”
 // (puste wiersze i komentarze # / ; pomijane). Otwarta aplikacja wykonuje zlecenia po kolei (jedno naraz,
 // wspólna kolejka dla wszystkich projektów), usuwa plik zlecenia i zapisuje wynik-<polecenie>.json
 // (katalog także dawny wynik.json).
 const FOLDER_ZLECEN = ['.generator', 'zlecenia'];
-const POLECENIA = ['katalog', 'stan', 'raport', 'pdf', 'obrazki', 'pcio', 'instrukcja'];
+const POLECENIA = ['katalog', 'stan', 'raport', 'pdf', 'obrazki', 'pcio', 'instrukcja', 'instrukcja-pdf'];
 let kolejkaZlecen = false;           // trwa przegląd zleceń (wszystkie projekty po kolei)
 function czytajZlecenie(tekst) {
   const o = {};
@@ -1225,6 +1235,14 @@ function zbudujMenu() {
             { label: 'Obrazki kart (JPG / PNG)…', accelerator: 'CmdOrCtrl+E', enabled: !!p.folder, click: wStronie('window.oknoObrazkow && oknoObrazkow()') },
             { label: 'Pokój playingcards.io…', enabled: !!p.folder, click: wStronie('window.oknoPcio && oknoPcio()') },
             { label: 'Katalog talii (JPG)…', enabled: !!p.folder, click: wStronie('window.oknoKatalogu && oknoKatalogu()') },
+          ],
+        },
+        // #160, etap 2 (0.9.0): PDF instrukcji gry – dla drukarni (profil z okna „PDF dla drukarni”) i lekki do sieci.
+        {
+          label: 'Instrukcja gry',
+          submenu: [
+            { label: 'PDF dla drukarni…', enabled: !!p.folder, click: wStronie("window.zapiszPdfInstrukcji && zapiszPdfInstrukcji({ uklad: 'drukarnia' })") },
+            { label: 'PDF do sieci…', enabled: !!p.folder, click: wStronie("window.zapiszPdfInstrukcji && zapiszPdfInstrukcji({ uklad: 'siec' })") },
           ],
         },
         { type: 'separator' },
@@ -4364,6 +4382,120 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     await js("pokazWidok('karty')");
     instrukcja = { ok: !b.length, bledy: b, stan: I, zmiana };
   }
+  // PDF instrukcji (#160, etap 2, 0.9.0; --test-edytor, na kopii 03-ogrod): zlecenie instrukcja-pdf.
+  // a) uklad = drukarnia (Własne ustawienia, profil testowy): jeden plik, 4 strony 111 × 154 mm (spad 3 mm z DOKUMENT), TrimBox
+  //    105 × 148, PDF/X-4 (Output Intent), kontrola CMYK bez RGB, TAC; ostrzeżenie o tle 150 ppi (pliki tlo-*.jpg); bez ostrzeżeń
+  //    o obrotach (obrazki obrócone sięgają do krawędzi spadu). Biel na ciemnym pasku (strona 2, render CMYK tiff32nc z
+  //    symulacją nadruku): są piksele białe (0 0 0 0), a każdy piksel paska to mieszanka koloru paska i bieli – bez szarego
+  //    tła pod tekstem i bez bieli zamienionej na kolor. Tło w spadzie: lewy pas spadu strony 2 (zewnętrzna krawędź) w kolorze tła.
+  // b) obroconePrzyKrawedzi: obrazek obrócony 1 mm w spadzie z 3 – ostrzeżenie; c) uklad = siec: 4 strony 105 × 148 mm,
+  //    bez CMYK, obrazy ≤ ok. 100 ppi (ikona PNG 600 ppi zmniejszona), plik ≤ 1 MB; d) zły klucz – ok: false.
+  // Zrzuty stron (Ghostscript png16m, 100 dpi): -instrukcja-pdf-drukarnia-s<N>.png i -instrukcja-pdf-siec-s<N>.png.
+  let instrukcjaPdf = null;
+  if (testBloku('instrukcjaPdf') && !jestPrzykladem(szablon)) {
+    const js = (k) => wc.executeJavaScript(k);
+    const gs = cmyk.znajdzGs({ odswiez: true });
+    const kat = gs.ok && cmyk.katalogIccGs(gs);
+    const icc = process.env.KARKA_TEST_PROFIL_KLUCZA || (kat && path.join(kat, 'default_cmyk.icc'));
+    if (!gs.ok || !icc || !fs.existsSync(icc)) instrukcjaPdf = process.env.GITHUB_ACTIONS ? { ok: false, blad: 'w CI wymagany Ghostscript: ' + gs.powod } : { pominiety: gs.ok ? 'brak profilu testowego' : gs.powod };
+    else {
+      const b = [], zEnv = process.env.KARKA_TEST_PROFIL_KLUCZA;
+      process.env.KARKA_TEST_PROFIL_KLUCZA = icc;
+      const zl = path.join(projekt, ...FOLDER_ZLECEN);
+      fs.mkdirSync(zl, { recursive: true });
+      const plikWyniku = path.join(zl, 'wynik-instrukcja-pdf.json');
+      const zlec = async (tresc) => {
+        fs.rmSync(plikWyniku, { force: true }); fs.writeFileSync(path.join(zl, 'instrukcja-pdf'), tresc);
+        for (let i = 0; i < 240; i++) { await czekaj(500); try { return JSON.parse(fs.readFileSync(plikWyniku, 'utf8')); } catch (e) { /* jeszcze nie */ } }
+        return null;
+      };
+      const { PDFDocument, PDFName } = require('./drukarnia').pdfLib(ZASOBY);
+      const MMpt = 72 / 25.4, bliskie = (a, b) => Math.abs(a - b) <= 0.02;
+      const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'gk-instr-pdf-'));
+      const render = (pdf, urzadzenie, dpi, wzor, strony) => require('child_process').spawnSync(gs.sciezka, ['-dSAFER', '-dBATCH', '-dNOPAUSE', '-dQUIET',
+        `-sDEVICE=${urzadzenie}`, `-r${dpi}`, '-dOverprint=/simulate', ...(strony ? [`-sPageList=${strony}`] : []), `-sOutputFile=${path.join(tmp, wzor)}`, pdf], { encoding: 'utf8' });
+      const ramkiStron = async (f) => (await PDFDocument.load(fs.readFileSync(f), { updateMetadata: false })).getPages().map((s) => {
+        const m = s.getMediaBox(), t = s.getTrimBox();
+        return { mb: [m.width, m.height].map((x) => x / MMpt), tb: [t.x, t.y, t.width, t.height].map((x) => x / MMpt) };
+      });
+      try {
+        // a) drukarnia
+        const wd = await zlec('uklad = drukarnia\ndrukarnia = wlasne\nprofil = fogra39\nplik = Export/instrukcja-druk.pdf\n');
+        const fd = wd && wd.pliki && wd.pliki[0] && path.join(projekt, wd.pliki[0]);
+        instrukcjaPdf = { drukarnia: wd && { ok: wd.ok, blad: wd.blad, pliki: wd.pliki, strony: wd.strony, strona: wd.strona, spad: wd.spad, rozmiarMB: wd.rozmiarMB,
+          ostrzezenia: wd.ostrzezenia, informacje: wd.informacje, cmyk: wd.cmyk && { profil: wd.cmyk.profil, pdfx: wd.cmyk.pdfx, maksTAC: wd.cmyk.maksTAC, plik: wd.cmyk.pliki && wd.cmyk.pliki[0] && { rgb: wd.cmyk.pliki[0].rgb, przestrzenieRgb: wd.cmyk.pliki[0].przestrzenieRgb, obrazki: wd.cmyk.pliki[0].obrazki, trimBox: wd.cmyk.pliki[0].trimBox } } } };
+        if (!wd || !wd.ok || !fd || !fs.existsSync(fd)) b.push('drukarnia: ' + JSON.stringify(instrukcjaPdf.drukarnia));
+        else {
+          const r = await ramkiStron(fd), doc = await PDFDocument.load(fs.readFileSync(fd), { updateMetadata: false });
+          instrukcjaPdf.drukarnia.ramki = r[0];
+          if (r.length !== 4 || r.some((x) => !bliskie(x.mb[0], 111) || !bliskie(x.mb[1], 154) || !bliskie(x.tb[0], 3) || !bliskie(x.tb[1], 3) || !bliskie(x.tb[2], 105) || !bliskie(x.tb[3], 148)))
+            b.push('drukarnia: strony / TrimBox ' + JSON.stringify(r));
+          if (!doc.catalog.lookup(PDFName.of('OutputIntents')) || wd.cmyk.pdfx !== 'PDF/X-4') b.push('drukarnia: brak PDF/X-4');
+          const k = wd.cmyk.pliki[0];
+          if (k.rgb || k.przestrzenieRgb || k.obrazki.inne.length || k.trimBox !== 4) b.push('drukarnia: kontrola CMYK ' + JSON.stringify(instrukcjaPdf.drukarnia.cmyk));
+          if (wd.spad !== 3 || JSON.stringify(wd.strona) !== '[111,154]' || !(wd.rozmiarMB > 0)) b.push('drukarnia: wynik spad / strona / rozmiar');
+          const ost = wd.ostrzezenia || [];
+          if (!ost.some((x) => /obrazki poniżej 300 ppi na stronach instrukcji: .*tlo-(lewa|prawa)\.jpg/.test(x))) b.push('drukarnia: brak ostrzeżenia o tle 150 ppi ' + JSON.stringify(ost));
+          if (ost.some((x) => /obrócony|nasiono\.png|po konwersji/.test(x))) b.push('drukarnia: nieoczekiwane ostrzeżenie ' + JSON.stringify(ost));
+          // biel na pasku strony 2 (lewa: pasek przy prawej krawędzi, x 101–108 mm strony = 104–111 mm z spadem)
+          const DPI = 300, px = (v) => Math.round(v / 25.4 * DPI);
+          const rt = render(fd, 'tiff32nc', DPI, 'p.tif', '2');
+          if (rt.status) b.push('render tiff: ' + (rt.stderr || '').slice(0, 300));
+          else {
+            const { w, czesci } = cmyk.pikseleTiff(fs.readFileSync(path.join(tmp, 'p.tif')));
+            const dane = Buffer.concat(czesci), pix = (x, y) => { const i = (y * w + x) * 4; return [dane[i], dane[i + 1], dane[i + 2], dane[i + 3]]; };
+            const P = pix(px(110.5), px(20)), maxP = Math.max(...P), kan = P.indexOf(maxP);
+            let biale = 0, obce = 0, wszystkie = 0;
+            for (let y = px(45); y < px(110); y++) for (let x = px(104.4); x < px(107.6); x++) {
+              const c = pix(x, y), t = c[kan] / maxP, blad = Math.max(...c.map((v, i) => Math.abs(v - P[i] * t)));
+              wszystkie++;
+              if (c[0] + c[1] + c[2] + c[3] <= 6) biale++;
+              if (blad > 24) obce++;
+            }
+            const T = pix(px(1.5), px(20));          // spad przy zewnętrznej (lewej) krawędzi strony 2 – tło z pliku, nie biel
+            instrukcjaPdf.biel = { pasek: P, biale, obce, wszystkie, spadZewn: T };
+            if (biale < 200 || obce > wszystkie * 0.003) b.push('biel na pasku w CMYK ' + JSON.stringify(instrukcjaPdf.biel));
+            if (T[0] + T[1] + T[2] + T[3] < 20) b.push('spad strony 2 bez tła ' + JSON.stringify(T));
+          }
+          const rp = render(fd, 'png16m', 100, 'd%d.png');
+          if (!rp.status) for (let n = 1; n <= 4; n++) fs.copyFileSync(path.join(tmp, `d${n}.png`), wynik.replace(/\.pdf$/i, '') + `-instrukcja-pdf-drukarnia-s${n}.png`);
+        }
+        // b) obrócony obrazek 1 mm w spadzie z 3 mm
+        instrukcjaPdf.obrot = await js(`(() => {
+          const k = document.querySelector('#strony .karta.strona[data-strona="3"]').cloneNode(true);
+          const el = [...k.querySelectorAll(':scope > .el.obrazek')].find((e) => /rotate\\(90deg\\)/.test(e.style.transform) && parseFloat(e.style.left) === 90);
+          const przed = obroconePrzyKrawedzi(k, 105, 148, 3);
+          if (el) el.style.left = '88mm';
+          return { przed, po: obroconePrzyKrawedzi(k, 105, 148, 3) };
+        })()`);
+        const po = instrukcjaPdf.obrot.po;
+        if (instrukcjaPdf.obrot.przed.length || po.length !== 1 || po[0].krawedz !== 'prawa' || Math.abs(po[0].wystaje - 1) > 0.01) b.push('obrót przy krawędzi ' + JSON.stringify(instrukcjaPdf.obrot));
+        // c) lekki PDF
+        const ws = await zlec('uklad = siec\nplik = Export/instrukcja-siec.pdf\n');
+        const fs_ = ws && ws.pliki && ws.pliki[0] && path.join(projekt, ws.pliki[0]);
+        instrukcjaPdf.siec = ws && { ok: ws.ok, blad: ws.blad, pliki: ws.pliki, strona: ws.strona, spad: ws.spad, rozmiarMB: ws.rozmiarMB, siec: ws.siec, ostrzezenia: ws.ostrzezenia };
+        if (!ws || !ws.ok || !fs_ || !fs.existsSync(fs_)) b.push('siec: ' + JSON.stringify(instrukcjaPdf.siec));
+        else {
+          const r = await ramkiStron(fs_), buf = fs.readFileSync(fs_), sc = ws.siec;
+          if (r.length !== 4 || r.some((x) => !bliskie(x.mb[0], 105) || !bliskie(x.mb[1], 148))) b.push('siec: strony ' + JSON.stringify(r));
+          if (ws.cmyk || /DeviceCMYK/.test(buf.toString('latin1'))) b.push('siec: CMYK w lekkim PDF');
+          if (!sc || sc.brakGs || sc.po !== buf.length || buf.length > 1048576 || !(sc.maksPpi <= 115) || !(sc.przed > sc.po) || sc.ppi !== 100) b.push('siec: rozmiar / ppi ' + JSON.stringify(sc));
+          if ((ws.ostrzezenia || []).length) b.push('siec: ostrzeżenia ' + JSON.stringify(ws.ostrzezenia));
+          const rp = render(fs_, 'png16m', 100, 's%d.png');
+          if (!rp.status) for (let n = 1; n <= 4; n++) fs.copyFileSync(path.join(tmp, `s${n}.png`), wynik.replace(/\.pdf$/i, '') + `-instrukcja-pdf-siec-s${n}.png`);
+        }
+        // d) zły klucz
+        const wz = await zlec('uklad = papier\n');
+        instrukcjaPdf.zlyKlucz = wz && { ok: wz.ok, blad: wz.blad };
+        if (!wz || wz.ok || !/uklad: „papier” – możliwe: drukarnia, siec/.test(wz.blad || '')) b.push('zły klucz ' + JSON.stringify(instrukcjaPdf.zlyKlucz));
+      } catch (e) { b.push('wyjątek: ' + ((e && e.stack) || e)); }
+      finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+        if (zEnv === undefined) delete process.env.KARKA_TEST_PROFIL_KLUCZA; else process.env.KARKA_TEST_PROFIL_KLUCZA = zEnv;
+      }
+      instrukcjaPdf.bledy = b; instrukcjaPdf.ok = !b.length;
+    }
+  }
   // Ikony z nazwą pliku w NFD (#164, --test-edytor, na kopii projektu): plik „Żołądź.svg” zapisany jako „Z” + znak łączący
   // (jak z pakietu InDesigna / HFS+) i wiersz ikony.csv ze znacznikiem i plikiem w NFD – znaczniki w tekście (NFC) trafiają
   // w ikony na karcie i w treści instrukcji (renderText), bez Uwag „Nieznany znacznik” / „Brak pliku ikony”.
@@ -4437,8 +4569,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
     && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!obrotKarty || obrotKarty.pominiety || obrotKarty.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!filtrWTrakcie || filtrWTrakcie.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!naroznikTest || naroznikTest.ok) && (!otokTest || otokTest.ok) && (!stykTest || stykTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok) && (!instrukcja || instrukcja.ok) && (!ikonyNfd || ikonyNfd.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, obrotKarty, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, naroznik: naroznikTest, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, instrukcja, ikonyNfd, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!naroznikTest || naroznikTest.ok) && (!otokTest || otokTest.ok) && (!stykTest || stykTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok) && (!instrukcja || instrukcja.ok) && (!instrukcjaPdf || instrukcjaPdf.ok) && (!ikonyNfd || ikonyNfd.ok);
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, obrotKarty, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, naroznik: naroznikTest, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, instrukcja, instrukcjaPdf, ikonyNfd, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
