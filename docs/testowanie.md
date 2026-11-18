@@ -9,7 +9,7 @@ Notatki dla Claude (i ludzi). Przeniesione z `CLAUDE.md` (v0.7.5); tryb testowy 
 
   | Przykład | Bloki | Po co |
   |---|---|---|
-  | `03-ogrod` | `edytor`, `wybor`, `drukarnia`, `drukarniaPdf`, `obrotKarty`, `oknaDruku`, `instrukcja`, `ikonyNfd` | kilka talii, rewersy, `jeśli=`; instrukcja gry (`Instrukcja/`, #160); ikona z nazwą pliku w NFD (#164) |
+  | `03-ogrod` | `edytor`, `wybor`, `drukarnia`, `drukarniaPdf`, `obrotKarty`, `oknaDruku`, `instrukcja`, `instrukcjaPdf`, `ikonyNfd` | kilka talii, rewersy, `jeśli=`; instrukcja gry (`Instrukcja/`, #160; PDF instrukcji – Ghostscript i profil testowy jak `profileDrukarni`); ikona z nazwą pliku w NFD (#164) |
   | `07-gildie:zlecenia` | `cmykTest`, `zlecenia`, `hist`, `zmienione`, `katalog` | zlecenia z profilem CMYK tylko z `cmykTest` w tym samym procesie |
   | `07-gildie:zakladki` | `zakladki`, `zleceniaWTle` | oba otwierają i zamykają zakładki |
   | `07-gildie:reszta` | `arkusze`, `rewersy`, `rewersyDodatki`, `spadTest`, `okna`, `podfolder`, `filtrWTrakcie`, `formatowanie`, `uklad`, `jesli`, `rozmiary`, `akapity`, `raportProgi`, `naroznik`, `otok`, `ramkiObraz`, `styk` | talia Magowie – rewersy zależne od karty (#47); reszta to karty testowe poza projektem |

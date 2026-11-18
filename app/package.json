@@ -1,8 +1,8 @@
 {
   "name": "karka",
   "productName": "KarKa",
-  "version": "0.8.3",
-  "nazwaWydania": "Kaszta zecerska",
+  "version": "0.9.0",
+  "nazwaWydania": "Kamień litograficzny",
   "description": "KarKa (Kawia Karciana) – generator kart do gier: karty z arkusza CSV/XLSX i szablonu tekstowego",
   "main": "start.js",
   "private": true,

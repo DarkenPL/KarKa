@@ -139,10 +139,15 @@ function konwertuj(wejscie, wyjscie, { gs, profil, sygnal, limit = 5 * 60 * 1000
     sprawdzPlikIcc(profil);
     katalog = katalogZProfilem(gs, profil, fs.mkdtempSync(path.join(os.tmpdir(), 'karka-icc-')));
   } catch (e) { return Promise.reject(e); }
+  return uruchomGs(gs, argumentyGs(wejscie, wyjscie, katalog), wyjscie, { sygnal, limit, opis: 'konwersja do CMYK', sprzatanie: () => fs.rmSync(katalog, { recursive: true, force: true }) });
+}
+// Uruchomienie Ghostscripta z gotowymi argumentami (konwersja do CMYK, lekki PDF). → { czas }. Błąd = wyjątek,
+// częściowy plik wyjściowy usuwany; sprzatanie – po zakończeniu (także przy błędzie).
+function uruchomGs(gs, argumenty, wyjscie, { sygnal, limit = 5 * 60 * 1000, opis = 'Ghostscript', sprzatanie = () => {} } = {}) {
   const start = Date.now();
   return new Promise((ok, blad) => {
     let wyjscieGs = '', koniec = false;
-    const proc = spawn(gs.sciezka, argumentyGs(wejscie, wyjscie, katalog), { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(gs.sciezka, argumenty, { stdio: ['ignore', 'pipe', 'pipe'] });
     const dopisz = (c) => { wyjscieGs = (wyjscieGs + c).slice(-20000); };
     proc.stdout.on('data', dopisz);
     proc.stderr.on('data', dopisz);
@@ -151,10 +156,10 @@ function konwertuj(wejscie, wyjscie, { gs, profil, sygnal, limit = 5 * 60 * 1000
       koniec = true;
       clearTimeout(zegar);
       if (sygnal) sygnal.removeEventListener('abort', przerwij);
-      fs.rmSync(katalog, { recursive: true, force: true });
+      sprzatanie();
       if (e) { fs.rmSync(wyjscie, { force: true }); blad(e); } else ok({ czas: Date.now() - start });
     };
-    const przerwij = () => { proc.kill('SIGKILL'); zakoncz(new Error('konwersja do CMYK przerwana')); };
+    const przerwij = () => { proc.kill('SIGKILL'); zakoncz(new Error(`${opis} przerwana`)); };
     const zegar = setTimeout(() => { proc.kill('SIGKILL'); zakoncz(new Error(`Ghostscript nie skończył w ${Math.round(limit / 1000)} s`)); }, limit);
     if (sygnal) { if (sygnal.aborted) return przerwij(); sygnal.addEventListener('abort', przerwij); }
     proc.on('error', (e) => zakoncz(new Error('nie udało się uruchomić Ghostscripta: ' + e.message)));
@@ -752,6 +757,45 @@ async function pdfx4(buf, { PDFLib, profil, warunek = 'Custom', nazwa, tytul = '
   return wynik;
 }
 
+// ── Lekki PDF do sieci (#160, etap 2, 0.9.0) ────────────────────────────────
+// PDF instrukcji z Chromium (RGB, strony bez spadu) przez Ghostscript: kolory w RGB (LeaveColorUnchanged rastruje część
+// treści Chromium na tysiące pasków 720 ppi – plik 7× większy, sprawdzone na 03-ogrod), obrazy kolorowe i szare
+// zmniejszone do ok. ppi (próg 1,0 – każdy obraz powyżej ppi) i zapisane jako JPEG, czcionki w podzbiorach.
+// Bez Ghostscripta – plik z Chromium bez zmniejszenia (brakGs = powód). Potem pdf-lib: tytuł, narzędzie, ppi obrazków.
+function argumentyLekkie(wejscie, wyjscie, ppi) {
+  return ['-dSAFER', '-dBATCH', '-dNOPAUSE', '-dQUIET',
+    '-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.6', '-dPDFSETTINGS=/ebook',
+    '-sColorConversionStrategy=RGB', '-dAutoRotatePages=/None',
+    '-dDownsampleColorImages=true', '-dColorImageDownsampleType=/Bicubic', `-dColorImageResolution=${ppi}`, '-dColorImageDownsampleThreshold=1.0',
+    '-dDownsampleGrayImages=true', '-dGrayImageDownsampleType=/Bicubic', `-dGrayImageResolution=${ppi}`, '-dGrayImageDownsampleThreshold=1.0',
+    '-dDownsampleMonoImages=true', `-dMonoImageResolution=${ppi * 3}`,
+    '-dDetectDuplicateImages=true', '-dCompressFonts=true', '-dSubsetFonts=true',
+    `-sOutputFile=${wyjscie}`, wejscie];
+}
+async function lekkiPdf(buf, { gs, ppi = 100, PDFLib, tytul = 'Instrukcja', narzedzie = 'KarKa', sygnal, data = new Date() } = {}) {
+  gs = gs || znajdzGs();
+  const przed = buf.length;
+  let bufor = buf, czas = 0;
+  if (gs.ok) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'karka-siec-'));
+    try {
+      const we = path.join(tmp, 'we.pdf'), wy = path.join(tmp, 'wy.pdf');
+      fs.writeFileSync(we, buf);
+      ({ czas } = await uruchomGs(gs, argumentyLekkie(we, wy, ppi), wy, { sygnal, opis: 'zmniejszanie PDF' }));
+      bufor = fs.readFileSync(wy);
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  }
+  const doc = await PDFLib.PDFDocument.load(bufor, { updateMetadata: false });
+  doc.setTitle(tytul); doc.setCreator(narzedzie); doc.setProducer(narzedzie);
+  doc.setCreationDate(data); doc.setModificationDate(data);
+  let obrazy = [];
+  try { obrazy = ppiObrazkow(doc, PDFLib); } catch (e) { obrazy = []; }
+  const ppiMin = (x) => Math.min(x.ppi[0], x.ppi[1]);
+  bufor = Buffer.from(await doc.save({ useObjectStreams: true, updateFieldAppearances: false }));
+  return { bufor, przed, po: bufor.length, strony: doc.getPageCount(), czas, ghostscript: gs.ok ? gs.wersja : null, brakGs: gs.ok ? null : gs.powod,
+    ppi, obrazki: obrazy.length, maksPpi: obrazy.length ? Math.max(...obrazy.map(ppiMin)) : null, minPpi: obrazy.length ? Math.min(...obrazy.map(ppiMin)) : null };
+}
+
 // ── TAC – całkowite pokrycie farbą (#85) ────────────────────────────────────
 // Render CMYK Ghostscriptem (tiff32nc, nadruk symulowany – jak Podgląd wyjściowy w Acrobacie), suma C+M+Y+K na piksel.
 // → { maksTAC (%), strony: [{ maks, ponad (% powierzchni powyżej limitu) }], stronPonadLimit (z limitem), dpi }.
@@ -803,6 +847,6 @@ async function zmierzTAC(buf, { gs, dpi = 150, limit = null, limitCzasu = 5 * 60
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 
-module.exports = { PROFILE, DOMYSLNY, PODPOWIEDZ_GS, MIN_WERSJA_GS, znajdzGs, argumentyGs, konwertuj, opisBleduGs,
+module.exports = { PROFILE, DOMYSLNY, PODPOWIEDZ_GS, MIN_WERSJA_GS, znajdzGs, argumentyGs, konwertuj, uruchomGs, opisBleduGs, argumentyLekkie, lekkiPdf,
   sprawdzPlikIcc, profilLokalny, pobierzProfil, rozwiazProfil, adresPaczki, czyKlucz, sprawdzPdf, konwertujBufor, sha256,
   czernK100, grupyCmyk, nadrukCzerni, nadrukWStrumieniu, katalogIccGs, wypakujProfileGs, sprawdzProfilGs, pdfx4, zmierzTAC, pikseleTiff, PROG_PPI };

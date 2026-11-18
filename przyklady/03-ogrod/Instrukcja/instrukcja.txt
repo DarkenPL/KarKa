@@ -29,10 +29,16 @@ STYL_ZNAKOWY = pogrubienie, czcionka="EB Garamond", grubość=600, kolor=#2E4A22
 [WZORZEC]
 TŁO = ziemia
 TEKST = 10, 141, 85, 4, "[_projekt] · strona [_numer]", styl=podpis, rozmiar=7
+; Tło z pliku ze spadem (111 × 154 mm = strona + 3 mm z każdej strony) – ciemniejsze ku krawędzi zewnętrznej.
+; Biały tekst na pasku (obrót 90°) – sprawdzenie bieli na ciemnym tle po konwersji do CMYK.
 [WZORZEC LEWA]
+TŁO = Instrukcja/tlo-lewa.jpg
 PROSTOKĄT = 101, -3, 7, 154, kolor=zieleń
+TEKST = 68, 73.25, 70, 3.5, "OGRÓD · INSTRUKCJA", styl=podpis, rozmiar=7, kolor=#ffffff, obrót=90
 [WZORZEC PRAWA]
+TŁO = Instrukcja/tlo-prawa.jpg
 PROSTOKĄT = -3, -3, 7, 154, kolor=zieleń
+TEKST = -33, 73.25, 70, 3.5, "OGRÓD · INSTRUKCJA", styl=podpis, rozmiar=7, kolor=#ffffff, obrót=-90
 
 [STRONA 1]
 TEKST   = 10, 12, 85, 20, "Ogród", czcionka="Patrick Hand", rozmiar=40, kolor=zieleń, wyrównanie=środek, pion=środek
@@ -55,6 +61,9 @@ TEKST     = 66, 50, 26, 6, "Dąb", styl=podpis
 TEKST     = 12, 60, 81, 12, "grządka „warzywa” · grządka „drzewa”", styl=podpis, rozmiar=8, kolor=#6b6b6b
 OBRAZEK   = 40, 84, 25, 25, Ikony/burza.svg, obrót=180
 TEKST     = 20, 112, 65, 8, "Burza do góry nogami", styl=podpis, obrót=180
+; Obrazki obrócone przy krawędzi strony – sięgają do krawędzi spadu (w PDF dla drukarni – w spadzie, w lekkim PDF – przycięte)
+OBRAZEK   = 90, 86, 18, 18, Ikony/koniczyna.svg, obrót=90
+OBRAZEK   = 90, 133, 18, 18, Ikony/grzyb.svg, obrót=180
 RAMKA     = 15, 122, 75, 14, tekst=podpis, pion=środek
 
 [STRONA 4]

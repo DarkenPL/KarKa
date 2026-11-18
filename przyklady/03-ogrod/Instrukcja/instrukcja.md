@@ -3,7 +3,7 @@
 <tekst=wstęp>
 <styl=ramka>Zasadź warzywa, kwiaty i drzewa, a potem patrz w niebo. **Słońce** {slonce} i **deszcz** {deszcz} pomagają roślinom rosnąć, a **burza** {burza} potrafi zniszczyć całą grządkę.
 
-<styl=ramka>Gra dla 2–4 ogrodników od 8 lat.
+<styl=ramka>Gra dla 2–4 ogrodników od 8 lat. Każdy zaczyna z jednym nasionem {nasiono}.
 
 <tekst=podpis>
 <styl=ramka>Ten rysunek to tylko przykład – w grze grządek może być więcej.
