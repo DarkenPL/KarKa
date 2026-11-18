@@ -4371,7 +4371,7 @@ async function zapiszPdfInstrukcji(o = {}) {
     let minPpiPlikow = Infinity;                 // najniższe ppi plików ze stron – po konwersji tylko to, co niżej (np. gradienty)
     if (uklad === 'drukarnia') {
       const niskie = (await obrazkiNiskiejRozdzielczosci(300, strony)).map((x) => x.replace(/<[^>]+>/g, '').replace(/\s*\(\)$/, ''));
-      for (const x of niskie) minPpiPlikow = Math.min(minPpiPlikow, parseFloat((/– ([\d,]+) dpi/.exec(x) || [])[1].replace(',', '.')));
+      for (const x of niskie) { const m = /– ([\d,]+) dpi/.exec(x); if (m) minPpiPlikow = Math.min(minPpiPlikow, parseFloat(m[1].replace(',', '.'))); }
       if (niskie.length) plan.ostrzezenia.push(`obrazki poniżej 300 ppi na stronach instrukcji: ${niskie.join('; ')}`);
     }
     const druk = { szer: plan.szer, wys: plan.wys, spad: plan.spad, pliki: plan.pliki, strony: plan.strony };
