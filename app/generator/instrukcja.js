@@ -43,6 +43,16 @@
     return { args, opt };
   }
 
+  // margines= ramki (#160, 18.11.2026): jedna liczba – wszystkie boki, dwie – pion i poziom („0 2”: 2 mm tylko z lewej
+  // i prawej, jak wcięcia ramki w InDesignie), cztery – góra, prawo, dół, lewo (kolejność CSS). Wynik [góra, prawo, dół, lewo]
+  // w mm albo null przy błędzie. Przecinek dziesiętny jak w innych liczbach (0,5).
+  function marginesy(v, h) {
+    if (v === undefined || v === true) return [0, 0, 0, 0];
+    const n = String(v).trim().split(/\s+/).map((x) => h.num(x.replace(',', '.')));
+    if (![1, 2, 4].includes(n.length) || n.some((x) => Number.isNaN(x))) return null;
+    return n.length === 1 ? [n[0], n[0], n[0], n[0]] : n.length === 2 ? [n[0], n[1], n[0], n[1]] : n;
+  }
+
   // Style z wpisów STYL (w kolejności pliku) → nazwa → opcje po dziedziczeniu (bazuje=), liczby jako liczby.
   function rozwiazStyle(wpisy, h, bledy) {
     const wlasne = new Map();
@@ -177,8 +187,8 @@
         if (!strona) { d.bledy.push(`${where}: RAMKA stoi poza [STRONA N] – ramka tekstu należy do strony`); return; }
         const { opt } = rozbierz(m[2], h);
         const r = { linia: i + 1, strona: strona.nr, tekst: opt.tekst !== undefined ? h.plain(opt.tekst) : '', nazwa: opt.tekst || '',
-          margines: opt.margines !== undefined ? h.num(String(opt.margines).replace(',', '.')) : 0, pion: h.plain(opt.pion || '') };
-        if (Number.isNaN(r.margines)) { d.bledy.push(`${where}: margines= to liczba mm`); r.margines = 0; }
+          margines: marginesy(opt.margines, h), pion: h.plain(opt.pion || '') };
+        if (!r.margines) { d.bledy.push(`${where}: margines= to 1, 2 albo 4 liczby mm oddzielone spacją (wszystkie boki · pion poziom · góra prawo dół lewo)`); r.margines = [0, 0, 0, 0]; }
         d.ramki.set(i + 1, r); strona.ramki.push(r);
         // Ramka rysuje się jak PROSTOKĄT (wypełnienie, obwódka, zaokrąglenie, obrót) – domyślnie bez wypełnienia.
         d.zamiany.set(i, 'PROSTOKĄT = kolor=brak, ' + m[2]);
@@ -223,7 +233,7 @@
   // Nagłówki #, ##, ###; akapity (pusta linia kończy akapit); listy -, *, +, • i 1. / 1) – poziom z wcięcia (do 3);
   // twarde złamanie: <br>, \ albo dwie spacje na końcu wiersza; <styl=nazwa> na początku akapitu albo punktu;
   // <tekst=nazwa> w osobnym wierszu zaczyna nazwany tekst; <następna_ramka> w osobnym wierszu – przejście do następnej
-  // ramki; komentarze <!-- … --> pomijane. Formatowanie w wierszu (**, *, {ikona}, znaczniki) zostaje w polu tekst –
+  // ramki, <następna_strona> – do pierwszej ramki wątku na dalszej stronie (0.8.3); komentarze <!-- … --> pomijane. Formatowanie w wierszu (**, *, {ikona}, znaczniki) zostaje w polu tekst –
   // zamienia je karty.html (to samo co na kartach).
   const PUNKT_RE = /^(\s*)([-*+•]|\d{1,3}[.)])\s+(.*)$/;
   function parsujMarkdown(text, plik, h) {
@@ -253,9 +263,10 @@
         else { biezacy = { nazwa, etykieta: zn[1], bloki: [], linia }; teksty.push(biezacy); }
         return;
       }
-      if (/^\s*<\s*nast[eę]pna_ramka\s*>\s*$/i.test(t)) {
+      const zn2 = /^\s*<\s*nast[eę]pna_(ramka|strona)\s*>\s*$/i.exec(t);
+      if (zn2) {
         zamknij(); wciecia = [];
-        biezacy.bloki.push({ typ: 'nastepna', linia });
+        biezacy.bloki.push({ typ: 'nastepna', linia, strona: zn2[1].toLowerCase() === 'strona' });
         return;
       }
       const hd = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/.exec(t);      // zamykające # tylko po spacji (CommonMark)
@@ -353,16 +364,17 @@
     return w;
   }
 
-  // Bloki tekstu podzielone na odcinki <następna_ramka>: odcinek N zaczyna się w kolejnej ramce po odcinku N−1.
-  // Wynik: [{ bloki, linia }] – linia: wiersz znacznika, który zaczyna odcinek (0 dla pierwszego).
+  // Bloki tekstu podzielone na odcinki <następna_ramka> / <następna_strona>: odcinek N zaczyna się w kolejnej ramce po
+  // odcinku N−1 (strona: true – w pierwszej ramce wątku na dalszej stronie niż ramka, w której skończył się odcinek N−1).
+  // Wynik: [{ bloki, linia, strona }] – linia: wiersz znacznika, który zaczyna odcinek (0 dla pierwszego).
   function odcinki(bloki) {
-    const out = [{ bloki: [], linia: 0 }];
+    const out = [{ bloki: [], linia: 0, strona: false }];
     for (const b of bloki) {
-      if (b.typ === 'nastepna') out.push({ bloki: [], linia: b.linia });
+      if (b.typ === 'nastepna') out.push({ bloki: [], linia: b.linia, strona: !!b.strona });
       else out[out.length - 1].bloki.push(b);
     }
     return out;
   }
 
-  return { WBUDOWANE, parseDokument, watki, odcinki, tekstCzesci, parsujMarkdown, stylBloku, formatNumeru, numeruj, rozwiazStyle, opcjeTekstu };
+  return { WBUDOWANE, marginesy, parseDokument, watki, odcinki, tekstCzesci, parsujMarkdown, stylBloku, formatNumeru, numeruj, rozwiazStyle, opcjeTekstu };
 });

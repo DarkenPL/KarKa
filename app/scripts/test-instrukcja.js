@@ -61,7 +61,7 @@ sprawdz(d.w === 106 && d.h === 148 && d.spad === 3, 'DOKUMENT', [d.w, d.h, d.spa
 sprawdz(d.tresc.join() === 'instrukcja.md', 'TREŚĆ', d.tresc);
 sprawdz(d.strony.length === 3 && d.strony.map((s) => s.nr).join() === '1,2,3', 'strony 1–3 (2 pusta)', d.strony.map((s) => s.nr));
 sprawdz(d.strony[2].bezWzorca && !d.strony[0].bezWzorca, 'bez_wzorca');
-sprawdz(d.strony[0].ramki.length === 1 && d.strony[0].ramki[0].tekst === 'wstep' && d.strony[0].ramki[0].margines === 1, 'ramka strony 1', d.strony[0].ramki);
+sprawdz(d.strony[0].ramki.length === 1 && d.strony[0].ramki[0].tekst === 'wstep' && d.strony[0].ramki[0].margines.join() === '1,1,1,1', 'ramka strony 1', d.strony[0].ramki);
 sprawdz(d.strony[2].ramki[0].tekst === 'zasady' && d.strony[2].ramki[0].linia === 22, 'ramka strony 3 – nazwa bez wielkości liter, wiersz', d.strony[2].ramki);
 sprawdz(d.style.akapit.rozmiar === 9 && d.style.akapit.interlinia === 1.2 && d.style.akapit.wyrownanie === 'wyjustuj', 'akapit – zmiana tylko podanych opcji', d.style.akapit);
 sprawdz(d.style.h1.rozmiar === 18 && d.style.h1.wersaliki === true && d.style.h1.czcionka === 'EB Garamond' && d.style.h1.pogrubienie === true, 'h1 bazuje na akapit', d.style.h1);
@@ -171,6 +171,15 @@ sprawdz(wat.style.h1.z_nastepnym === true && wat.style.h3.z_nastepnym === true &
 const od = I.odcinki([{ typ: 'p', linia: 1 }, { typ: 'nastepna', linia: 3 }, { typ: 'nastepna', linia: 4 }, { typ: 'h', linia: 6 }, { typ: 'p', linia: 7 }]);
 sprawdz(od.map((o) => o.linia + ':' + o.bloki.map((b) => b.linia).join('+')).join() === '0:1,3:,4:6+7', 'odcinki <następna_ramka> (dwa pod rząd – pusty odcinek)', od);
 sprawdz(I.odcinki([]).length === 1 && !I.odcinki([])[0].bloki.length, 'odcinki pustego tekstu');
+// <następna_strona> (0.8.3): blok nastepna ze strona: true, odcinek z flagą strona
+const ns = I.parsujMarkdown('A\n\n<następna_strona>\n\nB\n\n< nastepna_ramka >\n\nC\n', 'ns.md', h).teksty[0].bloki;
+sprawdz(ns.map((b) => b.typ + (b.typ === 'nastepna' ? (b.strona ? 'S' : 'R') : '')).join() === 'p,nastepnaS,p,nastepnaR,p', 'Markdown: <następna_strona> i <następna_ramka>', ns);
+sprawdz(I.odcinki(ns).map((o) => o.linia + (o.strona ? 'S' : 'R')).join() === '0R,3S,7R', 'odcinki z flagą strona', I.odcinki(ns));
+// margines= (0.8.3): 1 liczba – wszystkie boki, 2 – pion poziom, 4 – góra prawo dół lewo; inaczej Uwaga
+sprawdz(I.marginesy('0 2', h).join() === '0,2,0,2' && I.marginesy('1 2 3 4', h).join() === '1,2,3,4' && I.marginesy('1.5', h).join() === '1.5,1.5,1.5,1.5'
+  && I.marginesy(undefined, h).join() === '0,0,0,0' && I.marginesy('1 2 3', h) === null && I.marginesy('a', h) === null, 'margines= – 1, 2 albo 4 liczby');
+const mr = I.parseDokument('DOKUMENT = 100, 140\n[STRONA 1]\nRAMKA = 1, 1, 50, 50, margines=0 2\nRAMKA = 1, 60, 50, 50, margines=1 2 3\n', 'm.txt', h);
+sprawdz(mr.strony[0].ramki[0].margines.join() === '0,2,0,2' && mr.strony[0].ramki[1].margines.join() === '0,0,0,0' && /wiersz 4: margines= to 1, 2 albo 4 liczby/.test(mr.bledy.join()), 'RAMKA margines=0 2 i błędny', [mr.strony[0].ramki, mr.bledy]);
 // numeracja ciągnie się przez <następna_ramka>
 const nb = I.numeruj([{ typ: 'li', poziom: 1, numerowana: true }, { typ: 'nastepna' }, { typ: 'li', poziom: 1, numerowana: true }], I.rozwiazStyle([], h, []));
 sprawdz(nb[2].znacznik === '2.', 'numeracja przez <następna_ramka>', nb);
