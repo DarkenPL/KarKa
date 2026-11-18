@@ -29,6 +29,7 @@ KOMENDA = argument, argument, opcja=wartość, flaga
 |---|---|
 | `PROJEKT = Złota Wyprawa` | Nazwa projektu (gry): w nazwach plików JPG i PDF. Bez tej komendy – nazwa pliku szablonu. Zwykle w części wspólnej szablonu. |
 | `WERSJA = v0.3` | Wersja projektu, do wstawienia na kartę polem `[_wersja]` (patrz [Pola wbudowane](#pola-wbudowane)). |
+| `IKONY = środek` | Ikony `{…}` w tekście wyśrodkowane na wysokości cyfr (od 0.9.3) – `−1 {drewno}` stoi w jednej osi także przy dużych `ikony=`. `IKONY = linia` (i brak komendy) – ikona w linii pisma, jak przed 0.9.3. Działa w całym szablonie (karty i instrukcja gry); pojedyncze pole zmienia `ikony_pion=`. Szablon startowy ma `IKONY = środek` od początku; w starym projekcie wystarczy dopisać ten wiersz – patrz [Ikony wyśrodkowane](#ikony-wyśrodkowane--ikony--środek-od-093). |
 | `STAŁA = margines, 4` | Stała: `[=margines]` w dowolnej komendzie zostaje zamienione na `4`. Wygodne dla powtarzanych liczb i kolorów (`STAŁA = złoty, #C9A227` → `kolor=[=złoty]`). Stała działa w całym pliku szablonu, także w taliach i rewersach. |
 | `NAZWA = Przedmioty` | Nazwa talii (podgląd, pliki JPG, eksport). Domyślnie nazwa z `[TALIA …]` albo z nazwy pliku. |
 | `DANE = przedmioty.csv, przedmioty.xlsx` | Plik(i) z kartami. Pierwszy znaleziony wygrywa. Plik może leżeć w podfolderze projektu: `DANE = dane/przedmioty.csv`. |
@@ -184,6 +185,8 @@ OTOK = 4, kolor=#1d1b19, zaokrąglenie=2
 | `pion=góra \| środek \| dół` | w pionie |
 | `interlinia=1.15` | odstęp między liniami |
 | `ikony=0.9` | wysokość ikon względem tekstu (`1.8` = 2× większe) |
+| `ikony_pion=środek \| linia` | ikony na środku cyfr albo w linii pisma – tylko w tym polu (nadpisuje `IKONY =`) |
+| `ikony_długie=1.2` | gdy tekst pola łamie się na **więcej niż 2 linie**, ikony mają tę wielkość zamiast `ikony=` – krótkie efekty z dużymi ikonami, długie z ikonami jak tekst |
 | `min=0.6` | najmniejsza skala, gdy tekst się nie mieści |
 | `obrys=0.3`, `kolor_obrysu=#000000` | obrys liter (grubość w mm) – czytelny tekst na obrazku albo gradiencie |
 | `cień` albo `cień=#00000099` | cień pod tekstem (domyślnie półprzezroczysty czarny) |
@@ -194,6 +197,27 @@ Flagi: `pogrubienie`, `kursywa`, `podkreślenie`, `wersaliki`, `jedna_linia`, `b
 
 - Za długi tekst zmniejsza się sam. Jeśli nadal się nie mieści, karta dostaje w podglądzie czerwoną ramkę, a w Uwagach pojawia się wpis.
 - Jeśli **wszystkie** `[Kolumny]` w treści są puste, element nie jest rysowany. Na przykład `"**Efekt:** [Efekt]"` znika, gdy Efekt jest pusty.
+
+### Ikony wyśrodkowane – `IKONY = środek` (od 0.9.3)
+
+Ikona w tekście ma wysokość `ikony=` × wielkość tekstu. Bez komendy stoi w linii pisma (dół ikony trochę pod linią), więc przy dużych ikonach (`ikony=1.5` i więcej) wystaje w górę, a liczby obok wyglądają na opuszczone. `IKONY = środek` w części wspólnej szablonu stawia środek każdej ikony na połowie wysokości cyfr (wysokość wersalików czcionki pola – dobra także dla czcionek odręcznych i przy zmianie czcionki w środku tekstu). Ikony kolorów `{kolor-…}` też.
+
+```
+CZCIONKA = "EB Garamond, Georgia, serif", 10
+IKONY    = środek                     ; cały szablon
+TEKST = 6, 50, 51, 20, [Efekt], ikony=1.5, ikony_długie=1.2, wyrównanie=środek, pion=środek
+TEKST = 6, 5, 51, 9, [Koszt], ikony=1.8, ikony_pion=linia   ; to pole jak dawniej
+```
+
+- **Stare projekty bez zmian:** bez komendy karty wyglądają jak przed 0.9.3 i nie są „zmienione od ostatniego PDF” po aktualizacji. Dopisanie `IKONY = środek` zmienia wygląd (i odcisk) kart z ikonami w tekście.
+- **`ikony_długie=`** – efekt, który łamie się na więcej niż 2 linie, czyta się lepiej z ikonami niewiele większymi od tekstu (ok. `1.2`); krótki („−1 {drewno} → +2 {zloto}”) – z dużymi. KarKa najpierw dopasowuje pole z ikonami z `ikony=`, liczy linie i przy więcej niż 2 zmienia ikony na `ikony_długie=` (i dopasowuje jeszcze raz). Zostają mniejsze, nawet gdy tekst zmieści się wtedy w 2 liniach – karta nie przeskakuje między wielkościami.
+- Pole samych ikon (`IKONA = …`) nie zmienia się – ikona wypełnia całe pole.
+- `IKONY =` działa na cały projekt, także gdy stoi w sekcji `[TALIA …]` (ostatni wiersz z tą komendą wygrywa) – dla jednej talii albo pola użyj `ikony_pion=`.
+- `ikony_długie=` liczy linie przy własnej skali pola, także w `grupa=` (przed wspólnym zmniejszeniem grupy) i bez obrotu (`obrót=`). Linie liczą się po tekście – duża ikona w linii pisma nie robi z jednej linii dwóch.
+
+![Ikony: linia i środek, EB Garamond i Patrick Hand; ikony_długie](img/ikony-srodek.jpg)
+
+Na rysunku: w każdej karcie `ikony=0.9`, `1.5`, `1.9` – kolejno EB Garamond z `IKONY = linia` i `środek`, Patrick Hand `linia` i `środek`; niżej `ikony=1.5, ikony_długie=1.2` – długi tekst z ikonami 1,2, krótki z 1,5.
 
 ### Formatowanie tekstu
 
@@ -504,7 +528,7 @@ Nagłówki mają odstęp **przed** (3 / 2,5 / 2 mm) – przy odtwarzaniu układu
 | `numer="1."` | numeracja: cyfra `1` wzoru zastępuje numer (`1.`, `(1)`, `Faza 1:`); bez cyfry – osobna litera `a`, `A`, `i`, `I` (`a)`, `i.`) |
 | `wcięcie_znaku=` | gdzie stoi znak / numer (mm); tekst listy zaczyna się od `wcięcie=` – kolejne wiersze punktu też (wcięcie wiszące) |
 | `czcionka_znaku=`, `rozmiar_znaku=`, `kolor_znaku=`, `pogrubienie_znaku` | znak i numer własną czcionką – np. gdy czcionka tekstu nie ma znaku „•” |
-| `ikony=` | wysokość ikon `{…}` względem tekstu |
+| `ikony=` | wysokość ikon `{…}` względem tekstu (ustawienie w pionie – `IKONY =` z szablonu kart) |
 | `bazuje=` | styl bazowy |
 | `z_następnym` | akapit nie zostaje sam na dole ramki wątku – przechodzi dalej z następnym (domyślnie w `h1`–`h3`; `z_następnym=nie` wyłącza) |
 | flagi `pogrubienie`, `kursywa`, `wersaliki` | `pogrubienie=nie` wyłącza flagę ze stylu bazowego (np. w nagłówkach) |

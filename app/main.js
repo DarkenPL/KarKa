@@ -4548,6 +4548,108 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
         && !ikonyNfd.uwagiInstrukcji.length && !/Nieznany znacznik|Brak pliku ikony/.test(ikonyNfd.uwagi);
     } else ikonyNfd = { ok: false, blad: 'brak pliku .svg w Ikony/ do skopiowania' };
   }
+  // Ikony wyśrodkowane na wysokości cyfr (#170, karty testowe poza projektem – ikony z ikony.csv przykładu):
+  // IKONY = środek / ikony_pion= / ikony_długie=; bez ustawienia HTML pola jak dotąd. Zrzut: wiersze linia | środek.
+  let ikonySrodek = null;
+  if (testBloku('ikonySrodek')) {
+    ikonySrodek = await wc.executeJavaScript(`(async () => {
+      const wyniki = {}, uwagi = [];
+      const spr = (nazwa, warunek) => { wyniki[nazwa] = !!warunek; };
+      const ik = Object.keys(RAPORT.icons || {})[0] || '';
+      const d = document.createElement('div');
+      d.id = 'test-ikony-srodek';
+      d.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;background:#fff;padding:8px;display:flex;flex-wrap:wrap;gap:8px;width:1100px';
+      document.body.appendChild(d);
+      const bylo = IKONY_PION;
+      const karta = (linie, pion = 'linia') => {
+        IKONY_PION = pion;
+        try {
+          const t = parseTemplate('[TALIA Test]\\nKARTA = 63, 44\\nTŁO = #f4ecd8\\n' + linie + '\\n', 'test.txt').talie[0];
+          const warn = new Set();
+          const r = renderCard(t, t.awers, {}, { warn, icons: RAPORT.icons, label: 'Test', plik: 'test.txt', kolumny: true, wbudowane: {} });
+          const k = document.createElement('div');
+          k.className = 'karta'; k.dataset.talia = 'Test'; k.title = 'ikony'; k.style.cssText = r.style;
+          k.innerHTML = r.html; d.appendChild(k);
+          uwagi.push(...warn);
+          return { k, uwagi: [...warn], html: r.html };
+        } finally { IKONY_PION = bylo; }
+      };
+      // 1. komenda w szablonie
+      const p1 = parseTemplate('IKONY = środek\\n[TALIA A]\\n', 'a.txt'), p2 = parseTemplate('IKONY = Linia\\n', 'b.txt');
+      const p3 = parseTemplate('IKONY = bok\\n', 'c.txt'), p4 = parseTemplate('IKONY = 0, 22, 63, 22, {x}\\n', 'd.txt');
+      spr('komenda', p1.ikony === 'srodek' && !p1.bledy.length && p2.ikony === 'linia' && !p2.bledy.length);
+      spr('komendaBledna', !p3.ikony && /IKONY = środek albo linia/.test(p3.bledy[0] || '') && /IKONA = x, y/.test(p4.bledy[0] || ''));
+      // 2. zgodność: bez ustawienia HTML pola jak w 0.9.0
+      const z = karta('TEKST = 1, 2, 30, 10, "+2 {' + ik + '}", rozmiar=9, ikony=1.5, pion=środek');
+      spr('zgodnosc', ik && z.html.startsWith('<div class="el tekst" style="left:1mm;top:2mm;width:30mm;height:10mm;;font-size:9pt;line-height:1.15;text-align:left;justify-content:center;--ik:1.5" data-pt="9"><div class="tresc">'));
+      spr('zgodnoscPion', Math.abs(parseFloat(getComputedStyle(z.k.querySelector('img.ikona')).verticalAlign) + 1.8) < 0.01);
+      d.removeChild(z.k);
+      // 3. środek ikony na środku cyfr: czcionki z przykładów, ikony 0.9 / 1.5 / 1.9
+      const pomiar = [];
+      for (const czc of ['EB Garamond, serif', 'Patrick Hand, cursive']) {
+        await document.fonts.load('20pt "' + czc.split(',')[0] + '"', '0123456789');
+        for (const pion of ['linia', 'srodek']) {
+          const k = karta([0.9, 1.5, 1.9].map((x, i) => 'TEKST = 2, ' + (2 + i * 14) + ', 59, 13, "−1 {' + ik + '} → +23 {' + ik + '}", czcionka="' + czc + '", rozmiar=16, ikony=' + x + ', pion=środek').join('\\n'), pion);
+          fitAll(d);
+          for (const el of k.k.querySelectorAll('.el.tekst')) {
+            const t = el.firstElementChild;
+            t.insertAdjacentHTML('afterbegin', '<span class="test-bazowa" style="display:inline-block;width:0;height:0"></span>');
+            const baza = t.querySelector('.test-bazowa').getBoundingClientRect().bottom;
+            const cs = getComputedStyle(el), px = parseFloat(cs.fontSize);
+            const c = document.createElement('canvas').getContext('2d'); c.font = px + 'px ' + cs.fontFamily;
+            const srCyfr = baza - c.measureText('0123456789').actualBoundingBoxAscent / 2;
+            const img = el.querySelector('img.ikona').getBoundingClientRect();
+            pomiar.push({ czc: czc.split(',')[0], pion, ik: cs.getPropertyValue('--ik').trim(), roznicaEm: +(((img.top + img.bottom) / 2 - srCyfr) / px).toFixed(3) });
+            t.querySelector('.test-bazowa').remove();
+          }
+        }
+      }
+      const sr = pomiar.filter((p) => p.pion === 'srodek'), li = pomiar.filter((p) => p.pion === 'linia');
+      spr('srodekCyfr', sr.length === 6 && sr.every((p) => Math.abs(p.roznicaEm) < 0.04));
+      spr('liniaJakDotad', li.length === 6 && li.filter((p) => p.ik === '1.9').every((p) => p.roznicaEm < -0.25));
+      // 4. ikony_pion= nadpisuje IKONY =; ikony kolorów; zła wartość
+      const o = karta('TEKST = 2, 2, 59, 8, "1 {' + ik + '}", ikony_pion=linia\\nTEKST = 2, 12, 59, 8, "2 {' + ik + '}"\\nTEKST = 2, 22, 59, 8, "3 {' + ik + '}", ikony_pion=bok', 'srodek');
+      const [o1, o2, o3] = o.k.querySelectorAll('.el.tekst');
+      const k2 = karta('TEKST = 2, 2, 59, 8, "4 {' + ik + '}", ikony_pion=środek');
+      spr('nadpisanie', !o1.classList.contains('ik-srodek') && o2.classList.contains('ik-srodek') && o3.classList.contains('ik-srodek')
+        && k2.k.querySelector('.el.tekst').classList.contains('ik-srodek') && o.uwagi.some((u) => /ikony_pion= środek albo linia/.test(u)));
+      const paleta = PALETA.test170; PALETA.test170 = '#c0504d';
+      const kk = karta('TEKST = 2, 2, 59, 12, "12 {kolor-test170} 34", czcionka="Patrick Hand, cursive", rozmiar=16', 'srodek');
+      if (paleta === undefined) delete PALETA.test170; else PALETA.test170 = paleta;
+      fitAll(d);
+      const pk = kk.k.querySelector('.el.tekst'), tk = pk.firstElementChild, sk = kk.k.querySelector('.ikona-kolor');
+      tk.insertAdjacentHTML('afterbegin', '<span class="test-bazowa" style="display:inline-block;width:0;height:0"></span>');
+      const bazaK = tk.querySelector('.test-bazowa').getBoundingClientRect().bottom, pxK = parseFloat(getComputedStyle(pk).fontSize);
+      const cK = document.createElement('canvas').getContext('2d'); cK.font = pxK + 'px ' + getComputedStyle(pk).fontFamily;
+      const rk = sk ? sk.getBoundingClientRect() : null;
+      const roznicaKoloru = rk ? ((rk.top + rk.bottom) / 2 - (bazaK - cK.measureText('0123456789').actualBoundingBoxAscent / 2)) / pxK : null;
+      tk.querySelector('.test-bazowa').remove();
+      spr('ikonaKoloru', rk !== null && Math.abs(roznicaKoloru) < 0.04);
+      d.removeChild(kk.k); d.removeChild(o.k); d.removeChild(k2.k);
+      // 5. ikony_długie=: długi tekst (> 2 linie) – mniejsze ikony, krótki – jak w ikony=
+      const dl = karta('TEKST = 2, 2, 59, 24, "−1 {' + ik + '} → +2 {' + ik + '}. Gdy w kuźni leży kowadło, weź jeszcze +2 {' + ik + '} i dobierz kartę z wierzchu talii i zagraj ją od razu.", czcionka="Patrick Hand, cursive", rozmiar=14, ikony=1.5, ikony_długie=1.2, wyrównanie=środek, pion=środek\\nTEKST = 2, 28, 59, 14, "−1 {' + ik + '} → +2 {' + ik + '}", czcionka="Patrick Hand, cursive", rozmiar=14, ikony=1.5, ikony_długie=1.2, wyrównanie=środek, pion=środek', 'srodek');
+      fitAll(d);
+      const [dl1, dl2] = dl.k.querySelectorAll('.el.tekst');
+      // duże ikony w linii pisma (środek ikony wysoko nad tekstem) i pole obrócone – krótki tekst nie liczy się jako długi
+      const dl3 = karta('TEKST = 2, 2, 59, 14, "−1 {' + ik + '} → +2 {' + ik + '}", rozmiar=12, ikony=2.5, ikony_długie=1.2\\nTEKST = 2, 17, 59, 25, "−1 {' + ik + '} → +2 {' + ik + '}, potem dobierz kartę z talii", rozmiar=12, ikony=2.5, ikony_długie=1.2\\nTEKST = 2, 2, 40, 12, "−1 {' + ik + '} → +2 {' + ik + '}", rozmiar=12, ikony=1.5, ikony_długie=1.2, obrót=90');
+      fitAll(d);
+      const [d3a, d3b, d3c] = dl3.k.querySelectorAll('.el.tekst');
+      const linie3 = [d3a, d3b, d3c].map(linieTekstu);
+      spr('dlugieLinia', d3a.style.getPropertyValue('--ik') === '2.5' && linie3[0] === 1 && linie3[1] === 2 && d3b.style.getPropertyValue('--ik') === '2.5');
+      spr('dlugieObrot', linie3[2] === 1 && d3c.style.getPropertyValue('--ik') === '1.5' && /rotate\\(90deg\\)/.test(d3c.style.transform));
+      d.removeChild(dl3.k);
+      const zle = karta('TEKST = 2, 2, 59, 8, "x", ikony_długie=abc');
+      spr('dlugie', linieTekstu(dl1) > 2 && dl1.style.getPropertyValue('--ik') === '1.2' && dl2.style.getPropertyValue('--ik') === '1.5' && linieTekstu(dl2) === 1);
+      spr('dlugieBledne', zle.uwagi.some((u) => /ikony_długie= to liczba/.test(u)));
+      d.removeChild(zle.k);
+      const ok = Object.values(wyniki).every(Boolean) && uwagi.filter((u) => !/ikony_pion=|ikony_długie=/.test(u)).length === 0;
+      const rect = d.getBoundingClientRect();
+      return { ok, wyniki, pomiar, roznicaKoloru, linie3, uwagi, rect: { x: 0, y: 0, width: Math.ceil(rect.width), height: Math.ceil(rect.height) } };
+    })()`);
+    await wc.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))');
+    fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-ikony-srodek.png', (await wc.capturePage(ikonySrodek.rect)).toPNG());
+    await wc.executeJavaScript("document.getElementById('test-ikony-srodek').remove()");
+  }
   // Ramki przy cięciu na projekcie (#138): raport drukarni (pierwszy – z pomiarem z obrazu każdej karty) bez UWAG i BŁĘDÓW
   // z pomiaru obrazu i bez kart niezmierzonych; INFO nie liczy się do wyniku. Czas pierwszego raportu – w wyniku.
   let ramkiPrzyklad = null;
@@ -4576,8 +4678,8 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
   const ok = menuOk && czcionki.ok && / kart /.test(stan) && !uwagi.trim() && /^image\/jpeg [1-9]/.test(jpg) && (!eksport || eksport.startsWith('Zapisano'))
     && (!edytor || edytor.ok) && (!wybor || wybor.ok) && (!zmienione || zmienione.ok) && (!hist || hist.ok) && (!pcio || pcio.ok) && (!okna || okna.ok) && (!oknaDruku || oknaDruku.ok)
     && (!drukarnia || drukarnia.ok) && (!raportStart || raportStart.ok) && (!drukarniaPdf || drukarniaPdf.ok) && (!obrotKarty || obrotKarty.pominiety || obrotKarty.ok) && (!spadTest || spadTest.ok) && (!spadSzablonu || spadSzablonu.ok) && (!cmykTest || cmykTest.pominiety || cmykTest.ok) && (!profileDr || profileDr.pominiety || profileDr.ok) && (!filtrWTrakcie || filtrWTrakcie.ok) && (!katalog || katalog.ok) && (!zlecenia || zlecenia.ok) && (!aktualizacja || aktualizacja.ok) && (!podfolder || podfolder.ok)
-    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!naroznikTest || naroznikTest.ok) && (!otokTest || otokTest.ok) && (!stykTest || stykTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok) && (!instrukcja || instrukcja.ok) && (!instrukcjaPdf || instrukcjaPdf.ok) && (!ikonyNfd || ikonyNfd.ok);
-  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, obrotKarty, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, naroznik: naroznikTest, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, instrukcja, instrukcjaPdf, ikonyNfd, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
+    && (!formatowanie || formatowanie.ok) && (!uklad || uklad.ok) && (!jesli || jesli.ok) && (!rozmiary || rozmiary.ok) && (!akapity || akapity.ok) && (!arkusze || arkusze.ok) && (!rewersy || rewersy.ok) && (!rewersyDodatki || rewersyDodatki.ok) && projektyTest.ok && (!zakladki || zakladki.ok) && (!zleceniaWTle || zleceniaWTle.ok) && (!raportProgi || raportProgi.ok) && (!naroznikTest || naroznikTest.ok) && (!otokTest || otokTest.ok) && (!stykTest || stykTest.ok) && (!ramkiObraz || ramkiObraz.ok) && (!ramkiPrzyklad || ramkiPrzyklad.ok) && (!instrukcja || instrukcja.ok) && (!instrukcjaPdf || instrukcjaPdf.ok) && (!ikonyNfd || ikonyNfd.ok) && (!ikonySrodek || ikonySrodek.ok);
+  process.stdout.write(JSON.stringify({ szablon, bloki: Object.keys(czasyBlokow()), stan, czasyBlokow: czasyBlokow(), uwagi, czcionki, jpg, eksport, edytor, wybor, zmienione, hist, pcio, okna, oknaDruku, drukarnia, raportStart, drukarniaPdf, obrotKarty, spad: spadTest, spadSzablonu, cmyk: cmykTest, profileDrukarni: profileDr, filtrWTrakcie, katalog, zlecenia, aktualizacja, podfolder, formatowanie, uklad, jesli, rozmiary, akapity, arkusze, rewersy, rewersyDodatki, projekty: projektyTest, zakladki, zleceniaWTle, raportProgi, naroznik: naroznikTest, otok: otokTest, styk: stykTest, ramkiObraz, ramkiPrzyklad, instrukcja, instrukcjaPdf, ikonyNfd, ikonySrodek, menu, kod: { zrodlo: KOD.zrodlo, wersja: WERSJA, powod: KOD.powod || null }, pdf: wynik, ok }) + '\n');
   app.exit(ok ? 0 : 1);
 }
 
