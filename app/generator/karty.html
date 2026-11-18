@@ -1302,28 +1302,36 @@ function groupScale(list) {
   while ((list.some(overflows) || collide(list)) && k > min) { k -= 0.02; apply(); }
   return k;
 }
-// Linie tekstu pola (#170, ikony_długie=): środki prostokątów fragmentów tekstu i ikon posortowane w pionie –
-// nowa linia, gdy środek jest niżej od poprzedniego o więcej niż pół wielkości tekstu (w linii środki różnią się mniej,
-// także przy dużych ikonach; kolejne linie dzieli co najmniej interlinia). Puste wiersze się nie liczą.
+// Linie tekstu pola (#170, ikony_długie=): środki prostokątów fragmentów tekstu posortowane w pionie – nowa linia,
+// gdy środek jest niżej od poprzedniego o więcej niż pół wielkości tekstu (kolejne linie dzieli co najmniej interlinia).
+// Ikony tylko w wierszu bez tekstu (nie zachodzą w pionie na żaden fragment tekstu) – środek dużej ikony w linii pisma
+// leży wyżej niż środek tekstu i liczyłby się jako osobna linia. Pomiar bez obrotu pola. Puste wiersze się nie liczą.
 function linieTekstu(el) {
   const t = el.firstElementChild; if (!t) return 0;
-  const srodki = [], r = document.createRange();
-  const w = document.createTreeWalker(t, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
-  for (let n = w.nextNode(); n; n = w.nextNode()) {
-    if (n.nodeType === 1) { if (n.matches('img.ikona, .ikona-kolor')) { const q = n.getBoundingClientRect(); srodki.push((q.top + q.bottom) / 2); } continue; }
-    if (!n.nodeValue.trim()) continue;
-    r.selectNodeContents(n);
-    for (const q of r.getClientRects()) if (q.width > 0.5) srodki.push((q.top + q.bottom) / 2);
-  }
-  if (!srodki.length) return 0;
-  srodki.sort((a, b) => a - b);
-  const prog = parseFloat(getComputedStyle(el).fontSize) / 2;
-  let n = 1;
-  for (let i = 1; i < srodki.length; i++) if (srodki[i] - srodki[i - 1] > prog) n++;
-  return n;
+  const obrot = el.style.transform;
+  if (obrot) el.style.transform = 'none';             // tylko obrócone pole – inne bez zmian w atrybucie style
+  try {
+    const tekst = [], ikony = [], r = document.createRange();
+    const w = document.createTreeWalker(t, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      if (n.nodeType === 1) { if (n.matches('img.ikona, .ikona-kolor')) ikony.push(n.getBoundingClientRect()); continue; }
+      if (!n.nodeValue.trim()) continue;
+      r.selectNodeContents(n);
+      for (const q of r.getClientRects()) if (q.width > 0.5) tekst.push(q);
+    }
+    const srodki = tekst.map((q) => (q.top + q.bottom) / 2);
+    for (const q of ikony) if (!tekst.some((x) => x.top < q.bottom && q.top < x.bottom)) srodki.push((q.top + q.bottom) / 2);
+    if (!srodki.length) return 0;
+    srodki.sort((a, b) => a - b);
+    const prog = parseFloat(getComputedStyle(el).fontSize) / 2;
+    let n = 1;
+    for (let i = 1; i < srodki.length; i++) if (srodki[i] - srodki[i - 1] > prog) n++;
+    return n;
+  } finally { if (obrot) el.style.transform = obrot; }
 }
 // ikony_długie= (#170): pole dopasowane z ikonami z ikony= łamie się na więcej niż 2 linie → ikony w tej krotności
 // (zwykle mniejsze) i dopasowanie od nowa. Zostają małe, nawet gdy po zmianie tekst zmieści się w 2 liniach.
+// Pole z grupa= mierzone samo (przed wspólnym zmniejszeniem grupy) – liczba linii przy jego własnej skali.
 function ikonyDlugie(root) {
   for (const el of root.querySelectorAll('.el.tekst[data-ik-dlugie]')) {
     let k = 1; setScale(el, 1);

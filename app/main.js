@@ -4606,21 +4606,38 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       const k2 = karta('TEKST = 2, 2, 59, 8, "4 {' + ik + '}", ikony_pion=środek');
       spr('nadpisanie', !o1.classList.contains('ik-srodek') && o2.classList.contains('ik-srodek') && o3.classList.contains('ik-srodek')
         && k2.k.querySelector('.el.tekst').classList.contains('ik-srodek') && o.uwagi.some((u) => /ikony_pion= środek albo linia/.test(u)));
-      const kk = document.createElement('div'); kk.className = 'ik-srodek'; kk.style.fontSize = '20px';
-      kk.innerHTML = '<span class="ikona-kolor"></span>'; d.appendChild(kk);
-      spr('ikonaKoloru', Math.abs(parseFloat(getComputedStyle(kk.firstChild).verticalAlign) + 3) > 0.5);
-      d.removeChild(kk); d.removeChild(o.k); d.removeChild(k2.k);
+      const paleta = PALETA.test170; PALETA.test170 = '#c0504d';
+      const kk = karta('TEKST = 2, 2, 59, 12, "12 {kolor-test170} 34", czcionka="Patrick Hand, cursive", rozmiar=16', 'srodek');
+      if (paleta === undefined) delete PALETA.test170; else PALETA.test170 = paleta;
+      fitAll(d);
+      const pk = kk.k.querySelector('.el.tekst'), tk = pk.firstElementChild, sk = kk.k.querySelector('.ikona-kolor');
+      tk.insertAdjacentHTML('afterbegin', '<span class="test-bazowa" style="display:inline-block;width:0;height:0"></span>');
+      const bazaK = tk.querySelector('.test-bazowa').getBoundingClientRect().bottom, pxK = parseFloat(getComputedStyle(pk).fontSize);
+      const cK = document.createElement('canvas').getContext('2d'); cK.font = pxK + 'px ' + getComputedStyle(pk).fontFamily;
+      const rk = sk ? sk.getBoundingClientRect() : null;
+      const roznicaKoloru = rk ? ((rk.top + rk.bottom) / 2 - (bazaK - cK.measureText('0123456789').actualBoundingBoxAscent / 2)) / pxK : null;
+      tk.querySelector('.test-bazowa').remove();
+      spr('ikonaKoloru', rk !== null && Math.abs(roznicaKoloru) < 0.04);
+      d.removeChild(kk.k); d.removeChild(o.k); d.removeChild(k2.k);
       // 5. ikony_długie=: długi tekst (> 2 linie) – mniejsze ikony, krótki – jak w ikony=
       const dl = karta('TEKST = 2, 2, 59, 24, "−1 {' + ik + '} → +2 {' + ik + '}. Gdy w kuźni leży kowadło, weź jeszcze +2 {' + ik + '} i dobierz kartę z wierzchu talii i zagraj ją od razu.", czcionka="Patrick Hand, cursive", rozmiar=14, ikony=1.5, ikony_długie=1.2, wyrównanie=środek, pion=środek\\nTEKST = 2, 28, 59, 14, "−1 {' + ik + '} → +2 {' + ik + '}", czcionka="Patrick Hand, cursive", rozmiar=14, ikony=1.5, ikony_długie=1.2, wyrównanie=środek, pion=środek', 'srodek');
       fitAll(d);
       const [dl1, dl2] = dl.k.querySelectorAll('.el.tekst');
+      // duże ikony w linii pisma (środek ikony wysoko nad tekstem) i pole obrócone – krótki tekst nie liczy się jako długi
+      const dl3 = karta('TEKST = 2, 2, 59, 14, "−1 {' + ik + '} → +2 {' + ik + '}", rozmiar=12, ikony=2.5, ikony_długie=1.2\\nTEKST = 2, 17, 59, 25, "−1 {' + ik + '} → +2 {' + ik + '}, potem dobierz kartę z talii", rozmiar=12, ikony=2.5, ikony_długie=1.2\\nTEKST = 2, 2, 40, 12, "−1 {' + ik + '} → +2 {' + ik + '}", rozmiar=12, ikony=1.5, ikony_długie=1.2, obrót=90');
+      fitAll(d);
+      const [d3a, d3b, d3c] = dl3.k.querySelectorAll('.el.tekst');
+      const linie3 = [d3a, d3b, d3c].map(linieTekstu);
+      spr('dlugieLinia', d3a.style.getPropertyValue('--ik') === '2.5' && linie3[0] === 1 && linie3[1] === 2 && d3b.style.getPropertyValue('--ik') === '2.5');
+      spr('dlugieObrot', linie3[2] === 1 && d3c.style.getPropertyValue('--ik') === '1.5' && /rotate\\(90deg\\)/.test(d3c.style.transform));
+      d.removeChild(dl3.k);
       const zle = karta('TEKST = 2, 2, 59, 8, "x", ikony_długie=abc');
       spr('dlugie', linieTekstu(dl1) > 2 && dl1.style.getPropertyValue('--ik') === '1.2' && dl2.style.getPropertyValue('--ik') === '1.5' && linieTekstu(dl2) === 1);
       spr('dlugieBledne', zle.uwagi.some((u) => /ikony_długie= to liczba/.test(u)));
       d.removeChild(zle.k);
       const ok = Object.values(wyniki).every(Boolean) && uwagi.filter((u) => !/ikony_pion=|ikony_długie=/.test(u)).length === 0;
       const rect = d.getBoundingClientRect();
-      return { ok, wyniki, pomiar, uwagi, rect: { x: 0, y: 0, width: Math.ceil(rect.width), height: Math.ceil(rect.height) } };
+      return { ok, wyniki, pomiar, roznicaKoloru, linie3, uwagi, rect: { x: 0, y: 0, width: Math.ceil(rect.width), height: Math.ceil(rect.height) } };
     })()`);
     await wc.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))');
     fs.writeFileSync(wynik.replace(/\.pdf$/i, '') + '-ikony-srodek.png', (await wc.capturePage(ikonySrodek.rect)).toPNG());

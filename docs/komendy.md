@@ -212,6 +212,8 @@ TEKST = 6, 5, 51, 9, [Koszt], ikony=1.8, ikony_pion=linia   ; to pole jak dawnie
 - **Stare projekty bez zmian:** bez komendy karty wyglądają jak przed 0.9.1 i nie są „zmienione od ostatniego PDF” po aktualizacji. Dopisanie `IKONY = środek` zmienia wygląd (i odcisk) kart z ikonami w tekście.
 - **`ikony_długie=`** – efekt, który łamie się na więcej niż 2 linie, czyta się lepiej z ikonami niewiele większymi od tekstu (ok. `1.2`); krótki („−1 {drewno} → +2 {zloto}”) – z dużymi. KarKa najpierw dopasowuje pole z ikonami z `ikony=`, liczy linie i przy więcej niż 2 zmienia ikony na `ikony_długie=` (i dopasowuje jeszcze raz). Zostają mniejsze, nawet gdy tekst zmieści się wtedy w 2 liniach – karta nie przeskakuje między wielkościami.
 - Pole samych ikon (`IKONA = …`) nie zmienia się – ikona wypełnia całe pole.
+- `IKONY =` działa na cały projekt, także gdy stoi w sekcji `[TALIA …]` (ostatni wiersz z tą komendą wygrywa) – dla jednej talii albo pola użyj `ikony_pion=`.
+- `ikony_długie=` liczy linie przy własnej skali pola, także w `grupa=` (przed wspólnym zmniejszeniem grupy) i bez obrotu (`obrót=`). Linie liczą się po tekście – duża ikona w linii pisma nie robi z jednej linii dwóch.
 
 ![Ikony: linia i środek, EB Garamond i Patrick Hand; ikony_długie](img/ikony-srodek.jpg)
 
