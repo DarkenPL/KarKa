@@ -25,6 +25,7 @@ const BLOKI = {
     'instrukcja',                                                       // instrukcja gry (#160) – Instrukcja/
     'instrukcjaPdf',                                                    // PDF instrukcji dla drukarni i do sieci (#160, etap 2)
     'ikonyNfd'],                                                        // ikona z nazwą pliku w NFD (#164) – Ikony/, ikony.csv
+  '02-kuznia': ['ikonySrodek'],                                         // ikony wyśrodkowane na cyfrach (#170) – ikony z ikony.csv
   '05-zaklecia': ['raportStart'],                                       // tekst ok. 2 mm od krawędzi (#111)
   '07-gildie:zlecenia': ['cmykTest', 'zlecenia', 'hist', 'zmienione', 'katalog'],
   '07-gildie:zakladki': ['zakladki', 'zleceniaWTle'],

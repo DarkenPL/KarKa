@@ -25,6 +25,10 @@
 .el.ikony .ikona { height: 100%; width: auto; vertical-align: 0; }
 .el.ikony .ikona-kolor { height: 100%; width: auto; aspect-ratio: 1.42; }
 .ikona { height: calc(var(--ik, 0.9) * 1em); width: auto; vertical-align: -0.15em; }
+/* IKONY = środek / ikony_pion=środek (#170): środek ikony na połowie wysokości wersalików czcionki (jednostka cap ≈ wysokość
+   cyfr) – klasa tylko na polach z tym ustawieniem, więc karty bez komendy mają ten sam HTML i wygląd co dotąd. */
+.ik-srodek .ikona { vertical-align: calc(0.5cap - var(--ik, 0.9) * 0.5em); }
+.ik-srodek .ikona-kolor { vertical-align: calc(0.5cap - 0.475em); }
 .odstep { display: inline-block; width: 0.25em; }
 /* Prostokąt w kolorze z palety, rysowany kodem: {kolor-nazwa}, {kolor-nazwa-mix} */
 .ikona-kolor {
@@ -304,6 +308,8 @@ const CONFIG = {
 
 // Paleta nazwanych kolorów i plik pokoju playingcards.io – zbierane z szablonów przy każdym odświeżeniu.
 let PALETA = {};
+let IKONY_PION = 'linia';    // IKONY = środek | linia (#170) – ustawienie ikon w tekście z szablonu kart, bez komendy: linia
+const IKONY_PIONY = ['srodek', 'linia'];
 let PROJEKT = 'NowaGra';     // nazwa projektu: PROJEKT = … w szablonie, inaczej nazwa pliku szablonu
 let WERSJA = '';             // WERSJA = … w szablonie – pole [_wersja] na kartach
 
@@ -741,6 +747,12 @@ function parseTemplate(text, plik) {
       case 'projekt': if (args[0]) out.projekt = args[0].trim(); break;
       case 'instrukcja': out.instrukcja = (args[0] || '').trim(); break;      // szablon stron instrukcji gry (#160)
       case 'wersja': out.wersja = (args[0] || '').trim(); break;
+      case 'ikony': {                                                  // IKONY = środek | linia (#170)
+        const v = plain(args[0] || '');
+        if (IKONY_PIONY.includes(v)) out.ikony = v;
+        else out.bledy.push(`${where}: IKONY = środek albo linia (ikony w tekście na środku cyfr albo w linii pisma)${/^[\d.\s]+$/.test(args[0] || '') ? ' – element z ikoną to IKONA = x, y, szer, wys, {znacznik}' : ''}`);
+        break;
+      }
       default:
         if (!ELEMENTY.includes(kom)) { out.bledy.push(`${where}: nieznana komenda ${m[1].trim()}`); return; }
         if (kom === 'tekst') {
@@ -1193,8 +1205,19 @@ function renderCard(tpl, cmds, row, ctx) {
       if (f.has('kursywa')) st.push('font-style:italic');
       if (f.has('podkreslenie')) st.push('text-decoration:underline');
       if (f.has('wersaliki')) st.push('text-transform:uppercase');
-      const cls = 'el tekst' + (f.has('jedna_linia') ? ' jedna-linia' : '');
-      const data = ` data-pt="${pt}"` + (o.min ? ` data-min="${num(o.min)}"` : '') + (o.grupa ? ` data-grupa="${esc(o.grupa)}"` : '');
+      // ikony_pion= nadpisuje IKONY = z szablonu; klasa i data-ik-dlugie tylko przy ustawieniu (HTML starych kart bez zmian)
+      let pionIkon = IKONY_PION;
+      if (o.ikony_pion !== undefined) {
+        if (IKONY_PIONY.includes(plain(o.ikony_pion))) pionIkon = plain(o.ikony_pion);
+        else ctx.warn.add(`${c.where}: ikony_pion= środek albo linia`);
+      }
+      let dlugie = '';
+      if (o.ikony_dlugie !== undefined) {
+        const v = num(o.ikony_dlugie);
+        if (v > 0) dlugie = ` data-ik-dlugie="${v}"`; else ctx.warn.add(`${c.where}: ikony_długie= to liczba (krotność wielkości tekstu), np. 1.2`);
+      }
+      const cls = 'el tekst' + (f.has('jedna_linia') ? ' jedna-linia' : '') + (pionIkon === 'srodek' ? ' ik-srodek' : '');
+      const data = ` data-pt="${pt}"` + (o.min ? ` data-min="${num(o.min)}"` : '') + (o.grupa ? ` data-grupa="${esc(o.grupa)}"` : '') + dlugie;
       html += `<div class="${cls}" style="${esc(st.join(';'))}"${data}><div class="tresc">${rich(tr.s, tr.kolumny, pt, o.lista !== undefined && !['nie', 'brak', '0', ''].includes(plain(value(o.lista))))}</div></div>`;
     } else if (c.kom === 'obrazek') {
       const p = value(c.args[4]);
@@ -1279,7 +1302,38 @@ function groupScale(list) {
   while ((list.some(overflows) || collide(list)) && k > min) { k -= 0.02; apply(); }
   return k;
 }
+// Linie tekstu pola (#170, ikony_długie=): środki prostokątów fragmentów tekstu i ikon posortowane w pionie –
+// nowa linia, gdy środek jest niżej od poprzedniego o więcej niż pół wielkości tekstu (w linii środki różnią się mniej,
+// także przy dużych ikonach; kolejne linie dzieli co najmniej interlinia). Puste wiersze się nie liczą.
+function linieTekstu(el) {
+  const t = el.firstElementChild; if (!t) return 0;
+  const srodki = [], r = document.createRange();
+  const w = document.createTreeWalker(t, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    if (n.nodeType === 1) { if (n.matches('img.ikona, .ikona-kolor')) { const q = n.getBoundingClientRect(); srodki.push((q.top + q.bottom) / 2); } continue; }
+    if (!n.nodeValue.trim()) continue;
+    r.selectNodeContents(n);
+    for (const q of r.getClientRects()) if (q.width > 0.5) srodki.push((q.top + q.bottom) / 2);
+  }
+  if (!srodki.length) return 0;
+  srodki.sort((a, b) => a - b);
+  const prog = parseFloat(getComputedStyle(el).fontSize) / 2;
+  let n = 1;
+  for (let i = 1; i < srodki.length; i++) if (srodki[i] - srodki[i - 1] > prog) n++;
+  return n;
+}
+// ikony_długie= (#170): pole dopasowane z ikonami z ikony= łamie się na więcej niż 2 linie → ikony w tej krotności
+// (zwykle mniejsze) i dopasowanie od nowa. Zostają małe, nawet gdy po zmianie tekst zmieści się w 2 liniach.
+function ikonyDlugie(root) {
+  for (const el of root.querySelectorAll('.el.tekst[data-ik-dlugie]')) {
+    let k = 1; setScale(el, 1);
+    const min = minOf(el);
+    while (overflows(el) && k > min) { k -= 0.04; setScale(el, k); }
+    if (linieTekstu(el) > 2) el.style.setProperty('--ik', el.dataset.ikDlugie);
+  }
+}
 function fitAll(root) {
+  ikonyDlugie(root);
   const cards = [...root.querySelectorAll('.karta')];
   const groups = new Map();                          // talia|grupa → listy pól (po jednej na kartę)
   for (const card of cards) {
@@ -1392,7 +1446,7 @@ async function zbudujTeraz() {
   TALIE = []; PALETA = {}; INSTRUKCJA_PLIK = ''; ZBUDOWANY_SZABLON = skrot(tekstSzablonu);
   RAPORT = { tekst: tekstSzablonu, talie: [], icons, formatowanie: new Set() };
   PROJEKT = SZABLON.split('/').pop().replace(/\.txt$/i, '').trim() || 'NowaGra';
-  WERSJA = '';
+  WERSJA = ''; IKONY_PION = 'linia';
   const fontCss = [];
   for (const [, f] of tplFiles) {
     const t = parseTemplate(await f.text(), f.name);
@@ -1400,6 +1454,7 @@ async function zbudujTeraz() {
     for (const [n, v] of t.kolory) { PALETA[n.toLowerCase()] = v; PALETA[plain(n)] = v; }
     if (t.projekt) PROJEKT = t.projekt;
     if (t.wersja) WERSJA = t.wersja;
+    if (t.ikony) IKONY_PION = t.ikony;
     INSTRUKCJA_PLIK = t.instrukcja || '';
     for (const talia of t.talie) {
       if (TALIE.some((x) => x.nazwa === talia.nazwa)) warn.add(`${talia.plik}: talia „${talia.nazwa}” występuje dwa razy – pominięto drugą (zmień NAZWA).`);
@@ -1877,7 +1932,7 @@ async function zbudujInstrukcjeTeraz() {
   for (const el of box.querySelectorAll('.el.ksztalt[data-ramka]')) elRamki.set(+el.dataset.ramka, el);
   for (const [linia, el] of elRamki) {
     const r = d.ramki.get(linia);
-    el.innerHTML = `<div class="ramka-tekst" style="padding:${r.margines.map((x) => x + 'mm').join(' ')};justify-content:${FLEX_V[r.pion] || 'flex-start'}"></div>`;
+    el.innerHTML = `<div class="ramka-tekst${IKONY_PION === 'srodek' ? ' ik-srodek' : ''}" style="padding:${r.margines.map((x) => x + 'mm').join(' ')};justify-content:${FLEX_V[r.pion] || 'flex-start'}"></div>`;
     // numer ramki w wątku („Pokaż ramki”) – nad ramką, żeby nie zasłaniał tekstu
     el.insertAdjacentHTML('afterend', `<span class="nr-ramki" data-dla="${linia}" style="left:${parseFloat(el.style.left)}mm;top:${Math.max(0, parseFloat(el.style.top) - 3)}mm">${esc(r.nazwa || 'bez nazwy')} ${r.nr}/${r.z}</span>`);
   }

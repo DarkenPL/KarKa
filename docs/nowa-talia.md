@@ -29,6 +29,7 @@ Utwórz `Szablony/zaklecia.txt`:
 NAZWA = Zaklęcia
 DANE  = zaklecia.csv
 KARTA = 63, 88
+IKONY = środek                ; ikony w tekście na środku cyfr
 
 KOLOR = ogień, #D9534F
 KOLOR = woda,  #5BC0DE

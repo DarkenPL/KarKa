@@ -17,6 +17,7 @@ PROJEKT  = "{{NAZWA_W_CUDZYSLOWIE}}"     ; nazwa gry w plikach JPG i PDF
 WERSJA   = v0.1                          ; wersja – widoczna w stopce karty ([_wersja])
 KARTA    = 63, 88                          ; rozmiar karty w mm (standard pokerowy)
 CZCIONKA = "EB Garamond, Georgia, serif", 10, kolor=#000   ; #000 – w druku czysta czerń K100
+IKONY    = środek                        ; ikony w tekście na środku cyfr („linia” – w linii pisma)
 
 ; Nazwy kolorów – można ich używać w kolumnie Kolor w karty.csv
 KOLOR = czerwony,  #C0504D
