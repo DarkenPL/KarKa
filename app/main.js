@@ -859,10 +859,12 @@ function zlecenieTrwa(p, czy) {
 const oczekujace = (folder) => POLECENIA.filter((pol) => jestPlikiem(path.join(folder, ...FOLDER_ZLECEN, pol)));
 
 // ── Folder z projektami (#90, pkt 1) ────────────────────────────────────────
-// Ustawienie folderProjektow (domyślnie brak = wyłączone). Przegląd <folder>/*/ i jeden poziom niżej – tylko foldery,
+// Ustawienie folderProjektow (domyślnie brak = wyłączone). Przegląd <folder>/*/ do GLEBOKOSC_PROJEKTOW poziomów (od 0.9.4 – 3,
+// wcześniej 2; #173 – warianty gry w folderze gry: Gra/warianty/W1) – tylko foldery,
 // które po realpath leżą wewnątrz folderu (dowiązanie na zewnątrz jest pomijane); przykłady i projekty otwarte w zakładkach
 // pomijane (ich zlecenia wykonuje przegląd zakładek).
 const POMIJANE_FOLDERY = new Set(['szablony', 'export', 'ikony', 'icons', 'node_modules']);
+const GLEBOKOSC_PROJEKTOW = 3;
 function folderyZeZleceniami() {
   const korzen = ustawienia().folderProjektow;
   if (!korzen) return [];
@@ -877,7 +879,7 @@ function folderyZeZleceniami() {
     if (!real.startsWith(kr + path.sep) || byly.has(real) || !jestFolderem(real)) return;
     byly.add(real);
     if (!jestPrzykladem(real) && !otwarte.has(real)) { const l = oczekujace(real); if (l.length) wynik.push({ folder: real, lista: l }); }
-    if (poziom < 2) for (const n of podfoldery(real)) sprawdz(path.join(real, n), poziom + 1);
+    if (poziom < GLEBOKOSC_PROJEKTOW) for (const n of podfoldery(real)) sprawdz(path.join(real, n), poziom + 1);
   };
   for (const n of podfoldery(kr)) sprawdz(path.join(kr, n), 1);
   return wynik;
@@ -991,14 +993,14 @@ app.on('will-quit', () => { clearTimeout(ZAPIS_STANU.timer); ZAPIS_STANU.timer =
 async function wybierzFolderProjektow() {
   const u = ustawienia();
   const r = await dialog.showOpenDialog(okno, { title: 'Folder z projektami', buttonLabel: 'Wybierz',
-    message: 'Zlecenia z plików w projektach z tego folderu (i jeden poziom niżej) wykonują się w zakładkach w tle.',
+    message: 'Zlecenia z plików w projektach z tego folderu (do trzech poziomów podfolderów) wykonują się w zakładkach w tle.',
     defaultPath: u.folderProjektow || app.getPath('documents'), properties: ['openDirectory', 'createDirectory'] });
   if (r.canceled || !r.filePaths[0]) return;
   const powod = ryzykownyFolder(r.filePaths[0]);
   if (powod) {
     const o = await dialog.showMessageBox(okno, { type: 'warning', buttons: ['Wybierz mimo to', 'Anuluj'], defaultId: 1, cancelId: 1,
       message: 'Ten folder raczej nie nadaje się na Folder z projektami.',
-      detail: `${powod} KarKa przegląda Folder z projektami co 3 s, razem z podfolderami na dwóch poziomach. Lepiej wybrać folder, w którym są tylko projekty kart.` });
+      detail: `${powod} KarKa przegląda Folder z projektami co 3 s, razem z podfolderami na trzech poziomach. Lepiej wybrać folder, w którym są tylko projekty kart.` });
     if (o.response !== 0) return;
   }
   ustawFolderProjektow(r.filePaths[0]);
@@ -1628,7 +1630,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     z.ok = !!(z.druga.ok && z.zlecenia && z.zlecenia.ok && z.kropka && z.kropka.ok && z.przelaczanie && z.przelaczanie.ok && z.zamykanie && z.zamykanie.ok && z.limit.ok && z.ustawienia.ok);
     zakladki = z;
   }
-  // Zlecenia w tle (#90, PR 1): „Folder z projektami” z kopiami 01-wyprawa (poziom 1 i 2), zakładki otwierane w tle przez
+  // Zlecenia w tle (#90, PR 1): „Folder z projektami” z kopiami 01-wyprawa (poziom 1 i 2; od 0.9.4 poziom 3 i pominięty 4.), zakładki otwierane w tle przez
   // zlecenia, raport drukarni i PDF w zakładce nigdy niepokazanej, dowiązanie na zewnątrz, zaległe zlecenia, klucz
   // szablon =, przejęcie, samozamykanie, limit 8 bez pytań, lista zakładek w ustawieniach, plik stanu.
   let zleceniaWTle = null;
@@ -1703,6 +1705,26 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     await przegladKoniec(); await przegladKoniec();
     z.dowiazanie = { wynik: !!czytaj(zewn, 'stan'), zlecenie: fs.existsSync(path.join(zl(zewn), 'stan')), zakladka: !!zakladka(realna(zewn)) };
     z.dowiazanie.ok = !z.dowiazanie.wynik && z.dowiazanie.zlecenie && !z.dowiazanie.zakladka;
+    // 3b. Głębokość 3 (#173): wariant gry na 3. poziomie (Gra/warianty/W1) – zlecenie w tle, wynik jak dla kopii na poziomie 1;
+    // 4. poziom oraz foldery _ i . na 3. poziomie – pomijane (zlecenie zostaje, bez wyniku i zakładki).
+    const W1 = kopiuj(path.join(baza, 'Gra', 'warianty', 'W1'));
+    const pominiete = { poziom4: path.join(baza, 'Gra', 'warianty', 'grupa', 'W4'), podkreslnik: path.join(baza, 'Gra', 'warianty', '_kopia'),
+      kropka: path.join(baza, 'Gra', 'warianty', '.ukryty') };
+    for (const f of Object.values(pominiete)) { kopiuj(f); zapisz(f, 'stan'); }
+    await przegladKoniec();
+    zapisz(A, 'stan'); zapisz(W1, 'stan');
+    sprawdzZlecenia();
+    const gA = await czekajNa(A, 'stan'), gW = await czekajNa(W1, 'stan');
+    await przegladKoniec();
+    const opis = (s) => s && { ok: s.ok, karty: s.karty, szablon: s.szablon, projekt: s.projekt, zakladka: s.zakladka };
+    z.glebokosc = { a: opis(gA), w1: opis(gW), pominiete: {} };
+    for (const [k, f] of Object.entries(pominiete)) z.glebokosc.pominiete[k] = { wynik: !!czytaj(realna(f), 'stan'), zlecenie: fs.existsSync(path.join(zl(f), 'stan')), zakladka: !!zakladka(realna(f)) };
+    const PW = zakladka(W1);
+    if (PW) await zamknijZakladke(PW);
+    pokazProjekt(P);
+    z.glebokosc.ok = !!(gA && gA.ok && gW && gW.ok && gW.karty > 0 && gW.karty === gA.karty && gW.szablon === gA.szablon && gW.projekt === gA.projekt
+      && gW.zakladka === 'otwarta przez zlecenie' && PW)
+      && Object.values(z.glebokosc.pominiete).every((x) => !x.wynik && x.zlecenie && !x.zakladka);
     // 3a. Folder z nazwą w NFD na dysku, zakładka otwarta ścieżką w NFC: otwarcie tej samej ścieżki w NFD (jak z Findera)
     // przełącza na tę zakładkę, zlecenie wykonuje się w niej – bez drugiej zakładki dla tego samego folderu (#118, pkt 3).
     const nazwaNfc = 'Żółw-ęś';
@@ -1832,7 +1854,7 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
     for (const x of [...projekty]) if (!przed.includes(x)) await zamknijZakladke(x);
     pokazProjekt(P);
     z.sprzatanie = { liczba: projekty.length === przed.length, pytania: TEST.pytania - pytania, folder: !ustawienia().folderProjektow };
-    z.ok = !!(z.dwa.ok && z.rozmiarOkna.ok && z.kolejka.ok && z.nfd.ok && z.wykonane.ok && z.ryzykowny.ok && z.praca.ok && z.dowiazanie.ok && z.zalegle.ok && z.szablon.ok && z.przejecie.ok && z.stanPlik.ok && z.samozamykanie.ok && z.limit.ok
+    z.ok = !!(z.dwa.ok && z.glebokosc.ok && z.rozmiarOkna.ok && z.kolejka.ok && z.nfd.ok && z.wykonane.ok && z.ryzykowny.ok && z.praca.ok && z.dowiazanie.ok && z.zalegle.ok && z.szablon.ok && z.przejecie.ok && z.stanPlik.ok && z.samozamykanie.ok && z.limit.ok
       && z.sprzatanie.liczba && z.sprzatanie.pytania === 0 && z.sprzatanie.folder);
     zleceniaWTle = z;
   }

@@ -287,14 +287,14 @@ Fragment wyniku `wynik-pdf.json`:
 Bez dodatkowych ustawień zlecenia wykonują się tylko w projektach otwartych w zakładkach. Od 0.7.3 KarKa może sama otwierać projekty, w których czeka zlecenie:
 
 1. **KarKa → Folder z projektami → Wybierz…** i wskaż folder, w którym trzymasz gry (np. `~/Projekty-kart`). Wybrany folder widać w tym samym podmenu. **Wyłącz** przywraca pracę tylko z otwartymi zakładkami. Domyślnie ustawienie jest wyłączone. Od 0.7.10 KarKa ostrzega i pyta („Wybierz mimo to” / „Anuluj”), gdy wskażesz folder domowy, cały dysk, `/Users`, `/Volumes`, folder z przykładami albo folder z ponad 200 podfolderami – przegląd co 3 s takiego folderu niepotrzebnie obciąża dysk.
-2. Co 3 s KarKa sprawdza `.generator/zlecenia/` w podfolderach tego folderu i jeden poziom niżej, np. `Projekty-kart/Ogród/` i `Projekty-kart/Próby/Ogród/`. Pomija:
+2. Co 3 s KarKa sprawdza `.generator/zlecenia/` w podfolderach tego folderu do trzech poziomów w głąb (od 0.9.4; wcześniej dwa), np. `Projekty-kart/Ogród/`, `Projekty-kart/Próby/Ogród/` i `Projekty-kart/Ogród/warianty/W1/` – pełna kopia projektu (szablon i dane) trzymana jako wariant w folderze gry. Projekt na 4. poziomie i głębiej wykonuje zlecenia dopiero po otwarciu w zakładce. Pomija:
    - foldery ukryte i zaczynające się od `_`;
    - `Szablony`, `Export`, `Ikony`/`Icons` i `node_modules`;
    - przykłady;
    - dowiązania, które prowadzą poza Folder z projektami.
 3. Projekt ze zleceniem, który nie ma zakładki, otwiera się jako [zakładka otwarta przez zlecenie](#rodzaje-zakładek): w tle, bez przełączania Twojej pracy. Zlecenie wykonuje się w niej jak w zwykłej zakładce, a w wyniku jest `"zakladka": "otwarta przez zlecenie"`. Kolejka zleceń jest wspólna dla wszystkich zakładek i projektów, a zlecenia wykonują się po jednym.
 
-**Nie wskazuj folderu domowego, całego dysku ani dużego folderu z innymi plikami.** Przegląd co 3 s przechodzi przez dwa poziomy podfolderów, więc przy tysiącach folderów niepotrzebnie obciąża dysk. Najlepszy jest osobny folder z samymi projektami gier.
+**Nie wskazuj folderu domowego, całego dysku ani dużego folderu z innymi plikami.** Przegląd co 3 s przechodzi przez trzy poziomy podfolderów, więc przy tysiącach folderów niepotrzebnie obciąża dysk. Najlepszy jest osobny folder z samymi projektami gier.
 
 **Szablon projektu bez zakładki** KarKa wybiera po kolei:
 1. klucz `szablon = …` w zleceniu ([opis klucza](#zlecenia-z-pliku));
