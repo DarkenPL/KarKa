@@ -449,7 +449,7 @@ OBRAZEK = 40, 84, 25, 25, Ikony/burza.svg, obrót=180
 | `STYL_ZNAKOWY = pogrubienie, …` | Wygląd `**…**` (albo `kursywa` – `*…*`) w całej instrukcji: `czcionka=`, `grubość=` (np. 600), `kolor=`. |
 | `[WZORZEC]`, `[WZORZEC LEWA]`, `[WZORZEC PRAWA]` | Elementy rysowane pod każdą stroną / pod stronami parzystymi / nieparzystymi. Elementy przed pierwszą sekcją też należą do wzorca. |
 | `[STRONA N]` | Elementy strony N (od 1). `[STRONA N, bez_wzorca]` – bez wzorca. Kolejność sekcji w pliku jest dowolna. |
-| `RAMKA = x, y, szer, wys, tekst=nazwa` | Ramka tekstu z Markdownu: część pliku zaczęta `<tekst=nazwa>` (bez `tekst=` – początek pliku przed pierwszym `<tekst=…>`). Kilka ramek z tym samym `tekst=` to **wątek** – tekst przelewa się z ramki do ramki (niżej). Rysuje się jak `PROSTOKĄT` (domyślnie bez wypełnienia): `kolor=`, `obwódka=`, `kolor_obwódki=`, `zaokrąglenie=`, `obrót=`, `krycie=`. `margines=` – odstęp tekstu od brzegu ramki (mm), `pion=góra \| środek \| dół`. |
+| `RAMKA = x, y, szer, wys, tekst=nazwa` | Ramka tekstu z Markdownu: część pliku zaczęta `<tekst=nazwa>` (bez `tekst=` – początek pliku przed pierwszym `<tekst=…>`). Kilka ramek z tym samym `tekst=` to **wątek** – tekst przelewa się z ramki do ramki (niżej). Rysuje się jak `PROSTOKĄT` (domyślnie bez wypełnienia): `kolor=`, `obwódka=`, `kolor_obwódki=`, `zaokrąglenie=`, `obrót=`, `krycie=`. `margines=` – odstęp tekstu od brzegu ramki (mm): jedna liczba – wszystkie boki, dwie – pion i poziom (`margines=0 2` – 2 mm tylko z lewej i prawej, jak wcięcia ramki w InDesignie), cztery – góra, prawo, dół, lewo (od 0.8.3); `pion=góra \| środek \| dół`. |
 | Elementy kart | `TŁO`, `PROSTOKĄT`, `ELIPSA`, `LINIA`, `OBRAZEK`, `IKONA`, `TEKST` – jak na kartach, w mm od lewego górnego rogu strony (bez spadu), z `obrót=`; kolejność w pliku = kolejność rysowania (wzorzec pod stroną). `KOLOR`, `STAŁA`, `CZCIONKA_PLIK`, `CZCIONKA_GOOGLE` działają w całym pliku, `CZCIONKA` – od miejsca wpisania w swojej sekcji. Pola wbudowane: `[_numer]` (numer strony), `[_liczba]` (liczba stron), `[_projekt]`, `[_wersja]`, `[_data]`. |
 | `TEKST … styl=nazwa` | Krótki tekst (podpis) w stylu akapitu: czcionka, rozmiar, kolor, wyrównanie, interlinia, ikony i flagi stylu; opcje wpisane w wierszu mają pierwszeństwo, styl – przed `CZCIONKA`. Za długi tekst zmniejsza się jak na kartach. |
 
@@ -470,7 +470,8 @@ RAMKA = 54.5, 58, 40.5, 80, tekst=zasady         ; 4. – prawa kolumna
 - Punkt listy podzielony między ramki zachowuje wcięcie – znak albo numer stoi tylko przy pierwszej części. Numeracja list ciągnie się przez ramki.
 - Odstęp `przed=` pierwszego akapitu w ramce jest pomijany.
 - Nagłówek (styl z `z_następnym` – domyślnie `h1`–`h3`) nie zostaje sam na dole ramki: przechodzi do następnej razem z akapitem, który za nim stoi. Nagłówek się nie dzieli.
-- `<następna_ramka>` w tekście przenosi dalszy ciąg do następnej ramki wątku (np. rozdział od nowej strony). Gdy następnej ramki nie ma – Uwaga z wierszem znacznika.
+- `<następna_ramka>` w tekście przenosi dalszy ciąg do następnej ramki wątku. Gdy następnej ramki nie ma – Uwaga z wierszem znacznika.
+- `<następna_strona>` (od 0.8.3) przenosi dalszy ciąg do pierwszej ramki wątku na następnej stronie z ramką wątku (np. rozdział od nowej strony, gdy strona ma kilka ramek – kolumny albo ramki wokół obrazków); pozostałe ramki bieżącej strony zostają puste. Gdy dalej nie ma strony z ramką wątku – Uwaga z wierszem znacznika.
 - Tekst, który nie mieści się w **ostatniej** ramce wątku, jest ucięty: ramka dostaje czerwony obrys i znak „+”, a Uwaga podaje, ile akapitów i znaków zostało. Ramka, do której tekst nie dotarł, zostaje pusta bez Uwagi.
 - **Pokaż ramki** (nad stronami) pokazuje nad każdą ramką nazwę tekstu i numer w wątku (`zasady 2/4`; „pusta” – tekst nie dotarł).
 - Wdów i sierot (pojedynczych wierszy akapitu na dole albo na górze ramki) KarKa na razie nie pilnuje.
@@ -478,6 +479,19 @@ RAMKA = 54.5, 58, 40.5, 80, tekst=zasady         ; 4. – prawa kolumna
 ### Style akapitów
 
 Wbudowane style (używa ich Markdown bez znacznika): `akapit`, `h1`–`h3` (nagłówki `#`–`###`), `lista1`–`lista3` (punkty `-` na poziomach 1–3), `numer1`–`numer3` (punkty `1.` na poziomach 1–3). `STYL = akapit, …` zmienia tylko podane opcje; pozostałe style bazują na `akapit` (zmiana czcionki akapitu zmienia wszystkie). Własny styl: dowolna nazwa, `bazuje=` – styl, z którego bierze resztę opcji (domyślnie `akapit`).
+
+Wartości domyślne wbudowanych stylów (`STYL` zmienia tylko podane opcje – reszta zostaje taka jak niżej; odstępy w mm, rozmiar w pt):
+
+| Styl | Domyślnie |
+|---|---|
+| `akapit` | `rozmiar=10`, `interlinia=1.2`, `po=1.5`, `wyrównanie=lewo` |
+| `h1` | `rozmiar=16`, `pogrubienie`, `przed=3`, `po=2`, `z_następnym` |
+| `h2` | `rozmiar=13`, `pogrubienie`, `przed=2.5`, `po=1.5`, `z_następnym` |
+| `h3` | `rozmiar=11`, `pogrubienie`, `przed=2`, `po=1`, `z_następnym` |
+| `lista1`–`lista3` | znak `•`, `–`, `·`; `wcięcie=4 / 8 / 12`, `wcięcie_znaku=0 / 4 / 8`, `po=0.8` |
+| `numer1`–`numer3` | numer `1.`, `a)`, `i.`; `wcięcie=5 / 10 / 15`, `wcięcie_znaku=0 / 5 / 10`, `po=0.8` |
+
+Nagłówki mają odstęp **przed** (3 / 2,5 / 2 mm) – przy odtwarzaniu układu z innego programu (np. z InDesigna, gdzie nagłówki często mają 0) wpisz `przed=0` w `STYL = h1, …` (i `h2`, `h3`). Odstęp `przed=` pierwszego akapitu ramki jest pomijany zawsze.
 
 | Opcja | Znaczenie |
 |---|---|
@@ -525,4 +539,5 @@ Gra toczy się w turach. **Słońce** {slonce} pomaga roślinom.
 | `<styl=nazwa>` na początku akapitu albo punktu | inny styl tego akapitu (np. druga lista numerowana) |
 | `<tekst=nazwa>` w osobnym wierszu | zaczyna tekst dla ramki z `tekst=nazwa` |
 | `<następna_ramka>` w osobnym wierszu | dalszy tekst – do następnej ramki wątku (od 0.8.1) |
+| `<następna_strona>` w osobnym wierszu | dalszy tekst – do pierwszej ramki wątku na następnej stronie (od 0.8.3) |
 | `<!-- … -->` | komentarz – pomijany |

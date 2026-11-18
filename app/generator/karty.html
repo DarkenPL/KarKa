@@ -1870,13 +1870,14 @@ async function zbudujInstrukcjeTeraz() {
   box.innerHTML = html;
   // Ramki tekstu (etap 1b): ramki z tym samym tekst= tworzą wątek (Instrukcja.watki – kolejność stron, na stronie –
   // wiersza w pliku). Cały tekst wątku trafia najpierw do pierwszej ramki (wczytanie ikon i czcionek), potem przelewa
-  // się ramka po ramce (podzielRamke); <następna_ramka> zaczyna odcinek w następnej ramce. Ostatnia ramka zatrzymuje
+  // się ramka po ramce (podzielRamke); <następna_ramka> zaczyna odcinek w następnej ramce, <następna_strona> – w pierwszej
+  // ramce wątku na dalszej stronie niż ramka, w której skończył się poprzedni odcinek (0.8.3). Ostatnia ramka zatrzymuje
   // resztę – zmierzRamke liczy, ile się nie mieści. Tekst bez nazwy – początek pliku przed pierwszym <tekst=…>.
   const watki = Instrukcja.watki(d), elRamki = new Map(), przelewy = [];
   for (const el of box.querySelectorAll('.el.ksztalt[data-ramka]')) elRamki.set(+el.dataset.ramka, el);
   for (const [linia, el] of elRamki) {
     const r = d.ramki.get(linia);
-    el.innerHTML = `<div class="ramka-tekst" style="padding:${r.margines}mm;justify-content:${FLEX_V[r.pion] || 'flex-start'}"></div>`;
+    el.innerHTML = `<div class="ramka-tekst" style="padding:${r.margines.map((x) => x + 'mm').join(' ')};justify-content:${FLEX_V[r.pion] || 'flex-start'}"></div>`;
     // numer ramki w wątku („Pokaż ramki”) – nad ramką, żeby nie zasłaniał tekstu
     el.insertAdjacentHTML('afterend', `<span class="nr-ramki" data-dla="${linia}" style="left:${parseFloat(el.style.left)}mm;top:${Math.max(0, parseFloat(el.style.top) - 3)}mm">${esc(r.nazwa || 'bez nazwy')} ${r.nr}/${r.z}</span>`);
   }
@@ -1888,7 +1889,7 @@ async function zbudujInstrukcjeTeraz() {
     if (!t) { warn.add(`${plik}, wiersz ${r0.linia}: nie ma tekstu ${nazwa ? `„${r0.nazwa}” (znacznik <tekst=${r0.nazwa}> w pliku z TREŚĆ)` : 'bez nazwy (początek pliku z TREŚĆ przed pierwszym <tekst=…>)'}`); continue; }
     const bloki = Instrukcja.numeruj(t.bloki.map((b) => ({ ...b })), d.style);
     const tmp = document.createElement('div');
-    const odc = Instrukcja.odcinki(bloki).map((o) => { tmp.innerHTML = o.bloki.map((b) => blokHtml(b, d, css, warn, t.plik)).join(''); return { linia: o.linia, wezly: [...tmp.children] }; });
+    const odc = Instrukcja.odcinki(bloki).map((o) => { tmp.innerHTML = o.bloki.map((b) => blokHtml(b, d, css, warn, t.plik)).join(''); return { linia: o.linia, strona: o.strona, wezly: [...tmp.children] }; });
     ramkiW[0].el.firstElementChild.append(...odc.flatMap((o) => o.wezly));
     przelewy.push({ nazwa, t, ramkiW, odc });
   }
@@ -1903,17 +1904,24 @@ async function zbudujInstrukcjeTeraz() {
   const t0 = performance.now(), ramki = [];
   for (const { nazwa, t, ramkiW, odc } of przelewy) {
     ramkiW[0].el.firstElementChild.replaceChildren();
-    let fi = 0, poZnaczniku = { bloki: 0, znaki: 0 };
+    let fi = 0, poZnaczniku = { bloki: 0, znaki: 0, znacznik: '' };
     for (let si = 0; si < odc.length; si++) {
-      if (si > 0 && ++fi >= ramkiW.length) {
-        // <następna_ramka> bez następnej ramki – dalszy tekst się nie mieści
-        const reszta = odc.slice(si).flatMap((o) => o.wezly);
-        if (reszta.length) {
-          poZnaczniku = { bloki: reszta.length, znaki: reszta.reduce((a, x) => a + x.textContent.length, 0) };
-          const ost = ramkiW[ramkiW.length - 1].r;
-          warn.add(`${t.plik}, wiersz ${odc[si].linia}: <następna_ramka> – tekst ${nazwaTekstu(ost)} nie ma już następnej ramki (wątek: ${ramkiW.length} ${ramkiW.length === 1 ? 'ramka' : ramkiW.length < 5 ? 'ramki' : 'ramek'}, ostatnia na stronie ${ost.strona}) – dodaj RAMKA z tekst=${ost.nazwa || '…'} na dalszej stronie albo usuń znacznik`);
+      if (si > 0) {
+        const nr = odc[si].strona ? ramkiW.findIndex((x, k) => k > fi && x.r.strona > ramkiW[fi].r.strona) : fi + 1;
+        const znacznik = odc[si].strona ? '<następna_strona>' : '<następna_ramka>';
+        if (nr < 0 || nr >= ramkiW.length) {
+          // znacznik bez następnej ramki (strony) – dalszy tekst się nie mieści
+          const reszta = odc.slice(si).flatMap((o) => o.wezly);
+          if (reszta.length) {
+            poZnaczniku = { bloki: reszta.length, znaki: reszta.reduce((a, x) => a + x.textContent.length, 0), znacznik };
+            const ost = ramkiW[ramkiW.length - 1].r, ile = `${ramkiW.length} ${ramkiW.length === 1 ? 'ramka' : ramkiW.length < 5 ? 'ramki' : 'ramek'}`;
+            warn.add(odc[si].strona
+              ? `${t.plik}, wiersz ${odc[si].linia}: <następna_strona> – tekst ${nazwaTekstu(ost)} nie ma ramki na stronie dalszej niż ${ramkiW[fi].r.strona} (wątek: ${ile}, ostatnia na stronie ${ost.strona}) – dodaj RAMKA z tekst=${ost.nazwa || '…'} na dalszej stronie albo usuń znacznik`
+              : `${t.plik}, wiersz ${odc[si].linia}: <następna_ramka> – tekst ${nazwaTekstu(ost)} nie ma już następnej ramki (wątek: ${ile}, ostatnia na stronie ${ost.strona}) – dodaj RAMKA z tekst=${ost.nazwa || '…'} na dalszej stronie albo usuń znacznik`);
+          }
+          break;
         }
-        break;
+        fi = nr;
       }
       let wezly = odc[si].wezly;
       while (wezly.length) {
@@ -1935,7 +1943,7 @@ async function zbudujInstrukcjeTeraz() {
       const x = parseFloat(el.style.left) + parseFloat(el.style.width) - 3, y = parseFloat(el.style.top) + parseFloat(el.style.height) - 3;
       el.insertAdjacentHTML('afterend', `<div class="plus-ramki" style="left:${x}mm;top:${y}mm" title="Tekst nie mieści się w ramce">+</div>`);
       warn.add(`${plik}, wiersz ${r.linia}: tekst ${nazwaTekstu(r)} nie mieści się w ramce na stronie ${r.strona}${r.z > 1 ? ` (ostatniej z ${r.z} ramek wątku)` : ''} – zostało ${bloki} ${odmianaAkapitow(bloki)} (ok. ${znaki} znaków)`
-        + (ost && poZnaczniku.bloki ? `, w tym ${poZnaczniku.bloki} po <następna_ramka>` : '') + ' – powiększ ramkę albo dodaj następną z tym samym tekst=');
+        + (ost && poZnaczniku.bloki ? `, w tym ${poZnaczniku.bloki} po ${poZnaczniku.znacznik}` : '') + ' – powiększ ramkę albo dodaj następną z tym samym tekst=');
     });
   }
   const czasPrzelewu = Math.round(performance.now() - t0);
@@ -4030,6 +4038,7 @@ const KLUCZE_ZLECEN = {
   pdf: ['uklad', 'ciecie', 'rewersy', 'wspolnearkusze', 'strony', 'szkic', 'spad', 'przesunieciex', 'przesunieciey', 'talie', 'id', 'tylkozmienione', 'profil', 'nadrukczerni', 'pdfx', 'drukarnia', 'plik'],
   obrazki: ['dpi', 'format', 'talie', 'id', 'rewersy'],
   pcio: ['dpi', 'talie', 'id'],
+  instrukcja: ['ramki', 'strony', 'dpi'],
 };
 const ALIASY_ZLECEN = { talia: 'talie', rewers: 'rewersy', zmienione: 'tylkozmienione', rozdzielczosc: 'dpi', wspolne: 'wspolnearkusze', nadruk: 'nadrukczerni' };
 const OKNO_ZLECENIA = { obrazki: 'obrazki', pcio: 'pcio' };     // pdf – ustawieniaDruku()
@@ -4093,9 +4102,18 @@ function opcjeZlecenia(polecenie, surowe = {}) {
   if (v.ciecie !== undefined) o.ciecie = wybor('ciecie', ['znaczniki', 'nozyczki', 'oba'], { linie: 'nozyczki' });
   if (v.rewersy !== undefined) o.rewersy = tak('rewersy');
   if (v.wspolnearkusze !== undefined) o.wspolne = tak('wspolnearkusze');
-  if (v.strony !== undefined) o.strony = wybor('strony', ['osobno', 'naprzemian', 'dwapliki'], { przemian: 'naprzemian', na_przemian: 'naprzemian', osobne: 'osobno', 'dwa pliki': 'dwapliki', dwa_pliki: 'dwapliki' });
+  if (v.strony !== undefined && polecenie === 'instrukcja') {
+    // strony = 1-3, 5 (zakresy i pojedyncze numery)
+    o.strony = [];
+    for (const x of lista(v.strony)) {
+      const m = /^(\d+)\s*(?:[-–]\s*(\d+))?$/.exec(x);
+      if (!m || +m[1] < 1 || (m[2] && +m[2] < +m[1])) { bledy.push(`strony: „${x}” – numery stron i zakresy, np. strony = 1-3, 5`); continue; }
+      for (let n = +m[1]; n <= +(m[2] || m[1]); n++) if (!o.strony.includes(n)) o.strony.push(n);
+    }
+  } else if (v.strony !== undefined) o.strony = wybor('strony', ['osobno', 'naprzemian', 'dwapliki'], { przemian: 'naprzemian', na_przemian: 'naprzemian', osobne: 'osobno', 'dwa pliki': 'dwapliki', dwa_pliki: 'dwapliki' });
   if (v.drukarnia !== undefined && polecenie !== 'pdf') o.drukarnia = tak('drukarnia');
   if (v.szkic !== undefined) o.szkic = tak('szkic');
+  if (v.ramki !== undefined) o.ramki = tak('ramki');
   if (v.spad !== undefined) o.spad = liczba('spad', 0, 10);
   if (v.przesunieciex !== undefined) o.przesuniecieX = liczba('przesunieciex', -10, 10);
   if (v.przesunieciey !== undefined) o.przesuniecieY = liczba('przesunieciey', -10, 10);
@@ -4188,6 +4206,51 @@ async function raportJson(o = {}, wyjscie = {}) {
   });
 }
 
+// Zlecenie „instrukcja” (#160, decyzja właściciela 18.11.2026): PNG stron instrukcji do .generator/instrukcja (folder
+// czyszczony) – skład do obejrzenia bez okna i bez ręcznych zrzutów. ramki = tak – obrys ramek, numery ramek w wątku
+// i pola TEKST jak „Pokaż ramki” (przepełniona ramka ma czerwony obrys i „+” zawsze); strony = 1-3, 5 – tylko te;
+// dpi = 150 domyślnie. Strona w formacie po obcięciu, bez spadu (jak w podglądzie). Na czas zrzutu widok instrukcji jest włączony (ukryty ma
+// wysokość 0 i visibility: hidden – html-to-image kopiuje style), potem wraca widok i „Pokaż ramki” jak były.
+async function stronyInstrukcjiPng(o = {}) {
+  return naWylacznosc(async () => {
+    if (!INSTRUKCJA_PLIK) throw new Error('projekt nie ma instrukcji gry (INSTRUKCJA = … w szablonie kart)');
+    if (!INSTRUKCJA) throw new Error('instrukcja się nie złożyła – szczegóły w uwagach');
+    const wszystkie = [...$('strony').querySelectorAll('.karta.strona')], ostrzezenia = [];
+    const nr = (el) => +el.dataset.strona;
+    let wybrane = wszystkie;
+    if (o.strony && o.strony.length) {
+      const sa = new Set(wszystkie.map(nr));
+      const brak = o.strony.filter((n) => !sa.has(n));
+      if (brak.length) ostrzezenia.push(`nie ma ${brak.length === 1 ? 'strony' : 'stron'} ${brak.join(', ')} (instrukcja ma ${wszystkie.length})`);
+      wybrane = wszystkie.filter((el) => o.strony.includes(nr(el)));
+    }
+    if (!wybrane.length) throw new Error('brak stron do zapisania – sprawdź strony =');
+    const folder = await APP.eksportStart('zlecenie-instrukcja');
+    if (!folder) throw new Error('nie można zapisać stron w tym projekcie');
+    const dpi = +o.dpi || 150, cyfr = String(wszystkie.length).length, pliki = [];
+    const body = document.body, box = $('instrukcja'), bylWidok = body.classList.contains('widok-instrukcja'), byloZRamkami = box.classList.contains('z-ramkami');
+    body.classList.add('widok-instrukcja');
+    box.classList.toggle('z-ramkami', !!o.ramki);
+    try {
+      for (let i = 0; i < wybrane.length; i++) {
+        status(`Strony instrukcji: ${i + 1}/${wybrane.length}…`);
+        const nazwa = `strona-${String(nr(wybrane[i])).padStart(cyfr, '0')}.png`;
+        const blob = await obrazKarty(wybrane[i], { dpi, format: 'png' });
+        await APP.eksportPlik(nazwa, new Uint8Array(await blob.arrayBuffer()));
+        pliki.push(folder + '/' + nazwa);
+      }
+    } finally {
+      body.classList.toggle('widok-instrukcja', bylWidok);
+      box.classList.toggle('z-ramkami', byloZRamkami);
+    }
+    status(`Zapisano ${pliki.length} ${pliki.length === 1 ? 'stronę' : pliki.length < 5 ? 'strony' : 'stron'} instrukcji (PNG, ${dpi} dpi) w ${folder}`);
+    const I = INSTRUKCJA;
+    return { pliki, folder, strony: wybrane.map(nr), dpi, ramki: !!o.ramki, ...(ostrzezenia.length ? { ostrzezenia } : {}),
+      instrukcja: { plik: I.plik, strony: I.strony, w: I.w, h: I.h, spad: I.spad, ramki: I.ramki }, uwagiInstrukcji: [...UWAGI_INSTRUKCJI] };
+  });
+}
+window.stronyInstrukcjiPng = stronyInstrukcjiPng;
+
 const ZADANIA_ZLECEN = {
   async katalog(o) {
     const r = await zapiszKatalog({ talie: o.talie, id: o.id }, 'zlecenie');
@@ -4232,6 +4295,7 @@ const ZADANIA_ZLECEN = {
     if (!r) throw new Error('brak kart do eksportu – sprawdź talie i id');
     return { ok: true, pliki: r.nazwy.map((n) => r.folder + '/' + n) };
   },
+  async instrukcja(o) { return { ok: true, ...(await stronyInstrukcjiPng(o)) }; },
   async pcio(o) {
     const r = await exportPcio({ ...o, zlecenie: true });
     if (!r) throw new Error('brak kart do pokoju playingcards.io – sprawdź talie i id');

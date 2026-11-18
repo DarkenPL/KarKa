@@ -558,13 +558,15 @@ ipcMain.handle('projekt:pokaz', (e) => { const p = projektZ(e); if (p.folder) sh
 
 // ── Eksport JPG do folderu Export ───────────────────────────────────────────
 // Przykłady są tylko do odczytu – wtedy pytamy, gdzie zapisać.
-// cel: undefined = Export, 'katalog' = Export/katalog, 'zlecenie' = .generator/katalog (czyszczony).
+// cel: undefined = Export, 'katalog' = Export/katalog, 'zlecenie' = .generator/katalog (czyszczony),
+// 'zlecenie-instrukcja' = .generator/instrukcja (czyszczony; strony instrukcji ze zlecenia „instrukcja”, 0.8.3).
+const FOLDERY_ZLECEN_EKSPORTU = { zlecenie: 'katalog', 'zlecenie-instrukcja': 'instrukcja' };
 ipcMain.handle('eksport:start', async (e, cel) => {
   const p = projektZ(e);
   const pod = cel === 'katalog' ? ['katalog'] : [];
-  if (cel === 'zlecenie') {
+  if (FOLDERY_ZLECEN_EKSPORTU[cel]) {
     if (!p.zapisywalny) return null;
-    p.folderEksportu = path.join(p.folder, '.generator', 'katalog');   // nie w zlecenia/ – tam plik zlecenia „katalog”
+    p.folderEksportu = path.join(p.folder, '.generator', FOLDERY_ZLECEN_EKSPORTU[cel]);   // nie w zlecenia/ – tam pliki zleceń
     fs.rmSync(p.folderEksportu, { recursive: true, force: true });
   } else if (p.zapisywalny) p.folderEksportu = path.join(p.folder, 'Export', ...pod);
   else {
@@ -681,7 +683,7 @@ setInterval(() => {
 // wspólna kolejka dla wszystkich projektów), usuwa plik zlecenia i zapisuje wynik-<polecenie>.json
 // (katalog także dawny wynik.json).
 const FOLDER_ZLECEN = ['.generator', 'zlecenia'];
-const POLECENIA = ['katalog', 'stan', 'raport', 'pdf', 'obrazki', 'pcio'];
+const POLECENIA = ['katalog', 'stan', 'raport', 'pdf', 'obrazki', 'pcio', 'instrukcja'];
 let kolejkaZlecen = false;           // trwa przegląd zleceń (wszystkie projekty po kolei)
 function czytajZlecenie(tekst) {
   const o = {};
@@ -4318,6 +4320,46 @@ async function trybTestowy(folder, wynik, przywrocone = []) {
       await czas(c3);
       if (!c3 || /tylko-instrukcja/.test(raport)) b.push('raport: ikona z instrukcji jako nieużywana');
       zmiana.przeglad = { wyjatek, raport: !/tylko-instrukcja/.test(raport) };
+      // Mała wersja „pod sprawdzanie” (0.8.3, komentarz 18.11.2026 w #160): <następna_strona> – bez dalszej strony Uwaga,
+      // z [STRONA 5] tekst po znaczniku przeskakuje kolumny strony 4 (puste) do ramki strony 5; margines=0 5 (pion poziom).
+      const txt = path.join(projekt, 'Instrukcja', 'instrukcja.txt'), oryginalTxt = fs.readFileSync(txt, 'utf8');
+      fs.writeFileSync(md, oryginal.replace('\n<następna_ramka>\n', '\n<następna_strona>\n'));        // wiersz 34, nie komentarz
+      const c4 = await czas(await js('INSTRUKCJA.czas'));
+      const u4 = await js('[...UWAGI_INSTRUKCJI]');
+      await czekaj(2000);                                  // zapis po odczycie znacznika plików z tej przebudowy – inaczej zmiana przepada
+      fs.writeFileSync(txt, oryginalTxt + '\n[STRONA 5]\nRAMKA = 10, 10, 85, 128, tekst=zasady, margines=0 5\n');
+      const c5 = await czas(c4);
+      const s5 = await js(`(() => { const t = document.querySelector('#strony .karta.strona[data-strona="5"] .ramka-tekst'), cs = t && getComputedStyle(t);
+        return { uwagi: [...UWAGI_INSTRUKCJI], ramki: INSTRUKCJA.ramki, pad: cs ? [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].map((x) => Math.round(parseFloat(x) * 25.4 / 96 * 100) / 100) : null,
+          puste: [...document.querySelectorAll('#strony .nr-ramki.pusta')].map((e) => e.textContent) }; })()`);
+      fs.writeFileSync(md, oryginal); fs.writeFileSync(txt, oryginalTxt);
+      await czas(c5);
+      const starty5 = (s5.ramki || []).filter((r) => r.tekst === 'zasady').map((r) => `${r.strona}:${r.nr}/${r.z}:${r.start ? r.start.linia + (r.start.ciag ? '+' : '') : '-'}`).join(' ');
+      const un4 = u4.find((x) => /<następna_strona>/.test(x)) || '';
+      zmiana.nastepnaStrona = { c4: !!c4, c5: !!c5, uwaga: un4, starty: starty5, pad: s5.pad, puste: s5.puste, uwagi: s5.uwagi };
+      if (!/^instrukcja\.md, wiersz 34: <następna_strona> – tekst „zasady” nie ma ramki na stronie dalszej niż 4 \(wątek: 4 ramki, ostatnia na stronie 4\)/.test(un4)
+        || !u4.some((x) => /zostało \d+ akapit(y|ów)? \(ok\. \d+ znaków\), w tym \d+ po <następna_strona>/.test(x))) b.push('Uwaga o <następna_strona> bez strony ' + JSON.stringify(u4));
+      if (starty5 !== '2:1/5:14 4:2/5:27+ 4:3/5:- 4:4/5:- 5:5/5:36') b.push('<następna_strona> – początki ramek ' + starty5);
+      if (JSON.stringify(s5.pad) !== '[0,5,0,5]') b.push('margines=0 5 ' + JSON.stringify(s5.pad));
+      if (s5.uwagi.length) b.push('Uwagi z <następna_strona> i stroną 5: ' + s5.uwagi.join(' | '));
+      // Zlecenie z pliku „instrukcja” (0.8.3): PNG wybranych stron z „Pokaż ramki” do .generator/instrukcja, ostrzeżenie o
+      // stronie, której nie ma; widok i „Pokaż ramki” wracają jak były.
+      const zl = path.join(projekt, ...FOLDER_ZLECEN);
+      fs.mkdirSync(zl, { recursive: true });
+      await js("pokazWidok('karty')");                   // zlecenie z widoku kart – na czas zrzutu włącza instrukcję i wraca
+      fs.writeFileSync(path.join(zl, 'instrukcja'), 'ramki = tak\nstrony = 2, 4-4, 9\n');
+      let wz = null;
+      for (let i = 0; i < 60 && !wz; i++) { await czekaj(500); try { wz = JSON.parse(fs.readFileSync(path.join(zl, 'wynik-instrukcja.json'), 'utf8')); } catch (e) { /* jeszcze nie */ } }
+      const pngi = wz && wz.pliki ? wz.pliki.filter((f) => fs.existsSync(path.join(projekt, f))) : [];
+      const szerPng = (f) => fs.readFileSync(path.join(projekt, f)).readUInt32BE(16);
+      pngi.forEach((f, i) => fs.copyFileSync(path.join(projekt, f), wynik.replace(/\.pdf$/i, '') + `-instrukcja-zlecenie-${i + 1}.png`));
+      const poZleceniu = await js("({ widok: document.body.classList.contains('widok-instrukcja'), ramki: document.getElementById('instrukcja').classList.contains('z-ramkami') })");
+      zmiana.zlecenie = wz && { ok: wz.ok, pliki: wz.pliki, strony: wz.strony, ostrzezenia: wz.ostrzezenia, blad: wz.blad, szer: pngi.map(szerPng), poZleceniu };
+      // strona 105 × 148 mm (bez spadu) przy 150 dpi = 620 × 874 px
+      if (!wz || !wz.ok || JSON.stringify(wz.strony) !== '[2,4]' || pngi.join() !== '.generator/instrukcja/strona-2.png,.generator/instrukcja/strona-4.png'
+        || pngi.some((f) => Math.abs(szerPng(f) - 620) > 2) || !(wz.ostrzezenia || []).some((x) => /nie ma strony 9 \(instrukcja ma 4\)/.test(x))
+        || !wz.instrukcja || wz.instrukcja.strony !== 4 || poZleceniu.widok || poZleceniu.ramki || fs.existsSync(path.join(zl, 'instrukcja')))
+        b.push('zlecenie instrukcja ' + JSON.stringify(zmiana.zlecenie));
     }
     await js("pokazWidok('karty')");
     instrukcja = { ok: !b.length, bledy: b, stan: I, zmiana };
